@@ -1,4 +1,6 @@
 %% as version one, just read from a list.
+%% as version one, don't even bother to count the lines.
+
 -module(parse).
 -export([tests/0,
 	 test_char/0,
@@ -11,7 +13,7 @@
 	 test_token_of/0,
 	 test_string/0,
 	 %test/2,
-	 parse/1
+	 p/1
 	 
 	]).
 
@@ -156,10 +158,11 @@ check_prefix(StrT,I,J,K,N) ->
     end.
     
 
-%% lexer
+%% serl lexer/parser
 
 is_digit(C) -> ($0 =< C) and (C =< $9).
-is_alpha(C) -> (($a =< C) and (C =< $z)) or (($A =< C) and (C =< $Z)).
+is_upper(C) -> ($A =< C) and (C =< $Z).
+is_alpha(C) -> (($a =< C) and (C =< $z)) or is_upper(C).
 is_atom_char(C) -> is_alpha(C) or is_digit(C) or lists:member(C,"_-").
 is_special_atom_char(C) -> lists:member(C,?special_atom_chars). 
 is_delimiter(C) -> lists:member(C,?delimiters).
@@ -167,14 +170,25 @@ is_delimiter(C) -> lists:member(C,?delimiters).
 %% digit() -> char_if(is_digit). 
 %% alpha() -> char_if(is_alpha).
 
-
-an_atom() -> Atom=token_of(fun (C) -> is_atom_char(C) end),
-	     if Atom==[] -> error("Expecting an atom.");
-		true -> C=peek(),
-			if (C==$?) or (C==$!) -> read(),{atom,Atom++[C]};
-			   true -> {atom,Atom}
-			end
-	     end.
+a_symbol() -> 
+    C=peek(),
+    BindP=is_upper(C) or (C==$_),
+    VarP=(C==$!), 
+    if VarP -> read(); 
+       true->nil 
+    end,
+    %% you gotta be kidding me. I can't even have an if branch
+    %% that does nothing if condition is false..
+    %% if VarP -> read() end.  
+    Name=token_of(fun (X) -> is_atom_char(X) end),
+    if Name==[] -> if BindP -> {bind,"_"};
+		      true -> error("Expecting a symbol name.")
+		   end;
+       true -> if VarP -> {var,Name}; 
+		  BindP -> {bind,Name};
+		  true -> {atom,Name}
+	       end
+    end.
 
 
 a_number(S) -> 
@@ -193,14 +207,14 @@ a_number(S) ->
 			 In=Sign++Int++[$.|Float],
 			 R=io_lib:fread("~f",In),
 			 case R of
-			     {ok,[F],_} -> F;
+			     {ok,[F],_} -> {float,F};
 			     _ -> error("Error parsing floating point.")
 			 end;
 		    true -> error("Error parsing floating point")
 		 end;
        true -> R=io_lib:fread("~d",Sign++Int),
 	       case R of
-		   {ok,[I],_} -> I; 
+		   {ok,[I],_} -> {int,I}; 
 		   _ -> error("Error parsing integer: ")
 	       end
     end.
@@ -277,15 +291,15 @@ exp_dispatch($-) ->
     C=peek(),
     T=is_digit(C), 
     if T -> a_number(-1);
-       true -> error("atom cannot start with '-'")
+       true -> error("symbol cannot start with '-'")
     end;
 exp_dispatch(C) ->
     SpecialAtom=is_special_atom_char(C),
     Digit=is_digit(C),
-    Symbol=(is_atom_char(C) and (not (C==$-))),
-    if SpecialAtom -> read(),{atom,[C]};
+    Symbol=(is_atom_char(C) and (not (C==$-))) or (C==$!),
+    if SpecialAtom -> read(),{special_atom,C};
        Digit -> a_number(1);
-       Symbol -> an_atom();
+       Symbol -> a_symbol();
        true -> error("Parsing error: ")
     end.
 
@@ -293,9 +307,6 @@ exp() -> skip_while(?space),
 	 R=exp_dispatch(peek()),
 	 skip_while(?space),
 	 R.
-
-%% delimiters <white-space>, "(){}[].~:"
-
 
 
 %% Tests
@@ -392,8 +403,7 @@ tests() ->
 	      {test_string,"zzzzaabbaabbaacc",16}
 
 	     ]).
-
-parse(In) ->
+p(In) ->
     set_port(In),
     exp().
     
