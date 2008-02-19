@@ -30,8 +30,7 @@ parse(In) -> parse:p(In).
 p(In) -> parse(In).
 
 transform(Exp,Lang) ->
-    Exp2=desugar(Exp),
-    case Exp2 of
+    case desugar(Exp) of
 	[Car|Body] ->
 	    %% the current line is either the head of the form, or the nearest term.
 	    case Car of

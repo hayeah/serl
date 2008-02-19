@@ -21,6 +21,7 @@
 -define(spacen,"\t\s\n").
 -define(space,"\t\s").
 -define(special_atom_chars,".~:;,'`").
+-define(reserved_chars,"!@#$?").
 -define(delimiters,"#(){}[]\""++?special_atom_chars++?spacen).
 
 %% bdefnrstv#\"
@@ -206,7 +207,7 @@ a_number(S) ->
     R=if P1==46 -> read(),P2=peek(), %reading float requires peek-2
 		 IsD = is_digit(P2), 
 		 if IsD ->
-			 Float = token([],?delimiters),
+			 Float = token([],?delimiters++[eof]),
 			 %% read an erlang-style floating point
 			 %% P1 is the integral part, P2 is the decimal part, conforming to erlang syntax.
 			 In=Sign++Int++[$.|Float],
@@ -221,19 +222,19 @@ a_number(S) ->
 		   _ -> error("Error parsing integer: ")
 	       end
     end,
-    End=is_delimiter(peek()),
-    if End -> R; 
+    End=is_delimiter(C=peek()),
+    if End;C==eof -> R; 
        true -> error("Error parsing number.")
     end.
 
 a_list([OpenParen,CloseParen]) -> char([OpenParen]),a_list_rec(CloseParen,[]).
 
 a_list_rec(CloseParen,Acc) ->
-    E=exp(),C=peek(),
+    C=peek(),
     % 41 == $)
-    if C==CloseParen -> read(), lists:reverse([E|Acc]); 
+    if C==CloseParen -> read(), lists:reverse(Acc); 
        C==eof -> error("Unexpected eof while reading list.");
-       true -> a_list_rec(CloseParen,[E|Acc])
+       true -> a_list_rec(CloseParen,[exp()|Acc])
     end.
 
 a_string() ->
