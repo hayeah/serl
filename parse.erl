@@ -12,15 +12,16 @@
 	 test_token1/0,
 	 test_token_of/0,
 	 test_string/0,
-	 %test/2,
+	 test/2, 
 	 p/1
 	 
 	]).
 
+-include("ast.hrl").
 -define(spacen,"\t\s\n").
 -define(space,"\t\s").
--define(special_atom_chars,".~:"++?spacen).
--define(delimiters,"(){}[]\""++?special_atom_chars++?spacen).
+-define(special_atom_chars,".~:;,'`").
+-define(delimiters,"#(){}[]\""++?special_atom_chars++?spacen).
 
 %% bdefnrstv#\"
 -define(string_escapes,
@@ -29,6 +30,8 @@
 	 {$s,$\s},{$t,$\t},{$v,$\v},
 	 {$#,$\#},{$\\,$\\},{$\",$\"}]).
 
+-define(line_count,'__serl_parse_line_count').
+
 % port of Oleg Kiselyov's stream parsing utilities:
 % http://okmij.org/ftp/Scheme/parsing.html
 
@@ -36,10 +39,17 @@ error(Message) ->
     io:fwrite("\t with remaining input:\n~p~n~n",[residue()]),
     throw({parse_error,Message}).
 
+lineno() -> get(?line_count).
+
 peek() ->
     peek_port(get_port()).
 read() ->
-    read_port(get_port()).
+    C=read_port(get_port()),
+    if C==$\n -> put(?line_count,lineno()+1);
+       true -> nil
+    end,
+    C.
+
 residue() ->
     residue_port(get_port()).
     
@@ -116,7 +126,8 @@ token_of(Chs) when is_list(Chs) ->
 token_of(Pred,Acc) ->
     C=peek(),
     T=Pred(C),
-    if T -> read(),token_of(Pred,[C|Acc]);
+    if C==eof -> lists:reverse(Acc);
+       T -> read(),token_of(Pred,[C|Acc]);
        true -> lists:reverse(Acc)
     end.
 
@@ -163,31 +174,25 @@ check_prefix(StrT,I,J,K,N) ->
 is_digit(C) -> ($0 =< C) and (C =< $9).
 is_upper(C) -> ($A =< C) and (C =< $Z).
 is_alpha(C) -> (($a =< C) and (C =< $z)) or is_upper(C).
-is_atom_char(C) -> is_alpha(C) or is_digit(C) or lists:member(C,"_-").
+is_atom_char(C) -> not (lists:member(C,?delimiters)).
+is_atom_first_char(C) -> not (is_digit(C) or is_delimiter(C)).
 is_special_atom_char(C) -> lists:member(C,?special_atom_chars). 
 is_delimiter(C) -> lists:member(C,?delimiters).
 
 %% digit() -> char_if(is_digit). 
 %% alpha() -> char_if(is_alpha).
 
-a_symbol() -> 
-    C=peek(),
-    BindP=is_upper(C) or (C==$_),
-    VarP=(C==$!), 
-    if VarP -> read(); 
-       true->nil 
-    end,
-    %% you gotta be kidding me. I can't even have an if branch
-    %% that does nothing if condition is false..
-    %% if VarP -> read() end.  
-    Name=token_of(fun (X) -> is_atom_char(X) end),
-    if Name==[] -> if BindP -> {bind,"_"};
-		      true -> error("Expecting a symbol name.")
-		   end;
-       true -> if VarP -> {var,Name}; 
-		  BindP -> {bind,Name};
-		  true -> {atom,Name}
-	       end
+a_symbol() ->
+    a_symbol("").
+a_symbol(Prefix) ->
+    Token=token_of(fun is_atom_char/1),
+    Name=Prefix++Token,
+    case Name of
+	[] -> error("Expecting a symbol name.");
+	[H|_] -> VarP=is_upper(H),
+		 if VarP -> [?serl_variable,lineno(),list_to_atom(Name)];
+		    true -> [?serl_atom,lineno(),list_to_atom(Name)]
+		 end
     end.
 
 
@@ -198,71 +203,77 @@ a_number(S) ->
     Int=token_of(fun (C) -> is_digit(C) end), 
     P1=peek(), 
     %% 46 == $.
-    if P1==46 -> read(),P2=peek(), %reading float requires peek-2
+    R=if P1==46 -> read(),P2=peek(), %reading float requires peek-2
 		 IsD = is_digit(P2), 
 		 if IsD ->
 			 Float = token([],?delimiters),
 			 %% read an erlang-style floating point
 			 %% P1 is the integral part, P2 is the decimal part, conforming to erlang syntax.
 			 In=Sign++Int++[$.|Float],
-			 R=io_lib:fread("~f",In),
-			 case R of
-			     {ok,[F],_} -> {float,F};
+			 case io_lib:fread("~f",In) of
+			     {ok,[F],_} -> [?serl_float,lineno(),F];
 			     _ -> error("Error parsing floating point.")
 			 end;
 		    true -> error("Error parsing floating point")
 		 end;
-       true -> R=io_lib:fread("~d",Sign++Int),
-	       case R of
-		   {ok,[I],_} -> {int,I}; 
+       true -> case io_lib:fread("~d",Sign++Int) of
+		   {ok,[I],_} -> [?serl_integer,lineno(),I]; 
 		   _ -> error("Error parsing integer: ")
 	       end
+    end,
+    End=is_delimiter(peek()),
+    if End -> R; 
+       true -> error("Error parsing number.")
     end.
 
-a_list() -> char("("),a_list([]).
+a_list([OpenParen,CloseParen]) -> char([OpenParen]),a_list_rec(CloseParen,[]).
 
-a_list(Acc) ->
+a_list_rec(CloseParen,Acc) ->
     E=exp(),C=peek(),
     % 41 == $)
-    if C==41 -> read(), lists:reverse([E|Acc]); 
-       C==eof -> error("Unexpected eof");
-       true -> a_list([E|Acc])
+    if C==CloseParen -> read(), lists:reverse([E|Acc]); 
+       C==eof -> error("Unexpected eof while reading list.");
+       true -> a_list_rec(CloseParen,[E|Acc])
     end.
 
 a_string() ->
     read(),
     a_string([],[]).
 
+%% should do the interpolation optimization as macro. Just don't bother about it now.
 a_string(Acc,Segs) ->
     C=read(),
     case C of
-	$\\ -> a_string([string_escape()|Acc],Segs); 
-	$# -> Seg=string_interpolate(),
-	      NewSegs=string_cat_seg(Acc,Segs),
-	      NewSegs2=string_cat_seg(Seg,NewSegs),
-	      a_string([],NewSegs2);
+	$\\ -> a_string([string_escape()|Acc],Segs);
+	$# -> error("String interpolation not supported");
+
+	%% $# -> Seg=string_interpolate(),
+%% 	      NewSegs=string_cat_seg(Acc,Segs),
+%% 	      NewSegs2=string_cat_seg(Seg,NewSegs),
+%% 	      a_string([],NewSegs2);
 	%% $" = 34
-	34 -> NewSegs=string_cat_seg(Acc,Segs),
-	      case NewSegs of
-		  [R] -> R;
-		  _ -> {i_string,lists:reverse(NewSegs)}
-	      end;
+	%% 34 -> NewSegs=string_cat_seg(Acc,Segs),
+%% 	      case NewSegs of
+%% 		  [R] -> R;
+%% 		  _ -> {i_string,lists:reverse(NewSegs)}
+%% 	      end;
+	34 -> [?serl_string,lineno(),lists:reverse(Acc)];
 	_ -> a_string([C|Acc],Segs)
     end.
 
-string_cat_seg(Acc,Segs) when is_list(Acc) ->
-    if Acc == [] -> Segs;
-       true -> string_cat_seg({string,lists:reverse(Acc)},Segs)
-    end;
-string_cat_seg(Seg,Segs) ->
-    %io:format("cat seg: ~p to ~n\t~p~n",[Seg,Segs]),
-    case {Seg,Segs} of
-	{_,[]} -> [Seg];
-	{{string,Str2},[{string,Str1}|RSegs]} -> [{string,Str1++Str2}|RSegs]; %%collapse literal strings 
-	%% whatever. Collapsing not done entirely correctly for nested interpolated strings. 
-	% {{i_string,IStr},RSeqs} -> IStr++RSeqs;
-	_ -> [Seg|Segs]
-    end. 
+%% string_cat_seg(Acc,Segs) when is_list(Acc) ->
+%%     if Acc == [] -> Segs;
+%%        true -> string_cat_seg([?serl_string,lists:reverse(Acc)],Segs)
+%%     end;
+%% string_cat_seg(Seg,Segs) ->
+%%     %io:format("cat seg: ~p to ~n\t~p~n",[Seg,Segs]),
+%%     case {Seg,Segs} of
+%% 	{_,[]} -> [Seg];
+%% 	{{?serl_string,Str2},[{?serl_string,Str1}|RSegs]} -> [{?serl_string,Str1++Str2}|RSegs]; %%collapse literal strings 
+%% 	%% whatever. Collapsing not done entirely correctly for nested interpolated strings. 
+%% 	% {{i_string,IStr},RSeqs} -> IStr++RSeqs;
+%% 	_ -> [Seg|Segs]
+%%     end. 
     
 
 %%TODO
@@ -280,33 +291,50 @@ string_interpolate() ->
     E.
     
 %% $( == 40,  but it messes up indentation
+%% $) == 41
 exp_dispatch(40) ->
-    a_list();
+    a_list("()"); %% ()
+exp_dispatch(123) ->
+    [brace|a_list("{}")]; %% {}
+exp_dispatch(91) ->
+    [block|a_list("[]")]; %% []
 %% $" == 34, ditto
 exp_dispatch(34) ->
     a_string();
-%reading a negative number requires peek-2
-exp_dispatch($-) ->
-    read(),
-    C=peek(),
-    T=is_digit(C), 
-    if T -> a_number(-1);
-       true -> error("symbol cannot start with '-'")
-    end;
 exp_dispatch(C) ->
     SpecialAtom=is_special_atom_char(C),
-    Digit=is_digit(C),
-    Symbol=(is_atom_char(C) and (not (C==$-))) or (C==$!),
-    if SpecialAtom -> read(),{special_atom,C};
+    Digit=is_digit(C) or (C==$-),
+    Symbol=is_atom_first_char(C),
+    if SpecialAtom -> read(),[?serl_special_atom,lineno(),C];
+       %% If the first peeked char is $-, there is an overlap between Symbol and Digit, peek one more.
+       Digit,Symbol -> read(),
+		       C2=peek(),
+		       Digit2=is_digit(C2),
+		       if Digit2 -> a_number(-1);
+			  true -> a_symbol("-") %% unfortunate that the prefix of the symbol has to be passed in this way.
+		       end;
        Digit -> a_number(1);
        Symbol -> a_symbol();
        true -> error("Parsing error: ")
     end.
 
-exp() -> skip_while(?space),
+exp() -> skip_while(?spacen),
 	 R=exp_dispatch(peek()),
-	 skip_while(?space),
+	 skip_while(?spacen),
 	 R.
+
+p(In) ->
+    put(?line_count,1),
+    set_port(In),
+    R=exp(),
+    case peek() of
+	eof -> R;
+	_ -> error("Parse has leftover text:")
+    end. 
+
+
+
+
 
 
 %% Tests
@@ -403,7 +431,4 @@ tests() ->
 	      {test_string,"zzzzaabbaabbaacc",16}
 
 	     ]).
-p(In) ->
-    set_port(In),
-    exp().
     
