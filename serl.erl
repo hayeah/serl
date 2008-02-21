@@ -2,7 +2,7 @@
 
 
 -module(serl).
--export([p/1,lineno/0,
+-export([p/1,lineno/0,lineno/1,
 	 parse/1,erl_parse_f/1,erl_parse_e/1,
 	 compile/2,transform/2,transform_each/2
 	 ]).
@@ -32,23 +32,22 @@ p(In) -> parse(In).
 transform(Exp,Lang) ->
     case desugar(Exp) of
 	[Car|Body] ->
-	    %% the current line is either the head of the form, or the nearest term.
-	    case Car of
-		[?serl_atom,L,Atom] -> lineno(L),Name=Atom;
-		Atom when is_atom(Atom) -> Name=Atom
-	    end,
-	    MFun=Lang:lookup_macro(Name),
-	    case MFun of
-		{value,F} ->
-		    %io:format("~nExpanding: ~p",[Exp]),
-		    R=transform(Lang:F([Name|Body]),Lang),
-		    %io:format("~nExpanded: ~p~n",[R]),
-		    R;
-		_ -> R=Lang:lookup_macro(call),
-		     case R of
-			 {value,F} ->  Lang:F([call,Car|Body]);
-			 _ -> error("call is not defined for language: ~p~n",[Lang])
-		     end
+	    %% The macroexpander should be aware of module.
+	    %%
+	    %% TODO I should change parser so atomic literals are expressions
+	    %% that conforms to the form of all other expressions.
+	    %%
+	    %% Currently, the heads of atomic literals are atoms. 
+	    case Lang:lookup_macro(Car) of
+		{macro,F} ->
+		    transform(Lang:F(Body),Lang);
+		{module,Mod,F} ->
+		    %% note that the transform recurses on the same language module.
+		    transform(Mod:F(Body),Lang);
+		_ ->
+		    %% this is a brutal way to transform calls.
+		    %% TODO, think of a non-brutal way to do it. Damn it.
+		    Lang:'__mac_call'(Exp)
 	    end;
 	% done
 	_ -> Exp 

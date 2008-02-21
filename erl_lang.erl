@@ -1,10 +1,10 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Those below are generated
+%% These are generated from language spec.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 -module(erl_lang).
 -include_lib("eunit/include/eunit.hrl").
--import(serl,[error/1,error/2,lineno/0,erl_parse_f/1,erl_parse_e/1]).
+-import(serl,[error/1,error/2,lineno/0,lineno/1,erl_parse_f/1,erl_parse_e/1]).
 -import(lists,[map/2,member/2]).
 -export([lookup_macro/1,compile/1]).
 -define(atomic_literals,[integer,float,string,atom]).
@@ -14,14 +14,23 @@
 
 -include_lib("erl_lang.hrl").
 
-lookup_macro(Name) ->    
-    R=lists:keysearch(Name,1,?module_macros),
-    case R of
-	{value,{_,F}} -> {value,F};
+%% "lookup_macro" should be an generated meta function.
+lookup_macro([atom,L,Name]) ->
+    %% set the line number whenever a macro is expanded. 
+    lineno(L),
+    lookup_macro(Name); 
+lookup_macro(Name) when is_atom(Name) ->
+    case lists:keysearch(Name,1,?module_macros) of
+	{value,{_,F}} -> {macro,F};
 	_ -> false
-    end. 
+    end;
+lookup_macro([brace,_Module,_Atom]) ->
+    %% TODO, this is the mechanism for inheriting macros from another language module.
+    %% since erl_lang is the base language, it has no where to look.
+    %%{module,Module,Atom}
+    false;
+lookup_macro(_) -> false.
 
-%% "lookup_macro" is an generated meta function.
 compile(In) ->
     serl:compile(In,?MODULE).
 
@@ -31,6 +40,10 @@ transform(Exp) ->
 transform_each(Exp) ->
     serl:transform_each(Exp,?MODULE).
     
+
+%% Every defined language must have a top-level macro to wrap all the top-level forms.
+top_level(Exps) ->
+    Exps.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Those above are generated
@@ -59,15 +72,15 @@ transform_each(Exp) ->
 %%       end,
 %%       Clauses). 
 
-'__mac_defm'([defm,Name,Body]) ->
+'__mac_defm'([Name,Body]) ->
     {def,foo,Name,Body}.
 
 %% Translate [e0 e1 ...] to a list if not handled by some other macro
-'__mac_block'([block|Exps]) ->
+'__mac_block'(Exps) ->
     [list,[block|Exps]].
 
 %% Translate {e0 e1 ...} to a tuple if not handled by some other macro
-'__mac_brace'([brace|Exps]) ->
+'__mac_brace'(Exps) ->
     [tuple,[block|Exps]].
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -78,31 +91,27 @@ transform_each(Exp) ->
 
 %%  If D is a module declaration consisting of the forms F_1, ..., F_k, then Rep(D) = [Rep(F_1), ..., Rep(F_k)].
 
-%% Every defined language must have a top-level macro to wrap all the top-level forms.
-top_level(Exps) ->
-    Exps.
-
 %%  If F is an attribute -module(Mod), then Rep(F) = {attribute,LINE,module,Mod}.
-'__mac_module'([module,A]) ->
-    {atom,_,Mod}='__mac_atom'(A),
-    {attribute,lineno(),module,Mod}.
+'__mac_module'([A]) ->
+    {atom,_,Name}=transform(A),
+    {attribute,lineno(),module,Name}.
 
 %%  If F is an attribute -export([Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,export,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}.
-'__mac_export'([export,[block|Fs]]) ->
+'__mac_export'([[block|Fs]]) ->
     {attribute,lineno(),export,
      lists:map(fun ([F,A]) ->
-		       {atom,_,Name}='__mac_atom'(F),
-		       {integer,_,Arity}='__mac_integer'(A),
+		       {atom,_,Name}=transform(F),
+		       {integer,_,Arity}=transform(A),
 		       {Name,Arity}
 	       end,Fs)}.
 
 %%  If F is an attribute -import(Mod,[Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,import,{Mod,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}}.
-'__mac_import'([import,Atom,[block|Fs]]) ->
-    {atom,L,Mod}='__mac_atom'(Atom),
+'__mac_import'([Atom,[block|Fs]]) ->
+    {atom,L,Mod}=transform(Atom),
     {attribute,L,import,
      {Mod,lists:map(fun ([F,A]) ->
-			    {atom,_,Name}='__mac_atom'(F),
-			    {integer,_,Arity}='__mac_integer'(A),
+			    {atom,_,Name}=transform(F),
+			    {integer,_,Arity}=transform(A),
 			    {Name,Arity}
 		    end,Fs)}}.
 
@@ -115,8 +124,8 @@ top_level(Exps) ->
 %%     {attribute,0,file,{File,Line}}.
 
 %%  If F is a record declaration -record(Name,{V_1, ..., V_k}), then Rep(F) = {attribute,LINE,record,{Name,[Rep(V_1), ..., Rep(V_k)]}}. For Rep(V), see below. 
-'__mac_record'([record,Atom,[block|Vs]]) ->
-    {atom,_,Name}='__mac_atom'(Atom),
+'__mac_record'([Atom,[block|Vs]]) ->
+    {atom,_,Name}=transform(Atom),
     {attribute,lineno(),record,
      {Name,lists:map(fun (V) ->
 			     case V of
@@ -146,12 +155,12 @@ top_level(Exps) ->
 
 %%  If V is A, then Rep(V) = {record_field,LINE,Rep(A)}.
 record_field(A) ->
-    RA={atom,L,_}='__mac_atom'(A),
+    RA={atom,L,_}=transform(A),
     {record_field,L,RA}.
 
 %%  If V is A = E, then Rep(V) = {record_field,LINE,Rep(A),Rep(E)}.
 record_field(A,E) ->
-    RA={atom,L,_}='__mac_atom'(A),
+    RA={atom,L,_}=transform(A),
     {record_field,L,RA,transform(E)}.
     
 
@@ -162,16 +171,20 @@ record_field(A,E) ->
 %%%% HY: Hmmm... I count only four kinds...
 
 %%  If L is an integer or character literal, then Rep(L) = {integer,LINE,L}. 
-'__mac_integer'([integer,L,I]) -> {integer,L,I}.
+'__mac_integer'([L,I]) ->
+    {integer,L,I}.
 
 %%  If L is a float literal, then Rep(L) = {float,LINE,L}. 
-'__mac_float'([float,L,F]) -> {float,L,F}.
+'__mac_float'([L,F]) ->
+    {float,L,F}.
 
 %%  If L is a string literal consisting of the characters C_1, ..., C_k, then Rep(L) = {string,LINE,[C_1, ..., C_k]}.
-'__mac_string'([string,L,S]) -> {string,L,S}.
+'__mac_string'([L,S]) ->
+    {string,L,S}.
 
 %%  If L is an atom literal, then Rep(L) = {atom,LINE,L}. 
-'__mac_atom'([atom,L,A]) -> {atom,L,A}.
+'__mac_atom'([L,A]) ->
+    {atom,L,A}.
 
 %% Note that negative integer and float literals do not occur as such; they are parsed as an application of the unary negation operator.
 
@@ -227,29 +240,29 @@ pattern(P) ->
 %%     atomic_litera(P).
 
 %%  If E is P = E_0, then Rep(E) = {match,LINE,Rep(P),Rep(E_0)}.
-'__mac_='(['=',P,E]) ->
+'__mac_='([P,E]) ->
     {match,lineno(),transform(P),transform(E)}.
 
 %%  If E is a variable V, then Rep(E) = {var,LINE,A}, where A is an atom with a printname consisting of the same characters as V.
 %%HY: It's silly to call variables variables when they don't vary... I call them bindings.
 
-'__mac_var'([var,L,Name]) ->
+'__mac_var'([L,Name]) ->
     {var,L,Name}.
 
 %%  If E is a tuple skeleton {E_1, ..., E_k}, then Rep(E) = {tuple,LINE,[Rep(E_1), ..., Rep(E_k)]}.
-'__mac_tuple'([tuple,[block|Es]])->
+'__mac_tuple'([[block|Es]]) ->
     {tuple,lineno(),transform_each(Es)}.
 
 %%  If E is [], then Rep(E) = {nil,LINE}.
-'__mac_list'([list]) ->
+'__mac_list'([]) ->
     {nil,lineno()};
-'__mac_list'([list,[block|[]]]) ->
+'__mac_list'([[block|[]]]) ->
     {nil,lineno()};
-'__mac_list'([list,[block,H|T]]) ->
+'__mac_list'([[block,H|T]]) ->
     [cons,H,[list,[block|T]]].
 
 %%  If E is a cons skeleton [E_h | E_t], then Rep(E) = {cons,LINE,Rep(E_h),Rep(E_t)}.
-'__mac_cons'([cons,Car,Cdr]) ->
+'__mac_cons'([Car,Cdr]) ->
     {cons,lineno(),transform(Car),transform(Cdr)}.
 
 %%  If E is a binary constructor <<V_1:Size_1/TSL_1, ..., V_k:Size_k/TSL_k>>, then Rep(E) = {bin,LINE,[{bin_element,LINE,Rep(V_1),Rep(Size_1),Rep(TSL_1)}, ..., {bin_element,LINE,Rep(V_k),Rep(Size_k),Rep(TSL_k)}]}. For Rep(TSL), see below. An omitted Size is represented by default. An omitted TSL (type specifier list) is represented by default.
@@ -267,20 +280,20 @@ pattern(P) ->
 %% =
 %% catch
 
-'__mac_op'([op,Op,Arg1,Arg2]) ->
+'__mac_op'([Op,Arg1,Arg2]) ->
     {op,lineno(),Op,transform(Arg1),transform(Arg2)};
 
 %%  If E is Op E_0, where Op is a unary operator, then Rep(E) = {op,LINE,Op,Rep(E_0)}.
 %% %% unary Ops:
 %% + - bnot not
-'__mac_op'([op,Op,Arg1]) ->
+'__mac_op'([Op,Arg1]) ->
     {op,lineno(),Op,transform(Arg1)}.
 
 nest_binary(Head,Op,Exp) ->
     case Exp of
-	[Head,Arg1,Arg2] -> [op,Op,Arg1,Arg2];
-	[Head,[block,Arg1,Arg2]] -> [Head,Arg1,Arg2];
-	[Head,[block,Arg1|Args]] -> [Head,Arg1,[Head,[block|Args]]]
+	[Arg1,Arg2] -> [op,Op,Arg1,Arg2];
+	[[block,Arg1,Arg2]] -> [Head,Arg1,Arg2];
+	[[block,Arg1|Args]] -> [Head,Arg1,[Head,[block|Args]]]
     end.
 
 %% +
@@ -300,7 +313,7 @@ nest_binary(Head,Op,Exp) ->
     nest_binary('/','/',E).
 
 %% rem
-'__mac_rem'(['rem',Arg1,Arg2]) ->
+'__mac_rem'([Arg1,Arg2]) ->
     [op,'rem',Arg1,Arg2].
 
 %% and
@@ -320,19 +333,19 @@ nest_binary(Head,Op,Exp) ->
 %% TODO I don't know what this is used for. It removes the first occurence of a subsequence from a list.
 
 %% == /= =< < >= > =:= =/=
-'__mac_=='(['==',E1,E2]) ->
+'__mac_=='([E1,E2]) ->
     [op,'==',E1,E2].
 
-'__mac_<'(['<',E1,E2]) ->
+'__mac_<'([E1,E2]) ->
     [op,'<',E1,E2].
 
-'__mac_>'(['>',E1,E2]) ->
+'__mac_>'([E1,E2]) ->
     [op,'>',E1,E2].
 
-'__mac_>='(['>=',E1,E2]) ->
+'__mac_>='([E1,E2]) ->
     [op,'>=',E1,E2].
 
-'__mac_=<'(['=<',E1,E2]) ->
+'__mac_=<'([E1,E2]) ->
     [op,'=<',E1,E2].
 
 %% andalso
@@ -351,47 +364,47 @@ nest_binary(Head,Op,Exp) ->
 
 % not
 
-'__mac_not'(['not',E]) ->
+'__mac_not'([E]) ->
     [op,'not',E].
 
 %%  If E is #Name{Field_1=E_1, ..., Field_k=E_k}, then Rep(E) = {record,LINE,Name, [{record_field,LINE,Rep(Field_1),Rep(E_1)}, ..., {record_field,LINE,Rep(Field_k),Rep(E_k)}]}.
 
-'__mac_rec'([rec,Atom,[block|Fs]]) ->
-    {atom,L,Name}='__mac_atom'(Atom),
+'__mac_rec'([Atom,[block|Fs]]) ->
+    {atom,L,Name}=transform(Atom),
     {record,L,Name,
      lists:map(fun ([F,V]) -> record_field(F,V) end,Fs)};
 
 %%  If E is E_0#Name{Field_1=E_1, ..., Field_k=E_k}, then Rep(E) = {record,LINE,Rep(E_0),Name, [{record_field,LINE,Rep(Field_1),Rep(E_1)}, ..., {record_field,LINE,Rep(Field_k),Rep(E_k)}]}.
 
-'__mac_rec'([rec,E,Atom,[block|Fs]]) ->
-    {atom,L,Name}='__mac_atom'(Atom),
+'__mac_rec'([E,Atom,[block|Fs]]) ->
+    {atom,L,Name}=transform(Atom),
     {record,L,transform(E),Name,
      lists:map(fun ([F,V]) -> record_field(F,V) end,Fs)}.
 
 %%  If E is #Name.Field, then Rep(E) = {record_index,LINE,Name,Rep(Field)}.
-'__mac_rec-index'(['rec-index',Atom,Field]) ->
-    {atom,L,Name}='__mac_atom'(Atom),
-    {record_index,L,Name,'__mac_atom'(Field)}.
+'__mac_rec-index'([Atom,Field]) ->
+    {atom,L,Name}=transform(Atom),
+    {record_index,L,Name,transform(Field)}.
 
 %%  If E is E_0#Name.Field, then Rep(E) = {record_field,LINE,Rep(E_0),Name,Rep(Field)}.
 
-'__mac_rec-val'(['rec-val',E,Atom,Field]) ->
-    {atom,_,Name}='__mac_atom'(Atom),
+'__mac_rec-val'([E,Atom,Field]) ->
+    {atom,_,Name}=transform(Atom),
     TE=transform(E),
-    {record_field,lineno(),TE,Name,'__mac_atom'(Field)}.
+    {record_field,lineno(),TE,Name,transform(Field)}.
 
 
 %%  If E is catch E_0, then Rep(E) = {'catch',LINE,Rep(E_0)}.
-'__mac_catch'(['catch',E]) ->
+'__mac_catch'([E]) ->
     {'catch',lineno(),transform(E)}.
     
 %%  If E is E_m:E_0(E_1, ..., E_k), then Rep(E) = {call,LINE,{remote,LINE,Rep(E_m),Rep(E_0)},[Rep(E_1), ..., Rep(E_k)]}. 
-'__mac_call'([call,[Mod,Fn],[block|Body]]) ->
+'__mac_call'([[Mod,Fn],[block|Body]]) ->
     {call,lineno(),{remote,transform(Mod),transform(Fn),transform_each(Body)}};
 
 %%  If E is E_0(E_1, ..., E_k), then Rep(E) = {call,LINE,Rep(E_0),[Rep(E_1), ..., Rep(E_k)]}.
-'__mac_call'([call,Fn|Body]) ->
-    {call,lineno(),transform(Fn),transform_each(Body)}.
+'__mac_call'([Fn|Args]) ->
+    {call,lineno(),transform(Fn),transform_each(Args)}.
 
 
 %%  If E is a list comprehension [E_0 || W_1, ..., W_k], where each W_i is a generator or a filter, then Rep(E) = {lc,LINE,Rep(E_0),[Rep(W_1), ..., Rep(W_k)]}. For Rep(W), see below.
@@ -400,15 +413,15 @@ nest_binary(Head,Op,Exp) ->
 
 %%  If E is begin B end, where B is a body, then Rep(E) = {block,LINE,Rep(B)}.
 
-'__mac_do'([do,[block|Body]]) ->
+'__mac_do'([[block|Body]]) ->
     {block,lineno(),transform_each(Body)}.
 
 %%  If E is if Ic_1 ; ... ; Ic_k end, where each Ic_i is an if clause then Rep(E) = {'if',LINE,[Rep(Ic_1), ..., Rep(Ic_k)]}.
 
 
-'__mac_if'(['if',[block]]) ->
+'__mac_if'([[block]]) ->
     error("No clasues in 'if'.");
-'__mac_if'(['if',[block|Cases]]) ->
+'__mac_if'([[block|Cases]]) ->
     {'if',lineno(),build_if_clauses(Cases,[])}.
 
 build_if_clauses([],Acc) -> lists:reverse(Acc);
@@ -649,6 +662,26 @@ compile_test_() ->
 %% {op,1,'+',
 %%     {integer,1,3},
 %%     {op,1,'+',{integer,1,4},{integer,1,5}}}.
+
+%%%% Record
+?_assert(erl_parse_e("#foo{a=1,b=2}.") ==
+	 compile("(rec foo: (a 1) (b 2))")),
+%% {record,1,foo,
+%% 	[{record_field,1,{atom,1,a},{integer,1,1}},
+%% 	 {record_field,1,{atom,1,b},{integer,1,2}}]}.
+?_assert(erl_parse_e("A#foo{a=1,b=2}.") ==
+	 compile("(rec A foo: (a 1) (b 2))")),
+%% {record,1,
+%% 	{var,1,'A'},
+%% 	foo,
+%% 	[{record_field,1,{atom,1,a},{integer,1,1}},
+%% 	 {record_field,1,{atom,1,b},{integer,1,2}}]}.
+?_assert(erl_parse_e("#foo.a.") ==
+	 compile("(rec-index foo a)")),
+%% {record_index,1,foo,{atom,1,a}}.
+?_assert(erl_parse_e("A#foo.a.") ==
+	 compile("(rec-val A foo a)")),
+%% {record_field,1,{var,1,'A'},foo,{atom,1,a}}.
 
 
 
