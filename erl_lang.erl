@@ -19,6 +19,7 @@
 -define(erl_float(L,F),{float,L,F}).
 -define(erl_string(L,S),{string,L,S}).
 -define(erl_atom(L,A),{atom,L,A}).
+-define(erl_var(L,A),{var,L,Name}).
 
 
 %% "lookup_macro" should be an generated meta function.
@@ -218,7 +219,7 @@ record_field(A,E) ->
 %% Individual patterns are represented as follows: 
 %%  If P is an atomic literal L, then Rep(P) = Rep(L).
 
-pattern_sequence(Patterns) ->
+patterns(Patterns) ->
     map(fun pattern/1,Patterns).
 
 pattern(P) ->
@@ -267,7 +268,7 @@ pattern(P) ->
 %%HY: It's silly to call variables variables when they don't vary... I call them bindings.
 
 '__mac_var'([L,Name]) ->
-    {var,L,Name}.
+    ?erl_var(L,Name).
 
 %%  If E is a tuple skeleton {E_1, ..., E_k}, then Rep(E) = {tuple,LINE,[Rep(E_1), ..., Rep(E_k)]}.
 '__mac_tuple'([?ast_block(Es)]) ->
@@ -317,6 +318,12 @@ nest_binary(Op,Exp) ->
 	[?ast_block([Arg1,Arg2])] -> [Op,Arg1,Arg2];
 	[?ast_block([Arg1|Args])] -> [Op,Arg1,[Op,?ast_block(Args)]]
     end.
+
+%% !
+
+'__mac_!'([Pid,Msg]) ->
+    [mk_atom(op),mk_atom('!'),Pid,Msg].
+    
 
 %% +
 '__mac_+'(E) ->
@@ -448,37 +455,80 @@ nest_binary(Op,Exp) ->
 
 build_if_clauses([],Acc) -> lists:reverse(Acc);
 build_if_clauses([Exp],Acc) ->
-    build_if_clauses([],[clause_if(?ast_brace([?ast_block([mk_atom(true)])]),
-				   [Exp])
-			 |Acc]);
+    C=clause_if([mk_atom(true),?ast_block([Exp])]),
+    build_if_clauses([],[C|Acc]);
 build_if_clauses([Test,Exp|Cases],Acc) ->
-    Body=[Exp], % Erlang's if-clause expects a list of expressions as body.
-    C=case Test of
-	  %% God awful without quasiquoting.
-	  ?ast_brace(_) -> clause_if(Test,Body);
-	  ?ast_block(_) -> clause_if(?ast_brace([Test]),Body);
-	  _ -> clause_if(?ast_brace([?ast_block([Test])]),Body)
-    end,
+    Body=?ast_block([Exp]),
+    C=clause_if([Test,Body]),
     build_if_clauses(Cases,[C|Acc]).
 
-%%  If E is case E_0 of Cc_1 ; ... ; Cc_k end, where E_0 is an expression and each Cc_i is a case clause then Rep(E) = {'case',LINE,Rep(E_0),[Rep(Cc_1), ..., Rep(Cc_k)]}. 
-%%  If E is try B catch Tc_1 ; ... ; Tc_k end, where B is a body and each Tc_i is a catch clause then Rep(E) = {'try',LINE,Rep(B),[],[Rep(Tc_1), ..., Rep(Tc_k)],[]}. 
-%%  If E is try B of Cc_1 ; ... ; Cc_k catch Tc_1 ; ... ; Tc_n end, where B is a body, each Cc_i is a case clause and each Tc_j is a catch clause then Rep(E) = {'try',LINE,Rep(B),[Rep(Cc_1), ..., Rep(Cc_k)],[Rep(Tc_1), ..., Rep(Tc_n)],[]}. 
-%%  If E is try B after A end, where B and A are bodies then Rep(E) = {'try',LINE,Rep(B),[],[],Rep(A)}. 
-%%  If E is try B of Cc_1 ; ... ; Cc_k after A end, where B and A are a bodies and each Cc_i is a case clause then Rep(E) = {'try',LINE,Rep(B),[Rep(Cc_1), ..., Rep(Cc_k)],[],Rep(A)}. 
-%%  If E is try B catch Tc_1 ; ... ; Tc_k after A end, where B and A are bodies and each Tc_i is a catch clause then Rep(E) = {'try',LINE,Rep(B),[],[Rep(Tc_1), ..., Rep(Tc_k)],Rep(A)}. 
-%%  If E is try B of Cc_1 ; ... ; Cc_k catch Tc_1 ; ... ; Tc_n after A end, where B and A are a bodies, each Cc_i is a case clause and each Tc_j is a catch clause then Rep(E) = {'try',LINE,Rep(B),[Rep(Cc_1), ..., Rep(Cc_k)],[Rep(Tc_1), ..., Rep(Tc_n)],Rep(A)}. 
+%%  If E is case E_0 of Cc_1 ; ... ; Cc_k end, where E_0 is an expression and each Cc_i is a case clause then Rep(E) = {'case',LINE,Rep(E_0),[Rep(Cc_1), ..., Rep(Cc_k)]}.
+
+'__mac_case'([E,?ast_block(Clauses)]) ->
+    {'case',lineno(),transform(E),map(fun clause_case/1,Clauses)}.
+%% (case E:
+%%   ({a b c}: when guards: do this and that)
+%%   ([d e f]: when guards: do this and that))
+
+%%%  If E is try B catch Tc_1 ; ... ; Tc_k end, where B is a body and each Tc_i is a catch clause then Rep(E) = {'try',LINE,Rep(B),[],[Rep(Tc_1), ..., Rep(Tc_k)],[]}.
+
+%%  If E is try B of Cc_1 ; ... ; Cc_k catch Tc_1 ; ... ; Tc_n end, where B is a body, each Cc_i is a case clause and each Tc_j is a catch clause then Rep(E) = {'try',LINE,Rep(B),[Rep(Cc_1), ..., Rep(Cc_k)],[Rep(Tc_1), ..., Rep(Tc_n)],[]}.
+
+%%%  If E is try B after A end, where B and A are bodies then Rep(E) = {'try',LINE,Rep(B),[],[],Rep(A)}.
+
+%%  If E is try B of Cc_1 ; ... ; Cc_k after A end, where B and A are a bodies and each Cc_i is a case clause then Rep(E) = {'try',LINE,Rep(B),[Rep(Cc_1), ..., Rep(Cc_k)],[],Rep(A)}.
+
+%%  If E is try B catch Tc_1 ; ... ; Tc_k after A end, where B and A are bodies and each Tc_i is a catch clause then Rep(E) = {'try',LINE,Rep(B),[],[Rep(Tc_1), ..., Rep(Tc_k)],Rep(A)}.
+
+%%  If E is try B of Cc_1 ; ... ; Cc_k catch Tc_1 ; ... ; Tc_n after A end, where B and A are a bodies, each Cc_i is a case clause and each Tc_j is a catch clause then Rep(E) = {'try',LINE,Rep(B),[Rep(Cc_1), ..., Rep(Cc_k)],[Rep(Tc_1), ..., Rep(Tc_n)],Rep(A)}.
+
+%% The of, catch and after sections are all optional, as long as there is at least a catch or an after section, so the following are valid try expressions:
+
+'__mac_try'([?ast_block(Body),?ast_block([Type|Forms])]) ->
+    %% two segments, so the Type is either "after" of "catch"
+    case Type of
+	?ast_atom(_,'after') -> 
+	    build_try(Body,[],[],Forms);
+	?ast_atom(_,'catch') ->
+	    build_try(Body,[],Forms,[])
+    end; 
+'__mac_try'([?ast_block(Body),?ast_block([Type|Forms]),?ast_block([Type2|Forms2])]) ->
+    case Type of
+	?ast_atom(_,'of') ->
+	    case Type2 of
+		?ast_atom(_,'after') -> 
+		    build_try(Body,Forms,[],Forms2);
+		?ast_atom(_,'catch') ->
+		    build_try(Body,Forms,Forms2,[])
+	    end; 
+	_ -> build_try(Body,[],Forms,Forms2)
+    end;
+'__mac_try'([?ast_block(Body),
+	     ?ast_block([?ast_atom(_,'of')|Ofs]),
+	     ?ast_block([?ast_atom(_,'catch')|Catches]),
+	     ?ast_block([?ast_atom(_,'after')|AfterBody])
+	    ]) ->
+    build_try(Body,Ofs,Catches,AfterBody).
+
+build_try(Body,Ofs,Catches,AfterBody) -> 
+    {'try',lineno(),
+     transform_each(Body),
+     map(fun clause_case/1,Ofs),
+     map(fun clause_catch/1,Catches),
+     transform_each(AfterBody)}.
+
 %%  If E is receive Cc_1 ; ... ; Cc_k end, where each Cc_i is a case clause then Rep(E) = {'receive',LINE,[Rep(Cc_1), ..., Rep(Cc_k)]}. 
-%%  If E is receive Cc_1 ; ... ; Cc_k after E_0 -> B_t end, where each Cc_i is a case clause, E_0 is an expression and B_t is a body, then Rep(E) = {'receive',LINE,[Rep(Cc_1), ..., Rep(Cc_k)],Rep(E_0),Rep(B_t)}. 
+%%  If E is receive Cc_1 ; ... ; Cc_k after E_0 -> B_t end, where each Cc_i is a case clause, E_0 is an expression and B_t is a body, then Rep(E) = {'receive',LINE,[Rep(Cc_1), ..., Rep(Cc_k)],Rep(E_0),Rep(B_t)}.
+
 %%  If E is fun Name / Arity, then Rep(E) = {'fun',LINE,{function,Name,Arity}}. 
 %%  If E is fun Module:Name/Arity, then Rep(E) = {'fun',LINE,{function,Module,Name,Arity}}. 
-%%  If E is fun Fc_1 ; ... ; Fc_k end where each Fc_i is a function clause then Rep(E) = {'fun',LINE,{clauses,[Rep(Fc_1), ..., Rep(Fc_k)]}}. 
+%%  If E is fun Fc_1 ; ... ; Fc_k end where each Fc_i is a function clause then Rep(E) = {'fun',LINE,{clauses,[Rep(Fc_1), ..., Rep(Fc_k)]}}.
+
+
 %%  If E is query [E_0 || W_1, ..., W_k] end, where each W_i is a generator or a filter, then Rep(E) = {'query',LINE,{lc,LINE,Rep(E_0),[Rep(W_1), ..., Rep(W_k)]}}. For Rep(W), see below. 
 %%  If E is E_0.Field, a Mnesia record access inside a query, then Rep(E) = {record_field,LINE,Rep(E_0),Rep(Field)}. 
 %%  If E is ( E_0 ), then Rep(E) = Rep(E_0), i.e., parenthesized expressions cannot be distinguished from their bodies.
 
-%% pattern(A) ->
-%%     A.
 
 %% 4.5 Clauses
 %% There are function clauses, if clauses, case clauses and catch clauses. 
@@ -486,47 +536,89 @@ build_if_clauses([Test,Exp|Cases],Acc) ->
 
 %%  If C is a function clause ( Ps ) -> B where Ps is a pattern sequence and B is a body, then Rep(C) = {clause,LINE,Rep(Ps),[],Rep(B)}.
 
-clause_function(Patterns,Body) ->
-    clause_function(Patterns,[],Body).
-
 %%  If C is a function clause ( Ps ) when Gs -> B where Ps is a pattern sequence, Gs is a guard sequence and B is a body, then Rep(C) = {clause,LINE,Rep(Ps),Rep(Gs),Rep(B)}.
 
-clause_function(Patterns,Guards,Body) ->
-    Ps=map(fun pattern_sequence/1, Patterns),
-    B=transform_each(Body),
-    Gs=map(fun guard_sequence/1, Guards),
-    {clause,lineno(),Ps,Gs,B}.
+clause_function([Patterns,?ast_block(Body)]) ->
+    clause([Patterns,[],Body]);
+clause_function([Patterns,Guards,?ast_block(Body)]) ->
+    clause([Patterns,when_guards(Guards),Body]).
 
 % (if a)
 %%  If C is an if clause Gs -> B where Gs is a guard sequence and B is a body, then Rep(C) = {clause,LINE,[],Rep(Gs),Rep(B)}.
 
-clause_if(GuardSequence,Body) ->
-    {clause,lineno(),[],
-     guard_sequence(GuardSequence),
-     transform_each(Body)}.
+clause_if([Guards,?ast_block(Body)]) ->
+    clause([[],Guards,Body]).
 
 %%  If C is a case clause P -> B where P is a pattern and B is a body, then Rep(C) = {clause,LINE,[Rep(P)],[],Rep(B)}.
-clause_case(Pattern,Body) ->
-    clause_case(Pattern,[],Body).
+
 %%  If C is a case clause P when Gs -> B where P is a pattern, Gs is a guard sequence and B is a body, then Rep(C) = {clause,LINE,[Rep(P)],Rep(Gs),Rep(B)}.
 
-clause_case(Pattern,Guards,Body) ->
-    {clause,lineno(),[pattern(Pattern)],guard_sequence(Guards),transform_each(Body)}.
+clause_case([Pattern,?ast_block(Body)]) ->
+    clause([[Pattern],?ast_brace([]),Body]); 
+clause_case([Pattern,Guards,?ast_block(Body)]) ->
+    clause([[Pattern],when_guards(Guards),Body]).
 
-%%  If C is a catch clause P -> B where P is a pattern and B is a body, then Rep(C) = {clause,LINE,[Rep({throw,P,_})],[],Rep(B)}. 
-%%  If C is a catch clause X : P -> B where X is an atomic literal or a variable pattern, P is a pattern and B is a body, then Rep(C) = {clause,LINE,[Rep({X,P,_})],[],Rep(B)}. 
-%%  If C is a catch clause P when Gs -> B where P is a pattern, Gs is a guard sequence and B is a body, then Rep(C) = {clause,LINE,[Rep({throw,P,_})],Rep(Gs),Rep(B)}. 
+%%  If C is a catch clause P -> B where P is a pattern and B is a body, then Rep(C) = {clause,LINE,[Rep({throw,P,_})],[],Rep(B)}.
+
+%%  If C is a catch clause X : P -> B where X is an atomic literal or a variable pattern, P is a pattern and B is a body, then Rep(C) = {clause,LINE,[Rep({X,P,_})],[],Rep(B)}.
+
+%%  If C is a catch clause P when Gs -> B where P is a pattern, Gs is a guard sequence and B is a body, then Rep(C) = {clause,LINE,[Rep({throw,P,_})],Rep(Gs),Rep(B)}.
+
 %%  If C is a catch clause X : P when Gs -> B where X is an atomic literal or a variable pattern, P is a pattern, Gs is a guard sequence and B is a body, then Rep(C) = {clause,LINE,[Rep({X,P,_})],Rep(Gs),Rep(B)}.
 
+clause_catch([Pattern,?ast_block(Body)]) ->
+    %% Ok. This is ugly.
+    clause([[?ast_brace([?ast_atom(lineno(),throw),Pattern,?ast_var(lineno(),'_')])],
+	    ?ast_brace([]),
+	    Body
+	   ]);
+clause_catch([Pattern,?ast_block([?ast_atom(_,'when')|_])=Guards,?ast_block(Body)]) ->
+    clause([[?ast_brace([?ast_atom(lineno(),throw),Pattern,?ast_var(lineno(),'_')])],
+	    when_guards(Guards),
+	    Body
+	   ]);
+clause_catch([ErrorClass,Pattern,?ast_block(Body)]) ->
+    clause([[?ast_brace([ErrorClass,Pattern,?ast_var(lineno(),'_')])],
+	    ?ast_brace([]),
+	    Body
+	   ]);
+clause_catch([ErrorClass,Pattern,?ast_block([?ast_atom(_,'when')|_])=Guards,?ast_block(Body)]) ->
+    clause([[?ast_brace([ErrorClass,Pattern,?ast_var(lineno(),'_')])],
+	    when_guards(Guards),
+	    Body
+	   ]). 
+
+when_guards(?ast_block([?ast_atom(_,'when')|Guards])) ->
+    GS=map(fun (?ast_block(_Tests)=Guard) -> Guard;
+	       (Test) -> ?ast_block([Test])
+	end,
+	Guards),
+    ?ast_brace(GS).
+
+clause([Patterns,Guards,Body]) ->
+    {clause,lineno(),
+     patterns(Patterns),
+     guards(Guards),
+     transform_each(Body)}.
 
 %% %% 4.6 Guards
+
+
 
 %% A guard sequence Gs is a sequence of guards G_1; ...; G_k, and Rep(Gs) = [Rep(G_1), ..., Rep(G_k)]. If the guard sequence is empty, Rep(Gs) = [].
 %% HY: Hmmm. A guard sequence is true if at least one guard test is true. But this is not short-circuiting.
 %%%% what's the point of having it? Just syntatic sugar?
 
-guard_sequence(?ast_brace(Guards)) -> 
-    map(fun guard/1,Guards).
+%% {...} denotes a guard sequence:  {[guard1] [guard2]}
+%% [...] denotes a guard (list of guard tests): [test1 test2]
+%% a test needs to be wrapped by blocks and braces to make a sequence
+%%%% test1 => {[test1]}
+guards(?ast_brace(Guards)) -> 
+    map(fun guard/1,Guards);
+guards(?ast_block(_GuardTests)=Guard) ->
+    guards(?ast_brace([Guard]));
+guards(Test) ->
+    guards(?ast_brace([?ast_block([Test])])).
 
 %% A guard G is a nonempty sequence of guard tests Gt_1, ..., Gt_k, and Rep(G) = [Rep(Gt_1), ..., Rep(Gt_k)].
 
@@ -681,6 +773,9 @@ compile_test_() ->
 ?_assert(erl_parse_e("[1|[]].") ==
 	 compile("(cons 1 [])")),
 %% {cons,1,{integer,1,1},{nil,1}}.
+?_assert(erl_parse_e("A ! B.") ==
+	 compile("(! A B)")),
+%% {op,1,'_',{var,1,'A'},{var,1,'B'}}.
 ?_assert(erl_parse_e("3 + (4 + 5).") ==
 	 compile("(+: 3 4 5)")),
 %% {op,1,'+',
@@ -725,9 +820,19 @@ compile_test_() ->
 ?_assert(erl_parse_e("begin a,b,c end.") ==
 	 compile("(do: a b c)")),
 %% {block,1,[{atom,1,a},{atom,1,b},{atom,1,c}]}.
-     
+
+
+?_assert(erl_parse_e("if t11,t12 -> e1; t211,t212;t221,t222 -> e2; t3 -> e3 end.") ==
+	 compile("(if: [t11 t12] e1 {[t211 t212] [t221 t222]} e2 t3 e3)")),
+%% {'if',1,
+%%       [{clause,1,[],[[{atom,1,t11},{atom,1,t12}]],[{atom,1,e1}]},
+%%        {clause,1,[],
+%% 	       [[{atom,1,t211},{atom,1,t212}],
+%% 		[{atom,1,t221},{atom,1,t222}]],
+%% 	       [{atom,1,e2}]},
+%%        {clause,1,[],[[{atom,1,t3}]],[{atom,1,e3}]}]}.
 ?_assert(erl_parse_e("if Foo -> a(b); Bar -> c; true -> d end.") ==
-	 compile("(if: Foo (a b) Bar c d )"))
+	 compile("(if: Foo (a b) Bar c d )")),
 %% {'if',1,
 %%       [{clause,1,[],
 %% 	       [[{var,1,'Foo'}]],
@@ -735,5 +840,96 @@ compile_test_() ->
 %%        {clause,1,[],[[{var,1,'Bar'}]],[{atom,1,c}]},
 %%        {clause,1,[],[[{atom,1,true}]],[{atom,1,d}]}]}.
 
-     
+?_assert(erl_parse_e("case E of p1 when t1,t2 -> e1; p2 when t21;t221,t222 -> e2; t3 -> e31, e32 end.") ==
+	 compile("(case E: (p1: when [t1 t2]: e1) (p2: when t21 [t221 t222]: e2) (t3: e31 e32))")),
+%% {'case',1,
+%% 	{var,1,'E'},
+%% 	[{clause,1,
+%% 		 [{atom,1,p1}],
+%% 		 [[{atom,1,t1},{atom,1,t2}]],
+%% 		 [{atom,1,e1}]},
+%% 	 {clause,1,
+%% 		 [{atom,1,p2}],
+%% 		 [[{atom,1,t21}],[{atom,1,t221},{atom,1,t222}]],
+%% 		 [{atom,1,e2}]},
+%% 	 {clause,1,[{atom,1,t3}],[],[{atom,1,e31},{atom,1,e32}]}]}.
+
+?_assert(erl_parse_e("try e1 catch c1:ex1 -> h1; ex2 when foo(ex2),t1 -> h2; c3:ex3 when t3 -> h3 end.") ==
+	 compile("(try: e1 :catch (c1 ex1: h1) (ex2: when [(foo ex2) t1]: h2) (c3 ex3: when t3: h3))")),
+%% {'try',1,
+%%        [{atom,1,e1}],
+%%        [],
+%%        [{clause,1,
+%% 		[{tuple,1,[{atom,1,c1},{atom,1,ex1},{var,1,'_'}]}],
+%% 		[],
+%% 		[{atom,1,h1}]},
+%% 	{clause,1,
+%% 		[{tuple,1,[{atom,1,throw},{atom,1,ex2},{var,1,'_'}]}],
+%% 		[[{call,1,{atom,1,foo},[{atom,1,ex2}]},{atom,1,t1}]],
+%% 		[{atom,1,h2}]},
+%% 	{clause,1,
+%% 		[{tuple,1,[{atom,1,c3},{atom,1,ex3},{var,1,'_'}]}],
+%% 		[[{atom,1,t3}]],
+%% 		[{atom,1,h3}]}],
+%%        []}.
+?_assert(erl_parse_e("try e1 catch ex1 -> h1 end.") ==
+	 compile("(try: e1 :catch (ex1: h1))")),
+%% {'try',1,
+%%        [{atom,1,e1}],
+%%        [],
+%%        [{clause,1,
+%% 		[{tuple,1,[{atom,1,throw},{atom,1,ex1},{atom,1,'_'}]}],
+%% 		[],
+%% 		[{atom,1,h1}]}],
+%%        []}.
+
+?_assert(erl_parse_e("try E after a1 end.") ==
+	 compile("(try: E: after a1)")),
+%% {'try',1,[{var,1,'E'}],[],[],[{atom,1,a1}]}.
+
+
+?_assert(erl_parse_e("try E of p1 -> e2 catch ex1 -> h1 end.") ==
+	 compile("(try: E :of (p1: e2) :catch (ex1: h1))")),
+%% {'try',1,
+%%        [{var,1,'E'}],
+%%        [{clause,1,[{atom,1,p1}],[],[{atom,1,e2}]}],
+%%        [{clause,1,
+%% 		[{tuple,1,[{atom,1,throw},{atom,1,ex1},{var,1,'_'}]}],
+%% 		[],
+%% 		[{atom,1,h1}]}],
+%%        []}
+
+
+?_assert(erl_parse_e("try E of p1 -> e2 after a1,a2 end.") ==
+	 compile("(try: E :of (p1: e2) :after a1 a2)")),
+%% {'try',1,
+%%        [{var,1,'E'}],
+%%        [{clause,1,[{atom,1,p1}],[],[{atom,1,e2}]}],
+%%        [],
+%%        [{atom,1,a1},{atom,1,a2}]}.
+
+
+?_assert(erl_parse_e("try E catch ex1 -> h1 after a1,a2 end.") ==
+	 compile("(try: E :catch (ex1: h1) :after a1 a2)")),
+%% {'try',1,
+%%        [{var,1,'E'}],
+%%        [],
+%%        [{clause,1,
+%% 		[{tuple,1,[{atom,1,throw},{atom,1,ex1},{var,1,'_'}]}],
+%% 		[],
+%% 		[{atom,1,h1}]}],
+%%        [{atom,1,a1},{atom,1,a2}]}.
+?_assert(erl_parse_e("try E of p1 when t1 -> p2 catch ex1 -> h1 after a1,a2 end.") ==
+	 compile("(try: E: of (p1: when t1: p2) :catch (ex1: h1) :after a1 a2)")),
+%% {'try',1,
+%%        [{var,1,'E'}],
+%%        [{clause,1,[{atom,1,p1}],[[{atom,1,t1}]],[{atom,1,p2}]}],
+%%        [{clause,1,
+%% 		[{tuple,1,[{atom,1,throw},{atom,1,ex1},{var,1,'_'}]}],
+%% 		[],
+%% 		[{atom,1,h1}]}],
+%%        [{atom,1,a1},{atom,1,a2}]}.
+
+ 
+?_assert(done==done)
 ].

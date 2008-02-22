@@ -26,6 +26,7 @@
 
 	 {op,{?MODULE,'__mac_op'}},
 
+	 {'!',{?MODULE,'__mac_!'}},
 	 {'+',{?MODULE,'__mac_+'}},
 	 {'-',{?MODULE,'__mac_-'}},
 	 {'*',{?MODULE,'__mac_*'}},
@@ -54,7 +55,9 @@
 	 {'call',{?MODULE,'__mac_call'}},
 
 	 {'do',{?MODULE,'__mac_do'}},
-	 {'if',{?MODULE,'__mac_if'}}
+	 {'if',{?MODULE,'__mac_if'}},
+	 {'case',{?MODULE,'__mac_case'}},
+	 {'try',{?MODULE,'__mac_try'}}
 
 	]).
 
@@ -86,7 +89,7 @@
 
 	 '__mac_op'/1,
 
-
+	 '__mac_!'/1,
 	 '__mac_+'/1,
 	 '__mac_-'/1,
 	 '__mac_*'/1,
@@ -115,7 +118,10 @@
 	 '__mac_call'/1,
 	 
 	 '__mac_do'/1,
-	 '__mac_if'/1
+	 '__mac_if'/1,
+
+	 '__mac_case'/1,
+	 '__mac_try'/1
 	 
 	 
 	]). 
