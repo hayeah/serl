@@ -2,63 +2,62 @@
 -define(module_macros,
 	[
 	 % serl extensions
-	 {'block','__mac_block'},
-	 {'brace','__mac_brace'},
+	 {'block',{?MODULE,'__mac_block'}},
+	 {'brace',{?MODULE,'__mac_brace'}},
 	 
 	 % 4.1
-	 {module,'__mac_module'},
-	 {export,'__mac_export'},
-	 {import,'__mac_import'},
-	 {record,'__mac_record'},
+	 {module,{?MODULE,'__mac_module'}},
+	 {export,{?MODULE,'__mac_export'}},
+	 {import,{?MODULE,'__mac_import'}},
+	 {record,{?MODULE,'__mac_record'}},
 
 	 % 4.2
-	 {integer,'__mac_integer'},
-	 {float,'__mac_float'},
-	 {string,'__mac_string'},
-	 {atom,'__mac_atom'},
+	 {integer,{?MODULE,'__mac_integer'}},
+	 {float,{?MODULE,'__mac_float'}},
+	 {string,{?MODULE,'__mac_string'}},
+	 {atom,{?MODULE,'__mac_atom'}},
 
 	 % 4.4
-	 {'=','__mac_='},
-	 {var,'__mac_var'},
-	 {tuple,'__mac_tuple'},
-	 {list,'__mac_list'},
-	 {cons,'__mac_cons'},
+	 {'=',{?MODULE,'__mac_='}},
+	 {var,{?MODULE,'__mac_var'}},
+	 {tuple,{?MODULE,'__mac_tuple'}},
+	 {list,{?MODULE,'__mac_list'}},
+	 {cons,{?MODULE,'__mac_cons'}},
 
-	 {op,'__mac_op'},
+	 {op,{?MODULE,'__mac_op'}},
 
-	 {'+','__mac_+'},
-	 {'-','__mac_-'},
-	 {'*','__mac_*'},
-	 {'/','__mac_/'},	 
-	 {'rem','__mac_rem'},
+	 {'+',{?MODULE,'__mac_+'}},
+	 {'-',{?MODULE,'__mac_-'}},
+	 {'*',{?MODULE,'__mac_*'}},
+	 {'/',{?MODULE,'__mac_/'}},	 
+	 {'rem',{?MODULE,'__mac_rem'}},
 	 
-	 {'++','__mac_++'},
+	 {'++',{?MODULE,'__mac_++'}},
 	 
-	 {'==','__mac_=='},
-	 {'<','__mac_<'},
-	 {'>','__mac_>'},
-	 {'>=','__mac_>='},
-	 {'=<','__mac_=<'},
+	 {'==',{?MODULE,'__mac_=='}},
+	 {'<',{?MODULE,'__mac_<'}},
+	 {'>',{?MODULE,'__mac_>'}},
+	 {'>=',{?MODULE,'__mac_>='}},
+	 {'=<',{?MODULE,'__mac_=<'}},
 	 
 	 
-	 {'and','__mac_and'},
-	 {'or','__mac_or'},
-	 {'andalso','__mac_andalso'},
-	 {'orelse','__mac_orelse'},
-	 {'not','__mac_not'},
+	 {'and',{?MODULE,'__mac_and'}},
+	 {'or',{?MODULE,'__mac_or'}},
+	 {'andalso',{?MODULE,'__mac_andalso'}},
+	 {'orelse',{?MODULE,'__mac_orelse'}},
+	 {'not',{?MODULE,'__mac_not'}},
 	 
-	 {'rec','__mac_rec'},
-	 {'rec-index','__mac_rec-index'},
-	 {'rec-val','__mac_rec-val'},
-	 {'catch','__mac_catch'},
-	 {'call','__mac_call'},
+	 {'rec',{?MODULE,'__mac_rec'}},
+	 {'rec-index',{?MODULE,'__mac_rec-index'}},
+	 {'rec-val',{?MODULE,'__mac_rec-val'}},
+	 {'catch',{?MODULE,'__mac_catch'}},
+	 {'call',{?MODULE,'__mac_call'}},
 
-	 {'do','__mac_do'},
-	 {'if','__mac_if'}
-	     
-
+	 {'do',{?MODULE,'__mac_do'}},
+	 {'if',{?MODULE,'__mac_if'}}
 
 	]).
+
 
 -export([
 

@@ -1,20 +1,20 @@
 %% as version one, just read from a list.
 %% as version one, don't even bother to count the lines.
 
--module(parse).
--export([tests/0,
-	 test_char/0,
-	 test_skip_until_chs/0,
-	 test_skip_until_5/0,
-	 test_skip_until_eof/0,
-	 test_skip_while/0,
-	 test_token/0,
-	 test_token1/0,
-	 test_token_of/0,
-	 test_string/0,
-	 test/2, 
-	 p/1
+-module(read).
+-export([read/1
 	 
+%% 	 tests/0,
+%% 	 test_char/0,
+%% 	 test_skip_until_chs/0,
+%% 	 test_skip_until_5/0,
+%% 	 test_skip_until_eof/0,
+%% 	 test_skip_while/0,
+%% 	 test_token/0,
+%% 	 test_token1/0,
+%% 	 test_token_of/0,
+%% 	 test_string/0,
+%% 	 test/2, 
 	]).
 
 -include("ast.hrl").
@@ -33,12 +33,21 @@
 
 -define(line_count,'__serl_parse_line_count').
 
+read(In) ->
+    put(?line_count,1),
+    set_port(In),
+    R=exp(),
+    case peek() of
+	eof -> R;
+	_ -> error("Parse has leftover text:")
+    end. 
+
 % port of Oleg Kiselyov's stream parsing utilities:
 % http://okmij.org/ftp/Scheme/parsing.html
 
 error(Message) ->
     io:fwrite("\t with remaining input:\n~p~n~n",[residue()]),
-    throw({parse_error,Message}).
+    throw({read_error,Message}).
 
 lineno() -> get(?line_count).
 
@@ -191,8 +200,8 @@ a_symbol(Prefix) ->
     case Name of
 	[] -> error("Expecting a symbol name.");
 	[H|_] -> VarP=is_upper(H),
-		 if VarP -> [?serl_variable,lineno(),list_to_atom(Name)];
-		    true -> [?serl_atom,lineno(),list_to_atom(Name)]
+		 if VarP -> ?ast_var(lineno(),list_to_atom(Name));
+		    true -> ?ast_atom(lineno(),list_to_atom(Name))
 		 end
     end.
 
@@ -212,13 +221,13 @@ a_number(S) ->
 			 %% P1 is the integral part, P2 is the decimal part, conforming to erlang syntax.
 			 In=Sign++Int++[$.|Float],
 			 case io_lib:fread("~f",In) of
-			     {ok,[F],_} -> [?serl_float,lineno(),F];
+			     {ok,[F],_} -> ?ast_float(lineno(),F);
 			     _ -> error("Error parsing floating point.")
 			 end;
 		    true -> error("Error parsing floating point")
 		 end;
        true -> case io_lib:fread("~d",Sign++Int) of
-		   {ok,[I],_} -> [?serl_integer,lineno(),I]; 
+		   {ok,[I],_} -> ?ast_integer(lineno(),I); 
 		   _ -> error("Error parsing integer: ")
 	       end
     end,
@@ -258,7 +267,7 @@ a_string(Acc,Segs) ->
 %% 		  [R] -> R;
 %% 		  _ -> {i_string,lists:reverse(NewSegs)}
 %% 	      end;
-	34 -> [?serl_string,lineno(),lists:reverse(Acc)];
+	34 -> ?ast_string(lineno(),lists:reverse(Acc));
 	_ -> a_string([C|Acc],Segs)
     end.
 
@@ -296,9 +305,9 @@ string_interpolate() ->
 exp_dispatch(40) ->
     a_list("()"); %% ()
 exp_dispatch(123) ->
-    [brace|a_list("{}")]; %% {}
+    ?ast_brace(a_list("{}")); %% {}
 exp_dispatch(91) ->
-    [block|a_list("[]")]; %% []
+    ?ast_block(a_list("[]")); %% []
 %% $" == 34, ditto
 exp_dispatch(34) ->
     a_string();
@@ -306,7 +315,7 @@ exp_dispatch(C) ->
     SpecialAtom=is_special_atom_char(C),
     Digit=is_digit(C) or (C==$-),
     Symbol=is_atom_first_char(C),
-    if SpecialAtom -> read(),[?serl_special_atom,lineno(),C];
+    if SpecialAtom -> read(),?ast_satom(C);
        %% If the first peeked char is $-, there is an overlap between Symbol and Digit, peek one more.
        Digit,Symbol -> read(),
 		       C2=peek(),
@@ -324,112 +333,103 @@ exp() -> skip_while(?spacen),
 	 skip_while(?spacen),
 	 R.
 
-p(In) ->
-    put(?line_count,1),
-    set_port(In),
-    R=exp(),
-    case peek() of
-	eof -> R;
-	_ -> error("Parse has leftover text:")
-    end. 
 
 
 
 
 
-
-%% Tests
-do_test_error(RaiseP,Test,In) ->
-    set_port(In),
-    if RaiseP ->
-	    try ?MODULE:Test(),ok of
-		_ -> {no,"Expecting Parse Error"}
-	    catch {parse_error,Msg} -> {ok,"Raised: "++Msg}
-	    end;
-       RaiseP==false -> 
-	    try {ok,?MODULE:Test()}
-	    catch {parse_error,Msg} -> {no,Msg}
-	    end
-    end.
+%% %% Tests
+%% do_test_error(RaiseP,Test,In) ->
+%%     set_port(In),
+%%     if RaiseP ->
+%% 	    try ?MODULE:Test(),ok of
+%% 		_ -> {no,"Expecting Parse Error"}
+%% 	    catch {parse_error,Msg} -> {ok,"Raised: "++Msg}
+%% 	    end;
+%%        RaiseP==false -> 
+%% 	    try {ok,?MODULE:Test()}
+%% 	    catch {parse_error,Msg} -> {no,Msg}
+%% 	    end
+%%     end.
 	     
 		      
-do_tests(TestSpecs) ->
-    Rs=lists:map(fun (TestSpec) -> 
-			 io:format("Testing: ~p~n",[TestSpec]),
-			 R=case TestSpec of 
-			       {Test,In} -> do_test_error(false,Test,In);
-			       {Test,In,error} -> do_test_error(true,Test,In);
-			       {Test,In,Ans} -> 
-				   case do_test_error(false,Test,In) of 
-				       {ok,R2} when R2==Ans -> {ok,R2};
-				       {ok,R2} -> {no,lists:flatten(io_lib:format("Expected ~w /= ~w",[R2,Ans]))};
-				       Fail -> Fail
-				   end
-			   end,
-			 {R,TestSpec,residue()}
-		 end,
-		 TestSpecs),
-    Rs.
+%% do_tests(TestSpecs) ->
+%%     Rs=lists:map(fun (TestSpec) -> 
+%% 			 io:format("Testing: ~p~n",[TestSpec]),
+%% 			 R=case TestSpec of 
+%% 			       {Test,In} -> do_test_error(false,Test,In);
+%% 			       {Test,In,error} -> do_test_error(true,Test,In);
+%% 			       {Test,In,Ans} -> 
+%% 				   case do_test_error(false,Test,In) of 
+%% 				       {ok,R2} when R2==Ans -> {ok,R2};
+%% 				       {ok,R2} -> {no,lists:flatten(io_lib:format("Expected ~w /= ~w",[R2,Ans]))};
+%% 				       Fail -> Fail
+%% 				   end
+%% 			   end,
+%% 			 {R,TestSpec,residue()}
+%% 		 end,
+%% 		 TestSpecs),
+%%     Rs.
 
-test_char() ->
-    char("abc").
+%% test_char() ->
+%%     char("abc").
 
-test_skip_until_5() ->
-    skip_until(5).
+%% test_skip_until_5() ->
+%%     skip_until(5).
 
-test_skip_until_chs() ->
-    skip_until(";,").
+%% test_skip_until_chs() ->
+%%     skip_until(";,").
 
-test_skip_until_eof() ->
-    skip_until([eof,","]).
+%% test_skip_until_eof() ->
+%%     skip_until([eof,","]).
 
-test_skip_while() ->
-    R1=skip_while("abc"),R2=char("d"),R3=char("abc"++[eof]),[R1,R2,R3].
+%% test_skip_while() ->
+%%     R1=skip_while("abc"),R2=char("d"),R3=char("abc"++[eof]),[R1,R2,R3].
 
-test_token() ->
-    T=token("abc",";"),
-    C=read(),
-    T++[C].
+%% test_token() ->
+%%     T=token("abc",";"),
+%%     C=read(),
+%%     T++[C].
 
-test_token1() ->
-    T1=token("abc",","),C1=read(),T2=token("def",";"++[eof]),C2=read(),
-    T1++[C1|T2]++[C2].
+%% test_token1() ->
+%%     T1=token("abc",","),C1=read(),T2=token("def",";"++[eof]),C2=read(),
+%%     T1++[C1|T2]++[C2].
 
-test_token_of() ->
-    S=token_of("abcde"),C1=read(),S++[C1].
+%% test_token_of() ->
+%%     S=token_of("abcde"),C1=read(),S++[C1].
 
-test_string() ->    
-    string("aabbaacc").
+%% test_string() ->    
+%%     string("aabbaacc").
 
-test(Fun,In) ->
-    set_port(In),
-    Fun().
+%% test(Fun,In) ->
+%%     set_port(In),
+%%     Fun().
 
-tests() ->
-    do_tests([{test_char,"abcd"},
-	      {test_char,"abcd",$a} ,
-	      {test_char,"dce",error},
-	      {test_skip_until_5,"abc",error},
-	      {test_skip_until_5,"abcde",false},
-	      {test_skip_until_chs,"abcde;",$;},
-	      {test_skip_until_chs,"abcde,",$,},
-	      {test_skip_until_chs,"abcde",error},
-	      {test_skip_until_eof,"abcdef",eof},
-	      {test_skip_until_chs,"abcde,",$,},
-	      {test_skip_while,"abcabcda","dda"},
-	      {test_skip_while,"bd","dd"++[eof]},
-	      {test_skip_while,"b",error},
-	      {test_skip_while,"",error},
-	      {test_token,"abcdddeee; ","dddeee;"},
-	      {test_token,"abcdddeee",error},
-	      {test_token1,"abccbadddd,defabbc;","dddd,abbc;"},
-	      {test_token1,"abccbadddd,defabbc","dddd,abbc"++[eof]},
-	      {test_token_of,"abcdefg","abcdef"},
-	      {test_token_of,"fff","f"},
-	      {test_token_of,"",[eof]},
-	      {test_string,"aabbaacc",8},
-	      {test_string,"zzzzaabbaaccf",12},
-	      {test_string,"zzzzaabbaabbaacc",16}
+%% tests() ->
+%%     do_tests([{test_char,"abcd"},
+%% 	      {test_char,"abcd",$a} ,
+%% 	      {test_char,"dce",error},
+%% 	      {test_skip_until_5,"abc",error},
+%% 	      {test_skip_until_5,"abcde",false},
+%% 	      {test_skip_until_chs,"abcde;",$;},
+%% 	      {test_skip_until_chs,"abcde,",$,},
+%% 	      {test_skip_until_chs,"abcde",error},
+%% 	      {test_skip_until_eof,"abcdef",eof},
+%% 	      {test_skip_until_chs,"abcde,",$,},
+%% 	      {test_skip_while,"abcabcda","dda"},
+%% 	      {test_skip_while,"bd","dd"++[eof]},
+%% 	      {test_skip_while,"b",error},
+%% 	      {test_skip_while,"",error},
+%% 	      {test_token,"abcdddeee; ","dddeee;"},
+%% 	      {test_token,"abcdddeee",error},
+%% 	      {test_token1,"abccbadddd,defabbc;","dddd,abbc;"},
+%% 	      {test_token1,"abccbadddd,defabbc","dddd,abbc"++[eof]},
+%% 	      {test_token_of,"abcdefg","abcdef"},
+%% 	      {test_token_of,"fff","f"},
+%% 	      {test_token_of,"",[eof]},
+%% 	      {test_string,"aabbaacc",8},
+%% 	      {test_string,"zzzzaabbaaccf",12},
+%% 	      {test_string,"zzzzaabbaabbaacc",16}
 
-	     ]).
+%% 	     ]).
     

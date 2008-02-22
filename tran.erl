@@ -1,16 +1,17 @@
 %% It is best if I can use transform to keep track of the line count, using a process store.
 
 
--module(serl).
--export([p/1,lineno/0,lineno/1,
-	 parse/1,erl_parse_f/1,erl_parse_e/1,
+-module(tran).
+-include("ast.hrl").
+-include_lib("eunit/include/eunit.hrl").
+
+-export([p/1,parse/1,erl_parse_f/1,erl_parse_e/1,
+	 lineno/0,lineno/1,
 	 compile/2,transform/2,transform_each/2
 	 ]).
--include_lib("eunit/include/eunit.hrl").
--include("ast.hrl").
 
--define(stored_exp_key,'__serl_stored_exp').
--define(lineno,'__serl_line_of_head').
+-define(stored_exp_key,'__stored_exp').
+-define(lineno,'__line_of_head').
 
 lineno() -> get(?lineno).
 lineno(N) -> put(?lineno,N).
@@ -19,38 +20,35 @@ error(Message) ->
     error(Message,[]).
 error(Message,Args) ->
     io:format(Message,Args),
-    throw({compile_error,Message}).
+    throw({transform_error,Message}).
 
 compile(In,Lang) ->
-    Ast=parse:p(In),
+    Ast=read:read(In),
     transform(Ast,Lang).
 
-parse(In) -> parse:p(In).
-    
 p(In) -> parse(In).
+parse(In) -> desugar(read:read(In)).
+    
 
 transform(Exp,Lang) ->
-    case desugar(Exp) of
+    case DExp=desugar(Exp) of
 	[Car|Body] ->
-	    %% The macroexpander should be aware of module.
-	    %%
-	    %% TODO I should change parser so atomic literals are expressions
-	    %% that conforms to the form of all other expressions.
-	    %%
-	    %% Currently, the heads of atomic literals are atoms. 
-	    case Lang:lookup_macro(Car) of
+	    case Car of
+		?ast_brace([?ast_atom(L,Mod),?ast_atom(_,Name)]) ->
+		    lineno(L),
+		    Macro = Mod:lookup_macro(Name);
+		?ast_atom(L,Name) ->
+		    lineno(L),
+		    Macro = Lang:lookup_macro(Name); 
+		_  -> Macro=false 
+	    end, 
+	    case Macro of
 		{macro,F} ->
-		    transform(Lang:F(Body),Lang);
-		{module,Mod,F} ->
-		    %% note that the transform recurses on the same language module.
-		    transform(Mod:F(Body),Lang);
-		_ ->
-		    %% this is a brutal way to transform calls.
-		    %% TODO, think of a non-brutal way to do it. Damn it.
-		    Lang:'__mac_call'(Exp)
+		    transform(F(Body),Lang); 
+		_ -> Lang:primitive(DExp)
 	    end;
-	% done
-	_ -> Exp 
+	%% done
+	_ -> DExp 
     end.
 
 transform_each(Es,Lang) ->
@@ -61,10 +59,11 @@ transform_each(Es,Lang) ->
 desugar(Ast) ->
     put(?stored_exp_key,undefined),
     Ast2=normalize(Ast),
-    StoredP = get(?stored_exp_key), % check stored value had been inserted.
-    if StoredP==undefined -> ok;
-       true -> error("No corresponding '~'")
-    end,
+    %% check stored value had been inserted.
+    case get(?stored_exp_key) of
+	undefined -> ok;
+	_ -> error("No corresponding '~'")
+    end, 
     Ast2. 
 
 
@@ -74,11 +73,10 @@ normalize(Lst) when is_list(Lst) ->
     lists:reverse(normalize(Lst,[])); % reverse Acc
 normalize(O) -> O. %identity for everything else.
 normalize([],Acc) -> Acc; % this is the internal base case, more convenient not to reverse.
-normalize(Lst,Acc) ->
-    [H|T]=Lst,
+normalize([H|T]=Lst,Acc) ->
     case H of
-	[?serl_special_atom,_L,$~] -> normalize_splice(normal,T,Acc,[]);
-	[?serl_special_atom,_L,C]-> normalize_op(C,tl(Lst),Acc,[]);
+	?ast_satom($1) -> normalize_splice(normal,T,Acc,[]);
+	?ast_satom(C) -> normalize_op(C,tl(Lst),Acc,[]);
 	_ when is_list(H) -> NH=normalize(H),normalize(T,[NH|Acc]);
 	_ -> normalize(T,[H|Acc])
     end.
@@ -86,13 +84,12 @@ normalize(Lst,Acc) ->
 %% (:) => ([])
 %% (a : b c : d) => (a [b c] [d])
 %% (a : b (:c d) : e) => (a [b [c d]] [e])
-normalize_op($:,[],PrefixAcc,Acc) -> normalize([],[[block|lists:reverse(Acc)]|PrefixAcc]);
-normalize_op($:,Lst,PrefixAcc,Acc) ->
-    [H|T]=Lst,
+normalize_op($:,[],PrefixAcc,Acc) -> normalize([],[?ast_block(lists:reverse(Acc))|PrefixAcc]);
+normalize_op($:,[H|T],PrefixAcc,Acc) ->
     case H of
 	%%$: -> normalize(Lst,[lists:reverse(Acc)|PrefixAcc]);
-	[?serl_special_atom,_L,$~] -> normalize_splice($:,T,PrefixAcc,Acc);
-	[?serl_special_atom,_L,C] -> normalize_op(C,T,[[block|lists:reverse(Acc)]|PrefixAcc],[]);
+	?ast_satom($~) -> normalize_splice($:,T,PrefixAcc,Acc);
+	?ast_satom(C) -> normalize_op(C,T,[?ast_block(lists:reverse(Acc))|PrefixAcc],[]);
 	_ when is_list(H) -> NH=normalize(H),normalize_op($:,T,PrefixAcc,[NH|Acc]);
 	_  -> normalize_op($:,T,PrefixAcc,[H|Acc])
     end;
@@ -115,9 +112,8 @@ normalize_op($.,Lst,PrefixAcc,_Acc) ->
 %% (a ~ b : c ~ d) => (b [c (a) d])
 %% (a ~ b : ~ . d) => (d (b [(a)]))
 normalize_splice(Mode,Lst,PrefixAcc,Acc) ->
-    Store=get(?stored_exp_key),
     %io:format("~nSplicing for ~p",[Mode]),
-    case Store of
+    case get(?stored_exp_key) of
 	%% kludge... if a stored expression is found, collect it, then proceed.
 	{?stored_exp_key,Exp} ->
 	    put(?stored_exp_key,undefined),
@@ -138,8 +134,7 @@ normalize_splice(Mode,Lst,PrefixAcc,Acc) ->
 
 
 erl_parse_f(In) ->
-    Tokens=erl_scan:string(In),
-    case Tokens of
+    case erl_scan:string(In) of
 	{ok,Tks,_} ->
 	    Ast=erl_parse:parse_form(Tks),
 	    case Ast of
@@ -148,8 +143,7 @@ erl_parse_f(In) ->
     end.
 
 erl_parse_e(In) ->
-    Tokens=erl_scan:string(In),
-    case Tokens of
+    case erl_scan:string(In) of
 	{ok,Tks,_} ->
 	    Ast=erl_parse:parse_exprs(Tks),
 	    case Ast of
