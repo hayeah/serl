@@ -1,6 +1,7 @@
 %% It is best if I can use transform to keep track of the line count, using a process store.
 
 
+
 -module(tran).
 -include("ast.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -23,12 +24,15 @@ error(Message,Args) ->
     throw({transform_error,Message}).
 
 compile(In,Lang) ->
+    %% parameterize reader with the language module.
     Ast=read:read(In),
     transform(Ast,Lang).
 
 p(In) -> parse(In).
 parse(In) -> desugar(read:read(In)).
     
+
+%% Let me just maintain the global space.
 
 transform(Exp,Lang) ->
     case DExp=desugar(Exp) of

@@ -30,6 +30,8 @@ lookup_macro(Name) when is_atom(Name) ->
 	_ -> false
     end.
 
+
+
 compile(In) ->
     tran:compile(In,?MODULE).
 
@@ -920,7 +922,7 @@ compile_test_() ->
 %% 		[{atom,1,h1}]}],
 %%        [{atom,1,a1},{atom,1,a2}]}.
 ?_assert(erl_parse_e("try E of p1 when t1 -> p2 catch ex1 -> h1 after a1,a2 end.") ==
-	 compile("(try: E: of (p1: when t1: p2) :catch (ex1: h1) :after a1 a2)")),
+	 compile("(try: E :of (p1: when t1: p2) :catch (ex1: h1) :after a1 a2)")),
 %% {'try',1,
 %%        [{var,1,'E'}],
 %%        [{clause,1,[{atom,1,p1}],[[{atom,1,t1}]],[{atom,1,p2}]}],
