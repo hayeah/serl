@@ -22,6 +22,19 @@
 -define(erl_var(L,A),{var,L,Name}).
 
 
+-define(lineno,'__line_of_head').
+
+lineno() -> get(?lineno).
+lineno(N) -> put(?lineno,N).
+
+
+error(Message) ->
+    error(Message,[]).
+error(Message,Args) ->
+    io:format(Message,Args),
+    throw({serl_error,Message}).
+
+
 %% "lookup_macro" should be an generated meta function.
 lookup_macro(Name) when is_atom(Name) ->
     %% set the line number whenever a macro is expanded. 
@@ -31,16 +44,44 @@ lookup_macro(Name) when is_atom(Name) ->
     end.
 
 
-
 compile(In) ->
     tran:compile(In,?MODULE).
+
+parse(In) ->
+    read:exps(In,?MODULE).
 
 transform(Exp) ->
     tran:transform(Exp,?MODULE).
 
 transform_each(Exp) ->
     tran:transform_each(Exp,?MODULE).
-    
+
+%% Let me just maintain the global space.
+
+transform(Exp,Lang) ->
+    case DExp=desugar(Exp) of
+	[Car|Body] ->
+	    case Car of
+		?ast_brace([?ast_atom(L,Mod),?ast_atom(_,Name)]) ->
+		    lineno(L),
+		    Macro = Mod:lookup_macro(Name);
+		?ast_atom(L,Name) ->
+		    lineno(L),
+		    Macro = Lang:lookup_macro(Name); 
+		_  -> Macro=false 
+	    end, 
+	    case Macro of
+		{macro,F} ->
+		    transform(F(Body),Lang); 
+		_ -> Lang:primitive(DExp)
+	    end;
+	%% done
+	_ -> DExp 
+    end.
+
+transform_each(Es,Lang) ->
+    lists:map(fun (E) -> transform(E,Lang) end,Es).
+
 
 %% Every defined language must have a top-level macro to wrap all the top-level forms.
 top_level(Exps) ->
