@@ -1,33 +1,25 @@
 %% as version one, just read from a list.
 %% as version one, don't even bother to count the lines.
 
--module(read).
--include_lib("eunit/include/eunit.hrl").
+-module(reader).
 
 -export([exp/1,
 	 exps/1
-	 
-%% 	 tests/0,
-%% 	 test_char/0,
-%% 	 test_skip_until_chs/0,
-%% 	 test_skip_until_5/0,
-%% 	 test_skip_until_eof/0,
-%% 	 test_skip_while/0,
-%% 	 test_token/0,
-%% 	 test_token1/0,
-%% 	 test_token_of/0,
-%% 	 test_string/0,
-%% 	 test/2, 
 	]).
 
 -include("ast.hrl").
+-include("state.hrl").
+-include_lib("eunit/include/eunit.hrl").
+
+
+
 -define(spacen,"\t\s\n").
 -define(space,"\t\s").
 -define(special_atom_chars,".~:;,'`").
 -define(reserved_chars,"!@#$?").
 -define(delimiters,"#(){}[]\""++?special_atom_chars++?spacen++?reserved_chars).
 -import(lists,[reverse/1,member/2]).
--import(streamer,[
+-import(streamer,[lineno/1,
 		  lineno/0,
 		  residue/0,
 		  peek/0,
@@ -56,12 +48,27 @@
 %% 	       end),
 %%     receive {Resp,Exps} -> Exps. 
 
-exps(In) ->
-    streamer:init(In),
+%% TODO think of a better way for streamer to keep state.
+-define(reader_state,'__reader_state').
+
+get_state() ->
+    S=get(?reader_state),
+    S#reader_S{lineno=lineno(),input=S#reader_S.input}.
+set_state(S) when is_record(S,reader_S) ->
+    put(?reader_state,S),
+    lineno(S#reader_S.lineno),
+    streamer:set_port(S#reader_S.input). 
+
+curmod() ->
+    S=get_state(),
+    S#reader_S.curmod.
+
+exps(S) ->
+    set_state(S),
     all_exps().
     
-exp(In) ->
-    streamer:init(In),
+exp(S) ->
+    set_state(S),
     R=an_exp(),
     case peek() of
 	eof -> R;
@@ -95,8 +102,8 @@ a_symbol(Prefix) ->
     case Name of
 	[] -> error("Expecting a symbol name.");
 	[H|_] -> VarP=is_upper(H),
-		 if VarP -> ?ast_var(lineno(),list_to_atom(Name));
-		    true -> ?ast_atom(lineno(),list_to_atom(Name))
+		 if VarP -> ?cast_var(list_to_atom(Name));
+		    true -> ?cast_atom(list_to_atom(Name))
 		 end
     end.
 
@@ -116,13 +123,13 @@ a_number(S) ->
 			 %% P1 is the integral part, P2 is the decimal part, conforming to erlang syntax.
 			 In=Sign++Int++[$.|Float],
 			 case io_lib:fread("~f",In) of
-			     {ok,[F],_} -> ?ast_float(lineno(),F);
+			     {ok,[F],_} -> ?cast_float(F);
 			     _ -> error("Error parsing floating point.")
 			 end;
 		    true -> error("Error parsing floating point")
 		 end;
        true -> case io_lib:fread("~d",Sign++Int) of
-		   {ok,[I],_} -> ?ast_integer(lineno(),I); 
+		   {ok,[I],_} -> ?cast_integer(I); 
 		   _ -> error("Error parsing integer: ")
 	       end
     end,
@@ -162,7 +169,7 @@ a_string(Acc,Segs) ->
 %% 		  [R] -> R;
 %% 		  _ -> {i_string,lists:reverse(NewSegs)}
 %% 	      end;
-	34 -> ?ast_string(lineno(),lists:reverse(Acc));
+	34 -> ?cast_string(lists:reverse(Acc));
 	_ -> a_string([C|Acc],Segs)
     end.
 
@@ -195,13 +202,17 @@ string_interpolate() ->
     char("{"), E=an_exp(), char("}"),
     E.
 
+
 a_reader_macro() ->
     read(),
-    ?ast_atom(_,Name)=a_symbol(),
+    ?ast_atom(Name)=a_symbol(),
     {Args,Here}=reader_macro_args([]),
     {heredoc,Name,Args,Here}
     %get_module():apply_reader_macro(Name,Args)
 	.
+
+lookup_reader_macro(Name) ->
+    scompile:lookup_namespace(reader_macros,Name).
 
 reader_macro_args(Acc) ->
     skip_while(?spacen),
@@ -272,11 +283,11 @@ here_short(Close) when is_integer(Close) ->
 %% $( == 40,  but it messes up indentation
 %% $) == 41
 exp_dispatch(40) ->
-    a_list("()"); %% ()
+    ?cast_paren(a_list("()")); %% ()
 exp_dispatch(123) ->
-    ?ast_brace(a_list("{}")); %% {}
+    ?cast_brace(a_list("{}")); %% {}
 exp_dispatch(91) ->
-    ?ast_block(a_list("[]")); %% []
+    ?cast_block(a_list("[]")); %% []
 %% $" == 34, ditto
 exp_dispatch(34) ->
     a_string();
@@ -286,7 +297,7 @@ exp_dispatch(C) ->
     SpecialAtom=is_special_atom_char(C),
     Digit=is_digit(C) or (C==$-),
     Symbol=is_atom_first_char(C),
-    if SpecialAtom -> read(),?ast_satom(C);
+    if SpecialAtom -> read(),?cast_satom(C);
        %% If the first peeked char is $-, there is an overlap between Symbol and Digit, peek one more.
        Digit,Symbol -> read(),
 		       C2=peek(),

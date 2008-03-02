@@ -2,71 +2,74 @@
 
 -serl(true).
 
+-define(MOD,serl).
+
 -serl_namespaces(
-   [{special_forms,
+   [{specials,
      [%% ast literals
-      {'float',{?MODULE,'__mac_float'}}, 
-      {'integer',{?MODULE,'__mac_integer'}}, 
-      {'string',{?MODULE,'__mac_string'}}, 
-      {'atom',{?MODULE,'__mac_atom'}}, 
-      {'var',{?MODULE,'__mac_var'}},
-      {'call',{?MODULE,'__mac_call'}},
+      {'__float',{?MOD,'__mac_float'}}, 
+      {'__integer',{?MOD,'__mac_integer'}}, 
+      {'__string',{?MOD,'__mac_string'}}, 
+      {'__atom',{?MOD,'__mac_atom'}}, 
+      {'__var',{?MOD,'__mac_var'}},
+      {'call',{?MOD,'__mac_call'}},
 
 	 
     %% 4.1
-	 {module,{?MODULE,'__mac_module'}},
-	 {export,{?MODULE,'__mac_export'}},
-	 {import,{?MODULE,'__mac_import'}},
-	 {record,{?MODULE,'__mac_record'}},
-	 {def,{?MODULE,'__mac_def'}},
+	 {module,{?MOD,'__mac_module'}},
+	 {export,{?MOD,'__mac_export'}},
+	 {import,{?MOD,'__mac_import'}},
+	 {record,{?MOD,'__mac_record'}},
+	 {def,{?MOD,'__mac_def'}},
 
 	 %% 4.2
-	 {integer,{?MODULE,'__mac_integer'}},
-	 {float,{?MODULE,'__mac_float'}},
-	 {string,{?MODULE,'__mac_string'}},
-	 {atom,{?MODULE,'__mac_atom'}},
+	 {integer,{?MOD,'__mac_integer'}},
+	 {float,{?MOD,'__mac_float'}},
+	 {string,{?MOD,'__mac_string'}},
+	 {atom,{?MOD,'__mac_atom'}},
 
 	 %% 4.4
-	 {'=',{?MODULE,'__mac_='}},
-	 {var,{?MODULE,'__mac_var'}},
-	 {tuple,{?MODULE,'__mac_tuple'}},
-	 {list,{?MODULE,'__mac_list'}},
-	 {cons,{?MODULE,'__mac_cons'}},
+	 {'=',{?MOD,'__mac_='}},
+	 {var,{?MOD,'__mac_var'}},
+	 {tuple,{?MOD,'__mac_tuple'}},
+	 {list,{?MOD,'__mac_list'}},
+	 {cons,{?MOD,'__mac_cons'}},
 
-	 {op,{?MODULE,'__mac_op'}},
+	 {op,{?MOD,'__mac_op'}},
 
-	 {'!',{?MODULE,'__mac_!'}},
-	 {'+',{?MODULE,'__mac_+'}},
-	 {'-',{?MODULE,'__mac_-'}},
-	 {'*',{?MODULE,'__mac_*'}},
-	 {'/',{?MODULE,'__mac_/'}},	 
-	 {'rem',{?MODULE,'__mac_rem'}},
+	 {'!',{?MOD,'__mac_!'}},
+	 {'+',{?MOD,'__mac_+'}},
+	 {'-',{?MOD,'__mac_-'}},
+	 {'*',{?MOD,'__mac_*'}},
+	 {'/',{?MOD,'__mac_/'}},	 
+	 {'rem',{?MOD,'__mac_rem'}},
 	 
-	 {'++',{?MODULE,'__mac_++'}},
+	 {'++',{?MOD,'__mac_++'}},
 	 
-	 {'==',{?MODULE,'__mac_=='}},
-	 {'<',{?MODULE,'__mac_<'}},
-	 {'>',{?MODULE,'__mac_>'}},
-	 {'>=',{?MODULE,'__mac_>='}},
-	 {'=<',{?MODULE,'__mac_=<'}},
+	 {'==',{?MOD,'__mac_=='}},
+	 {'<',{?MOD,'__mac_<'}},
+	 {'>',{?MOD,'__mac_>'}},
+	 {'>=',{?MOD,'__mac_>='}},
+	 {'=<',{?MOD,'__mac_=<'}},
 	 
 	 
-	 {'and',{?MODULE,'__mac_and'}},
-	 {'or',{?MODULE,'__mac_or'}},
-	 {'andalso',{?MODULE,'__mac_andalso'}},
-	 {'orelse',{?MODULE,'__mac_orelse'}},
-	 {'not',{?MODULE,'__mac_not'}},
+	 {'and',{?MOD,'__mac_and'}},
+	 {'or',{?MOD,'__mac_or'}},
+	 {'andalso',{?MOD,'__mac_andalso'}},
+	 {'orelse',{?MOD,'__mac_orelse'}},
+	 {'not',{?MOD,'__mac_not'}},
 	 
-	 {'rec',{?MODULE,'__mac_rec'}},
-	 {'rec-index',{?MODULE,'__mac_rec-index'}},
-	 {'rec-val',{?MODULE,'__mac_rec-val'}},
-	 {'catch',{?MODULE,'__mac_catch'}},
+	 {'rec',{?MOD,'__mac_rec'}},
+	 {'rec-index',{?MOD,'__mac_rec-index'}},
+	 {'rec-val',{?MOD,'__mac_rec-val'}},
+	 {'catch',{?MOD,'__mac_catch'}},
 
-	 {'do',{?MODULE,'__mac_do'}},
-	 {'if',{?MODULE,'__mac_if'}},
-	 {'case',{?MODULE,'__mac_case'}},
-     {'try',{?MODULE,'__mac_try'}}
+	 {'do',{?MOD,'__mac_do'}},
+	 {'if',{?MOD,'__mac_if'}},
+	 {'case',{?MOD,'__mac_case'}},
+     {'try',{?MOD,'__mac_try'}}
      
     ]},
-    {macros,[]}
+    {macros,[]},
+    {reader_macros,[]}
    ]).

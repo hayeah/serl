@@ -1,38 +1,53 @@
 -module(scompile).
 -include("ast.hrl").
+-include("state.hrl").
 
--export([compile1/1,error/1,error/2,lineno/0,module_meta_info/2]).
+-export([eval/1,eval/2,
+	 transform/1, transform_each/1,
+	 %compile1/1,
+	 module_meta_info/2,
+	 lineno/0,
+	 warn/1,warn/2,error/1,error/2
+	 ]).
+-import(lists,[keysearch/3]).
 
 
--define(lineno,'__line_of_head').
+%% global process vars
+-define(lineno,{?MODULE,'lineno'}).
+-define(curmod,{?MODULE,'curmod'}).
+-define(state,{?MODULE,'state'}).
+
 lineno() -> get(?lineno).
 lineno(N) -> put(?lineno,N).
 
--record(c_state,
-	{namespaces=[], 
-	 namespace_safety=1 %% none, whiny (gives warning when shadowed), anal (error when shadowed)
-	 }).
+curmod() -> get(?curmod).
+curmod(M) -> put(?curmod,M). 
 
-
--define(c_state,'__serl_compiler_state').
 
 %% erlang record sucks! Why can't the compiler work a little harder?
 %% Now I am doomed to adhoc inefficiency.
-c_state_pos(Field) ->
+scompile_S_pos(Field) ->
     case Field of
-	namespaces -> #c_state.namespaces;
-	namespace_safety -> #c_state.namespace_safety
+	lineno -> #scompile_S.lineno;
+	curmod -> #scompile_S.curmod;
+	namespaces -> #scompile_S.namespaces;
+	namespace_safety -> #scompile_S.namespace_safety 
     end.
 
-set_state(S) when is_record(S,c_state) ->
-    put(?c_state,S).
+%% all state information is encapsulated in the functions set_state and get_state.
+set_state(S) when is_record(S,scompile_S) ->
+    put(?state,S),
+    lineno(S#scompile_S.lineno),
+    curmod(S#scompile_S.curmod).
 set_state(Field,Val) ->
-    set_state(setelement(c_state_pos(Field),get_state(),Val)).
+    set_state(setelement(scompile_S_pos(Field),get_state(),Val)).
    
 get_state() ->
-    get(?c_state).
+    S=get(?state),
+    S#scompile_S{lineno=lineno(),
+		 curmod=curmod()}.
 get_state(Field) ->
-    element(c_state_pos(Field),get_state()).
+    element(scompile_S_pos(Field),get_state()).
 
 
 warn(Message) ->
@@ -46,24 +61,28 @@ error(Message,Args) ->
     io:format(Message,Args),
     throw({serl_error,Message}).
 
-parse(In) ->
-    read:exps(In,?MODULE).
 
-
-module_meta_info(Mod,Field) ->
-    case meta_module_of(Mod) of
-	{ok,MetaMod} ->
-	    case lists:keysearch(serl,1,MetaMod:module_info(attributes)) of
-		{value,_} ->
-		    case lists:keysearch(Field,1,MetaMod:module_info(attributes)) of
-			{value,{_,Val}} -> {ok,Val};
-			_ -> false
-		    end;
-		_ -> false
-	    end; 
+assoc(AList,Key) when is_atom(Key) ->
+    assoc(AList,[Key]);
+assoc(Val,[]) ->
+    {value,Val};
+assoc(AList,[Key|Keys]) ->
+    case keysearch(Key,1,AList) of
+	{value,{_Key,Val}} -> assoc(Val,Keys);
 	_ -> false
     end.
-
+    
+module_meta_info(Mod,Fs) when is_list(Fs) ->
+    case meta_module_of(Mod) of
+	{ok,MetaMod} -> module_meta_info_(MetaMod,Fs);
+	_ -> false
+    end;
+module_meta_info(Mod,F) when is_atom(F) ->
+    module_meta_info(Mod,[F]).
+    
+module_meta_info_(MetaMod,Fs) ->
+    assoc(MetaMod:module_info(attributes),Fs). 
+    
 meta_module_of(Mod) when is_atom(Mod) ->
     MetaMod=list_to_atom(atom_to_list(Mod)++"__meta"),
     case code:which(MetaMod) of
@@ -72,29 +91,38 @@ meta_module_of(Mod) when is_atom(Mod) ->
     end.
 
 
-compile1(_In) ->
-    set_state(#c_state{}),
-    case module_meta_info(serl,serl_namespaces) of
-	{ok,NSs} -> 
-	    lists:foreach(fun ({NSName,Defs}) ->
-				  merge_namespace(NSName,Defs)
-			  end, 
-			  NSs);
-	_ -> nil
-    end,
-    io:format("Special forms:~n~p~n",[dict:to_list(lookup_namespace(special_forms))]).
-    %%transform().
+lookup_namespace(NSName,Key) ->
+    case Key of
+	?ast_atom3(_L,M,A) ->
+	    CurMod=curmod(),
+	    if M==CurMod ->
+		    %% local
+		    lookup_namespace_local(NSName,A);
+	       true ->
+		    %% module hygiene sees that the ast_atom is from
+		    %% another module, so it is implicitly a remote lookup.
+		    lookup_namespace_remote(NSName,M,A)
+	    end;
+	?ast_brace([?ast_atom(M),?ast_atom(A)]) ->
+	    lookup_namespace_remote(NSName,M,A);
+	_  when is_atom(Key) -> lookup_namespace_local(NSName,Key)
+    end.
 
-lookup_namespace(NSName) ->
-    case lists:keysearch(NSName,1,get_state(namespaces)) of
-	{value,{_,NS}} -> NS;
+lookup_namespace_local(NSName,Key) when is_atom(Key) ->
+    %% lookup the current dynamic module namespace.
+    case assoc(get_state(namespaces),NSName) of
+	{value,NS} ->
+	    case dict:find(Key,NS) of
+		{ok,V} -> {value,V}; 
+		_ -> false
+	    end;
 	_ -> false
     end.
-lookup_namespace(NSName,Name) ->
-    case lookup_namespace(NSName) of
-	{value,{_,NS}} -> dict:find(Name,NS);
-	_ -> false
-    end.
+
+lookup_namespace_remote(NSName,Mod,Key) ->
+    %% lookup the static information from a remote/external module.
+    module_meta_info(Mod,[namespaces,NSName,Key]).
+
 
 merge_namespace(NSName,Defs) ->
     NSs=get_state(namespaces),
@@ -116,74 +144,73 @@ merge_namespace(NSName,Defs) ->
     set_state(namespaces,MergedNSs).
 
 
-transform(Exp) -> 
-    case DExp=desugar:renest(Exp) of 
-	?ast_block(Es) ->
-	    transform([?ast_atom(lineno(),list),?ast_block(Es)]);
-	?ast_brace(Es) ->
-	    transform([?ast_atom(lineno(),tuple),?ast_block(Es)]);
-	[Car|Body] -> 
+read1(In,Mod) ->
+    reader:exp(#reader_S{input=In,curmod=Mod}).
+
+eval(In) ->
+    eval(In,#scompile_S{}).
+eval(In,S) ->
+    init_state(S),
+    Ast=read1(In,curmod()),
+    transform(Ast).
+
+%% init the transformer state
+init_state(S) ->
+    %%init namespaces from top-level module.
+    set_state(S),
+    case module_meta_info(curmod(),serl_namespaces) of
+	{value,NSs} -> 
+	    lists:foreach(fun ({NSName,Defs}) ->
+				  merge_namespace(NSName,Defs)
+			  end, 
+			  NSs);
+	_ -> nil
+    end
+    %%io:format("Initialized State:\n~p\n",[get_state()])
+    .
+    
+
+%% compile(Exp) ->
+%%     foo.
+%%     %%transform().
+
+transform(Exp) ->
+    %DExp=desugar:renest(Exp),
+    DExp=Exp,
+    case DExp of 
+	?ast_paren([Car|Body]) -> 
 	    case lookup_expander(Car) of
 		{special,F} -> F(Body);
-		{macro,F} -> transform(F(Body));
-		{ast,F} -> F(DExp); 
-		_ -> transform([?ast_atom(lineno(),'call')|DExp])
+		{macro,F} -> transform(F(Body)); 
+		_ -> case lookup_expander(?cast_atom('call')) of
+			 %% this is probably correct. A function call should follow the convention of the active module.
+			 %% it could be a special form or a macro.
+			 %% %% TODO Hmmmm... should I inspect the function header so I know how 'call' should actually be used?
+			 {_,F} ->
+			     F([Car|Body]);
+			 _ -> error("cannot find an expander for functional call. ")
+		     end 
 	    end;
-	_ -> DExp 
+	_ when is_tuple(DExp) ->
+	    [AstType,L,Mod|Body]=tuple_to_list(DExp),
+	    transform(?cast_paren([?ast_atom3(L,Mod,AstType)|Body])) 
     end.
 
 transform_each(Es) ->
-    lists:map(fun (E) -> transform(E) end,Es).
+    lists:map(fun transform/1,Es).
 
-lookup_expander(_Car) -> foo.
-    
-%% lookup_expander(Car) ->
-%%     %% set the line number whenever a macro is expanded.
-%%     case Car of
-%% 	?ast_brace([?ast_atom(L,Mod),?ast_atom(_,Name)]) ->
-%% 	    foo;
-%% 	    %% lineno(L),
-%% %% 	    ExternalMod=macro_module_of(Mod),
-%% %% 	    case code:which(MacMod) of
-%% %% 		non_existing -> false;
-%% %% 		_ -> lookup_external_env(Name,ExternalMod)
-%% %% 	    end;
-	
-%% 	?ast_atom(L,Name) ->
-%% 	    lineno(L),
-%% 	    %% macro definitions can shadow special forms.
-%% 	    %% function definitions can't shadow special forms.
-%% 	    lookup_current_env(Name);
-%% 	_ when is_atom(Car) ->
-%% 	    %% this is only possible for ast leaf nodes.
-%% 	    %% TODO For hygiene, I probably will have to keep track the module of the asts...
-%% 	    lookup_special(Car); 
-%% 	_  -> false
-%%     end.
-    
-%% lookup_remote_env(Name,Mod) ->
-%%     case Mac=lookup_macro(Name,Mod) of
-%% 	false -> lookup_special(Name,Mod);
-%% 	_ -> Mac
-%%     end.
+lookup_expander(Car) ->
+    %% macros shadow special forms
+    case lookup_macro(Car) of
+	{value,F} -> {macro,F};
+	_ -> case lookup_special(Car) of
+		 {value,F} -> {special,F}; 
+		 _ -> false
+	     end
+    end.
 
+lookup_special(Car) ->
+    lookup_namespace(specials,Car).
 
-    
-%% %% find the name by looking up the _static_ module information.
-%% %%%% TODO support language inheritance. treat an atom a module for recursive lookup.
-
-%% lookup_macro(Name) -> 
-%%     %% local macros are either imported, or not yet compiled.
-%%     %% Their names are known in the compiler state. 
-%%     %%look for macro by name
-%%     get_state(macros).
-
-%% lookup_macro(Name,Mod) ->
-%%     %% external macro is compiled, so can be found in the module info.
-%%     Mod:module_info(macros).
-
-%% lookup_special(Name) when is_atom(Name) ->
-%%     case lists:keysearch(Name,1,?module_specials) of
-%% 	{value,{_,F}} -> {special,F};
-%% 	_ -> false
-%%     end.
+lookup_macro(Car) ->
+    lookup_namespace(macros,Car).

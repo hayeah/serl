@@ -3,10 +3,12 @@
 
 % port of Oleg Kiselyov's stream parsing utilities:
 % http://okmij.org/ftp/Scheme/parsing.html
--export([init/1,
-	 residue/0,
+-export([set_port/1,
+	 get_port/0,
 	 lineno/0,
-
+	 lineno/1,
+	 
+	 residue/0, 
 	 peek/0,
 	 read/0,
 	 char/1,
@@ -27,12 +29,6 @@
 error(Message) ->
     io:fwrite("Stream error, remaining:\n~p~n~n",[residue()]),
     throw({stream_error,Message}).
-
-init(In) ->
-    init(1,In).
-init(Line,In) ->
-    lineno(Line),
-    set_port(In).
     
 lineno() -> get(?line_count).
 
