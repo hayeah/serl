@@ -12,6 +12,8 @@
       {'__string',{?MOD,'__mac_string'}}, 
       {'__atom',{?MOD,'__mac_atom'}}, 
       {'__var',{?MOD,'__mac_var'}},
+      {'__block',{?MOD,'__mac_block'}},
+      {'__brace',{?MOD,'__mac_brace'}},
       {'call',{?MOD,'__mac_call'}},
 
 	 
@@ -74,6 +76,10 @@
     {reader_macros,
      [
       {'lit',{?MOD,'__rm_lit'}}
+     ]},
+    {functions,
+     [
+      {'fmt',{io,format}}
      ]}
    ]).
 

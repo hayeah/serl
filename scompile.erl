@@ -2,7 +2,7 @@
 -include("ast.hrl").
 -include("state.hrl").
 
--export([eval/1,eval/2,
+-export([eval/1,eval/3,
 	 read1/1,read1/2,
 	 transform/1, transform_each/1,
 	 %compile1/1,
@@ -152,12 +152,27 @@ read1(In) ->
 read1(In,Mod) ->
     reader:exp(#reader_S{input=In,curmod=Mod}).
 
+
+
 eval(In) ->
-    eval(In,#scompile_S{}).
-eval(In,S) ->
+    eval(In,#scompile_S{},erl_eval:new_bindings()).
+eval(In,S,Bindings) ->
     init_state(S),
     Ast=read1(In,curmod()),
-    transform(Ast).
+    ErlAst=transform(Ast),
+    erl_eval:expr(ErlAst,Bindings,
+		  {value, fun local_funcall_handler/2},
+		  {value, fun remote_funcall_handler/2}). 
+
+local_funcall_handler(Name,Args) ->
+    case lookup_namespace_local(functions,Name) of
+	{value,{Mod,F}} -> apply(Mod,F,Args);
+	{value,F} -> apply(F,Args);
+	_ -> error("undefined function: ~p\n",[Name])
+    end.
+
+remote_funcall_handler(F,Args) ->
+    F(Args).
 
 %% init the transformer state
 init_state(S) ->
