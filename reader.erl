@@ -76,7 +76,9 @@ exp(S) ->
     end. 
 
 error(Message) ->
-    io:fwrite("\t with remaining input:\n~p~n~n",[residue()]),
+    error(Message,[]).
+error(Message,Args) ->
+    io:fwrite(Message++"\n\tWith remaining input:\n~p\n\n",Args++[residue()]),
     throw({read_error,Message}).
 
 %% serl lexer/parser
@@ -205,11 +207,17 @@ string_interpolate() ->
 
 a_reader_macro() ->
     read(),
-    ?ast_atom(Name)=a_symbol(),
-    {Args,Here}=reader_macro_args([]),
-    {heredoc,Name,Args,Here}
-    %get_module():apply_reader_macro(Name,Args)
-	.
+    Car=case peek() of
+	%% ${ == 123}
+	123 -> exp_dispatch(123); %% possibly a remote call.
+	_ -> a_symbol()
+    end,
+    case lookup_reader_macro(Car) of
+	{value,F} ->
+	    {Args,Here}=reader_macro_args([]),
+	    F(Args,Here);
+	_ -> error("Undefined reader macro: \n~p\n",[Car])
+    end.
 
 lookup_reader_macro(Name) ->
     scompile:lookup_namespace(reader_macros,Name).

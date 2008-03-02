@@ -71,5 +71,11 @@
      
     ]},
     {macros,[]},
-    {reader_macros,[]}
+    {reader_macros,
+     [
+      {'lit',{?MOD,'__rm_lit'}}
+     ]}
    ]).
+
+
+    

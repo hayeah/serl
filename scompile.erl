@@ -3,9 +3,12 @@
 -include("state.hrl").
 
 -export([eval/1,eval/2,
+	 read1/1,read1/2,
 	 transform/1, transform_each/1,
 	 %compile1/1,
 	 module_meta_info/2,
+	 lookup_namespace/2,
+	 curmod/0,
 	 lineno/0,
 	 warn/1,warn/2,error/1,error/2
 	 ]).
@@ -121,7 +124,7 @@ lookup_namespace_local(NSName,Key) when is_atom(Key) ->
 
 lookup_namespace_remote(NSName,Mod,Key) ->
     %% lookup the static information from a remote/external module.
-    module_meta_info(Mod,[namespaces,NSName,Key]).
+    module_meta_info(Mod,[serl_namespaces,NSName,Key]).
 
 
 merge_namespace(NSName,Defs) ->
@@ -143,6 +146,8 @@ merge_namespace(NSName,Defs) ->
     end,
     set_state(namespaces,MergedNSs).
 
+read1(In) ->
+    reader:exp(#reader_S{input=In,curmod=serl}).
 
 read1(In,Mod) ->
     reader:exp(#reader_S{input=In,curmod=Mod}).
