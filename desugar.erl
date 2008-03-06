@@ -2,65 +2,23 @@
 
 
 
--module(tran).
+-module(desugar).
 -include("ast.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
--export([p/1,parse/1,erl_parse_f/1,erl_parse_e/1,
-	 lineno/0,lineno/1,
-	 compile/2,transform/2,transform_each/2
+-export([renest/1 
 	 ]).
 
 -define(stored_exp_key,'__stored_exp').
--define(lineno,'__line_of_head').
-
-lineno() -> get(?lineno).
-lineno(N) -> put(?lineno,N).
 
 error(Message) ->
     error(Message,[]).
 error(Message,Args) ->
     io:format(Message,Args),
-    throw({transform_error,Message}).
-
-compile(In,Lang) ->
-    %% parameterize reader with the language module.
-    Ast=read:read(In),
-    transform(Ast,Lang).
-
-p(In) -> parse(In).
-parse(In) -> desugar(read:read(In)).
-    
-
-%% Let me just maintain the global space.
-
-transform(Exp,Lang) ->
-    case DExp=desugar(Exp) of
-	[Car|Body] ->
-	    case Car of
-		?ast_brace([?ast_atom(L,Mod),?ast_atom(_,Name)]) ->
-		    lineno(L),
-		    Macro = Mod:lookup_macro(Name);
-		?ast_atom(L,Name) ->
-		    lineno(L),
-		    Macro = Lang:lookup_macro(Name); 
-		_  -> Macro=false 
-	    end, 
-	    case Macro of
-		{macro,F} ->
-		    transform(F(Body),Lang); 
-		_ -> Lang:primitive(DExp)
-	    end;
-	%% done
-	_ -> DExp 
-    end.
-
-transform_each(Es,Lang) ->
-    lists:map(fun (E) -> transform(E,Lang) end,Es).
-
+    throw({desugar_error,Message}).
     
 %% implementation for "~" is somewhat kludgey. Eleganify later, or never.
-desugar(Ast) ->
+renest(Ast) ->
     put(?stored_exp_key,undefined),
     Ast2=normalize(Ast),
     %% check stored value had been inserted.
@@ -137,138 +95,119 @@ normalize_splice(Mode,Lst,PrefixAcc,Acc) ->
 	
 
 
-erl_parse_f(In) ->
-    case erl_scan:string(In) of
-	{ok,Tks,_} ->
-	    Ast=erl_parse:parse_form(Tks),
-	    case Ast of
-		{ok,R} -> R
-	    end
-    end.
-
-erl_parse_e(In) ->
-    case erl_scan:string(In) of
-	{ok,Tks,_} ->
-	    Ast=erl_parse:parse_exprs(Tks),
-	    case Ast of
-		{ok,[R]} -> R
-	    end
-    end.
+%% desugar_test_() ->
+%%     [
+%% ?_assert(desugar(p("(:)")) ==
+%%      [{block,[]}]), 
 
 
-desugar_test_() ->
-    [
-?_assert(desugar(p("(:)")) ==
-     [{block,[]}]), 
+%% %desugar(p("(: a b : c d)")).
+%% ?_assert(desugar(p("(: a b : c d)")) ==
+%%      [{block,[{atom,"a"},{atom,"b"}]},
+%%       {block,[{atom,"c"},{atom,"d"}]}]), 
 
 
-%desugar(p("(: a b : c d)")).
-?_assert(desugar(p("(: a b : c d)")) ==
-     [{block,[{atom,"a"},{atom,"b"}]},
-      {block,[{atom,"c"},{atom,"d"}]}]), 
+%% %desugar(p("(: a b : : c d)")).
+%% ?_assert(desugar(p("(: a b : : c d)")) ==
+%%      [{block,[{atom,"a"},{atom,"b"}]},
+%%       {block,[]},
+%%       {block,[{atom,"c"},{atom,"d"}]}]), 
 
 
-%desugar(p("(: a b : : c d)")).
-?_assert(desugar(p("(: a b : : c d)")) ==
-     [{block,[{atom,"a"},{atom,"b"}]},
-      {block,[]},
-      {block,[{atom,"c"},{atom,"d"}]}]), 
+%% %desugar(p("(a b (c d (e : f)))")).
+%% ?_assert(desugar(p("(a b (c d (e : f)))")) ==
+%%      [{atom,"a"},
+%%       {atom,"b"},
+%%       [{atom,"c"},{atom,"d"},[{atom,"e"},{block,[{atom,"f"}]}]]]), 
 
 
-%desugar(p("(a b (c d (e : f)))")).
-?_assert(desugar(p("(a b (c d (e : f)))")) ==
-     [{atom,"a"},
-      {atom,"b"},
-      [{atom,"c"},{atom,"d"},[{atom,"e"},{block,[{atom,"f"}]}]]]), 
+%% %desugar(p("(: a (b: c d): e f (:g h))")).
+%% ?_assert(desugar(p("(: a (b: c d): e f (:g h))")) ==
+%%      [{block,[{atom,"a"},
+%% 	      [{atom,"b"},{block,[{atom,"c"},{atom,"d"}]}]]},
+%%       {block,[{atom,"e"},
+%% 	      {atom,"f"},
+%% 	      [{block,[{atom,"g"},{atom,"h"}]}]]}]), 
 
 
-%desugar(p("(: a (b: c d): e f (:g h))")).
-?_assert(desugar(p("(: a (b: c d): e f (:g h))")) ==
-     [{block,[{atom,"a"},
-	      [{atom,"b"},{block,[{atom,"c"},{atom,"d"}]}]]},
-      {block,[{atom,"e"},
-	      {atom,"f"},
-	      [{block,[{atom,"g"},{atom,"h"}]}]]}]), 
+%% %desugar(p("(a b . c d)")).
+%% ?_assert(desugar(p("(a b . c d)")) ==
+%% 	  [{atom,"c"},{atom,"d"},[{atom,"a"},{atom,"b"}]]), 
 
 
-%desugar(p("(a b . c d)")).
-?_assert(desugar(p("(a b . c d)")) ==
-	  [{atom,"c"},{atom,"d"},[{atom,"a"},{atom,"b"}]]), 
+%% %desugar(p("(. c d)")).
+%% ?_assert(desugar(p("(. c d)")) ==
+%% 	  [{atom,"c"},{atom,"d"},[]]), 
 
 
-%desugar(p("(. c d)")).
-?_assert(desugar(p("(. c d)")) ==
-	  [{atom,"c"},{atom,"d"},[]]), 
+%% %desugar(p("(.)")).
+%% ?_assert(desugar(p("(.)")) ==
+%% 	  [[]]), 
 
 
-%desugar(p("(.)")).
-?_assert(desugar(p("(.)")) ==
-	  [[]]), 
+%% %desugar(p("(a : c d . e)")).
+%% ?_assert(desugar(p("(a : c d . e)")) ==
+%% 	  [{atom,"e"},[{atom,"a"},{block,[{atom,"c"},{atom,"d"}]}]]), 
 
 
-%desugar(p("(a : c d . e)")).
-?_assert(desugar(p("(a : c d . e)")) ==
-	  [{atom,"e"},[{atom,"a"},{block,[{atom,"c"},{atom,"d"}]}]]), 
+%% %desugar(p("(a : c d : e .f)")).
+%% ?_assert(desugar(p("(a : c d : e .f)")) ==
+%%      [{atom,"f"},
+%%       [{atom,"a"},
+%%        {block,[{atom,"c"},{atom,"d"}]},
+%%        {block,[{atom,"e"}]}]]), 
 
 
-%desugar(p("(a : c d : e .f)")).
-?_assert(desugar(p("(a : c d : e .f)")) ==
-     [{atom,"f"},
-      [{atom,"a"},
-       {block,[{atom,"c"},{atom,"d"}]},
-       {block,[{atom,"e"}]}]]), 
+%% %desugar(p("(a : c d : e .f :g)")).
+%% ?_assert(desugar(p("(a : c d : e .f :g)")) ==
+%%      [{atom,"f"},
+%%       {block,[{atom,"g"}]},
+%%       [{atom,"a"},
+%%        {block,[{atom,"c"},{atom,"d"}]},
+%%        {block,[{atom,"e"}]}]]),
 
 
-%desugar(p("(a : c d : e .f :g)")).
-?_assert(desugar(p("(a : c d : e .f :g)")) ==
-     [{atom,"f"},
-      {block,[{atom,"g"}]},
-      [{atom,"a"},
-       {block,[{atom,"c"},{atom,"d"}]},
-       {block,[{atom,"e"}]}]]),
+%% %%desugar(p("(~~)")).
+%% ?_assert(desugar(p("(~~)")) ==
+%%      [[]]),
+
+%% %%desugar(p("(a ~ b ~)")).
+%% ?_assert(desugar(p("(a ~ b ~)")) ==
+%%      [{atom,"b"},[{atom,"a"}]]),
+
+%% %%desugar(p("(a ~ b (c ~))")).
+%% ?_assert(desugar(p("(a ~ b (c ~))")) ==
+%%      [{atom,"b"},[{atom,"c"},[{atom,"a"}]]]),
+
+%% %%desugar(p("(:a b ~ c ~)")).
+%% ?_assert(desugar(p("(:a b ~ c ~)")) ==
+%%      [{atom,"c"},[{block,[{atom,"a"},{atom,"b"}]}]]),
+
+%% %%desugar(p("(a b ~ c : d ~)")).
+%% ?_assert(desugar(p("(a b ~ c : d ~)")) ==
+%%      [{atom,"c"},{block,[{atom,"d"},[{atom,"a"},{atom,"b"}]]}]),
+
+%% %%desugar(p("(:a b ~ c : d ~)")).
+%% ?_assert(desugar(p("(:a b ~ c : d ~)")) ==
+%%      [{atom,"c"},
+%%       {block,[{atom,"d"},[{block,[{atom,"a"},{atom,"b"}]}]]}]),
+
+%% %%desugar(p("(a b ~ c : d ~ : e)")).
+%% ?_assert(desugar(p("(a b ~ c : d ~ : e)")) ==
+%%      [{atom,"c"},
+%%       {block,[{atom,"d"},[{atom,"a"},{atom,"b"}]]},
+%%       {block,[{atom,"e"}]}]),
+
+%% %%desugar(p("(a b ~ c . d ~)")).
+%% ?_assert(desugar(p("(a b ~ c . d ~)")) ==
+%%      [{atom,"d"},[{atom,"a"},{atom,"b"}],[{atom,"c"}]]),
 
 
-%%desugar(p("(~~)")).
-?_assert(desugar(p("(~~)")) ==
-     [[]]),
-
-%%desugar(p("(a ~ b ~)")).
-?_assert(desugar(p("(a ~ b ~)")) ==
-     [{atom,"b"},[{atom,"a"}]]),
-
-%%desugar(p("(a ~ b (c ~))")).
-?_assert(desugar(p("(a ~ b (c ~))")) ==
-     [{atom,"b"},[{atom,"c"},[{atom,"a"}]]]),
-
-%%desugar(p("(:a b ~ c ~)")).
-?_assert(desugar(p("(:a b ~ c ~)")) ==
-     [{atom,"c"},[{block,[{atom,"a"},{atom,"b"}]}]]),
-
-%%desugar(p("(a b ~ c : d ~)")).
-?_assert(desugar(p("(a b ~ c : d ~)")) ==
-     [{atom,"c"},{block,[{atom,"d"},[{atom,"a"},{atom,"b"}]]}]),
-
-%%desugar(p("(:a b ~ c : d ~)")).
-?_assert(desugar(p("(:a b ~ c : d ~)")) ==
-     [{atom,"c"},
-      {block,[{atom,"d"},[{block,[{atom,"a"},{atom,"b"}]}]]}]),
-
-%%desugar(p("(a b ~ c : d ~ : e)")).
-?_assert(desugar(p("(a b ~ c : d ~ : e)")) ==
-     [{atom,"c"},
-      {block,[{atom,"d"},[{atom,"a"},{atom,"b"}]]},
-      {block,[{atom,"e"}]}]),
-
-%%desugar(p("(a b ~ c . d ~)")).
-?_assert(desugar(p("(a b ~ c . d ~)")) ==
-     [{atom,"d"},[{atom,"a"},{atom,"b"}],[{atom,"c"}]]),
+%% %% (~.~) => reg=[],(. ~) => (() ~) => (() ())
+%% %%desugar(p("(~.~)")).
+%% ?_assert(desugar(p("(~.~)")) ==
+%%      [[],[]])
 
 
-%% (~.~) => reg=[],(. ~) => (() ~) => (() ())
-%%desugar(p("(~.~)")).
-?_assert(desugar(p("(~.~)")) ==
-     [[],[]])
-
-
-    ].
+%%     ].
 

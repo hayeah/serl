@@ -2,17 +2,17 @@
 -include("ast.hrl").
 -include("state.hrl").
 
--export([eval/1,eval/3,
+-export([
 	 read1/1,read1/2,
-	 transform/1, transform_each/1,
+	 eval/2,eval/3,
+	 expand/2,
+	 transform/2, transform_each/2,
 	 %compile1/1,
-	 module_meta_info/2,
-	 lookup_namespace/2,
 	 curmod/0,
 	 lineno/0,
 	 warn/1,warn/2,error/1,error/2
 	 ]).
--import(lists,[keysearch/3]).
+-import(lists,[map/2,keysearch/3]).
 
 
 %% global process vars
@@ -65,144 +65,57 @@ error(Message,Args) ->
     throw({serl_error,Message}).
 
 
-assoc(AList,Key) when is_atom(Key) ->
-    assoc(AList,[Key]);
-assoc(Val,[]) ->
-    {value,Val};
-assoc(AList,[Key|Keys]) ->
-    case keysearch(Key,1,AList) of
-	{value,{_Key,Val}} -> assoc(Val,Keys);
-	_ -> false
-    end.
-    
-module_meta_info(Mod,Fs) when is_list(Fs) ->
-    case meta_module_of(Mod) of
-	{ok,MetaMod} -> module_meta_info_(MetaMod,Fs);
-	_ -> false
-    end;
-module_meta_info(Mod,F) when is_atom(F) ->
-    module_meta_info(Mod,[F]).
-    
-module_meta_info_(MetaMod,Fs) ->
-    assoc(MetaMod:module_info(attributes),Fs). 
-    
-meta_module_of(Mod) when is_atom(Mod) ->
-    MetaMod=list_to_atom(atom_to_list(Mod)++"__meta"),
-    case code:which(MetaMod) of
-	not_existing -> false;
-	_ -> {ok,MetaMod}
-    end.
-
-
-lookup_namespace(NSName,Key) ->
-    case Key of
-	?ast_atom3(_L,M,A) ->
-	    CurMod=curmod(),
-	    if M==CurMod ->
-		    %% local
-		    lookup_namespace_local(NSName,A);
-	       true ->
-		    %% module hygiene sees that the ast_atom is from
-		    %% another module, so it is implicitly a remote lookup.
-		    lookup_namespace_remote(NSName,M,A)
-	    end;
-	?ast_brace([?ast_atom(M),?ast_atom(A)]) ->
-	    lookup_namespace_remote(NSName,M,A);
-	_  when is_atom(Key) -> lookup_namespace_local(NSName,Key)
-    end.
-
-lookup_namespace_local(NSName,Key) when is_atom(Key) ->
-    %% lookup the current dynamic module namespace.
-    case assoc(get_state(namespaces),NSName) of
-	{value,NS} ->
-	    case dict:find(Key,NS) of
-		{ok,V} -> {value,V}; 
-		_ -> false
-	    end;
-	_ -> false
-    end.
-
-lookup_namespace_remote(NSName,Mod,Key) ->
-    %% lookup the static information from a remote/external module.
-    module_meta_info(Mod,[serl_namespaces,NSName,Key]).
-
-
-merge_namespace(NSName,Defs) ->
-    NSs=get_state(namespaces),
-    NewNS=dict:from_list(Defs),
-    MergedNSs=case lists:keysearch(NSName,1,NSs) of
-	{value,NS} ->
-	    MergedNS=dict:merge(fun (_K,V1,V2) ->
-			  case get_state(namespace_safety) of
-			      0 -> V2;
-			      1 -> warn("Shadowed definition: \n\t~p\n\t ~p\n",[V1,V2]), V2;
-			      2 -> error("Shadowed definition: \n\t~p\n\t ~p\n",[V1,V2])
-			  end
-		  end,
-		  NS,
-		  NewNS),
-	    lists:keyreplace(NSName,1,NSs,{NSName,MergedNS});
-	_ -> [{NSName,dict:from_list(Defs)}|NSs]
-    end,
-    set_state(namespaces,MergedNSs).
-
 read1(In) ->
     reader:exp(#reader_S{input=In,curmod=serl}).
 
 read1(In,Mod) ->
     reader:exp(#reader_S{input=In,curmod=Mod}).
 
+expand(Ast,TopLevelMod) ->
+    {_NewEnv,ErlAst}=transform(Ast,env:new(TopLevelMod)),
+    ErlAst. 
 
-
-eval(In) ->
-    eval(In,#scompile_S{},erl_eval:new_bindings()).
-eval(In,S,Bindings) ->
-    init_state(S),
-    Ast=read1(In,curmod()),
-    ErlAst=transform(Ast),
+eval(In,TopLevelMod) ->
+    eval(In,TopLevelMod,erl_eval:new_bindings()).
+eval(In,TopLevelMod,Bindings) ->
+    eval(In,TopLevelMod,#scompile_S{},Bindings).
+eval(In,TopLevelMod,S,Bindings) ->
+    set_state(S),
+    Ast=read1(In,TopLevelMod),
+    {NewEnv,ErlAst}=transform(Ast,env:new(TopLevelMod)),
     erl_eval:expr(ErlAst,Bindings,
-		  {value, fun local_funcall_handler/2},
+		  {value, fun (Name,Arg) ->
+				  local_funcall_handler(Name,Arg,NewEnv)
+			  end},
 		  {value, fun remote_funcall_handler/2}). 
 
-local_funcall_handler(Name,Args) ->
-    case lookup_namespace_local(functions,Name) of
+local_funcall_handler(Name,Args,Env) ->
+    case env:lookup(functions,Name,Env) of
 	{value,{Mod,F}} -> apply(Mod,F,Args);
 	{value,F} -> apply(F,Args);
+	%% TODO should throw undef exception.
 	_ -> error("undefined function: ~p\n",[Name])
     end.
 
 remote_funcall_handler(F,Args) ->
     F(Args).
 
-%% init the transformer state
-init_state(S) ->
-    %%init namespaces from top-level module.
-    set_state(S),
-    case module_meta_info(curmod(),serl_namespaces) of
-	{value,NSs} -> 
-	    lists:foreach(fun ({NSName,Defs}) ->
-				  merge_namespace(NSName,Defs)
-			  end, 
-			  NSs);
-	_ -> nil
-    end
-    %%io:format("Initialized State:\n~p\n",[get_state()])
-    .
-    
 
 %% compile(Exp) ->
 %%     foo.
 %%     %%transform().
 
-transform(Exp) ->
+transform(Exp,Env) ->
     %DExp=desugar:renest(Exp),
     DExp=Exp,
     case DExp of 
 	?ast_paren([Car|Body]) -> 
-	    case lookup_expander(Car) of
-		{special,F} -> F(Body);
-		{macro,F} -> transform(F(Body)); 
-		_ -> case lookup_expander(?cast_atom('call')) of
+	    case lookup_expander(Car,Env) of
+		%% special should get passed the environments. This makes scoping much easier.
+		{special,F} -> F(Body,Env);
+		%% maybe the transformer should be agnostic about every other values...
+		{macro,F} -> transform(F(Body),Env); 
+		_ -> case lookup_expander(?cast_atom('call'),Env) of
 			 %% this is probably correct. A function call should follow the convention of the active module.
 			 %% it could be a special form or a macro.
 			 %% %% TODO Hmmmm... should I inspect the function header so I know how 'call' should actually be used?
@@ -213,24 +126,51 @@ transform(Exp) ->
 	    end;
 	_ when is_tuple(DExp) ->
 	    [AstType,L,Mod|Body]=tuple_to_list(DExp),
-	    transform(?cast_paren([?ast_atom3(L,Mod,AstType)|Body])) 
+	    transform(?cast_paren([?ast_atom3(L,Mod,AstType)|Body]),Env) 
     end.
 
-transform_each(Es) ->
-    lists:map(fun transform/1,Es).
+%% doesn't really conform to "eval in some order"
+%% for a series of expressions, transform_each extends environment from left to right.
+%%%% this doesn't catch error like:  X=1+X.
+%%%% but the erlang compiler would catch it, so let's not worry about it.
+transform_each(Es,Env) ->
+    transform_each(Es,Env,[]).
+transform_each([],Env,Acc) ->
+    {Env,lists:reverse(Acc)};
+transform_each([E|Es],Env,Acc) ->
+    {Env2,R}=transform(E,Env),
+    transform_each(Es,Env2,[R|Acc]).
 
-lookup_expander(Car) ->
+lookup_expander(Car,Env) ->
     %% macros shadow special forms
-    case lookup_macro(Car) of
-	{value,F} -> {macro,F};
-	_ -> case lookup_special(Car) of
-		 {value,F} -> {special,F}; 
+    case lookup_macro(Car,Env) of
+	{ok,F} -> {macro,F};
+	_ -> case lookup_special(Car,Env) of
+		 {ok,F} -> {special,F}; 
 		 _ -> false
 	     end
     end.
 
-lookup_special(Car) ->
-    lookup_namespace(specials,Car).
+lookup_special(Car,Env) ->
+    lookup(specials,Car,Env).
 
-lookup_macro(Car) ->
-    lookup_namespace(macros,Car).
+lookup_macro(Car,Env) ->
+    lookup(macros,Car,Env).
+
+lookup(NSType,Key,Env) ->
+    case Key of
+	?ast_atom3(_L,M,A) ->
+	    CurMod=curmod(),
+	    if M==CurMod ->
+		    %% local
+		    env:lookup(NSType,A,Env);
+	       true ->
+		    %% module hygiene sees that the ast_atom is from
+		    %% another module, so it is implicitly a remote lookup.
+		    %% TODO should cache remote environment.
+		    env:lookup(NSType,A,env:new(M))
+	    end;
+	?ast_brace([?ast_atom(M),?ast_atom(A)]) ->
+	    env:lookup(NSType,A,env:new(M));
+	_  when is_atom(Key) -> env:lookup(NSType,Key,Env)
+    end. 

@@ -220,7 +220,7 @@ a_reader_macro() ->
     end.
 
 lookup_reader_macro(Name) ->
-    scompile:lookup_namespace(reader_macros,Name).
+    scompile:lookup_namespace(rmacros,Name).
 
 reader_macro_args(Acc) ->
     skip_while(?spacen),

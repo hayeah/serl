@@ -1,12 +1,21 @@
 -module(serl__meta).
-
--serl(true).
-
 -define(MOD,serl).
 
--serl_namespaces(
+-serl_exports(
+   [{specials,all},
+    {macros,all},
+    {rmacros,all},
+    {functions,all}
+   ]).
+
+
+
+%% these are the definitions of the module.
+%% normally they contain all the definitions, but sensitive internal definitions may be omitted.
+%% even though they appear in this list, they can't be used unless exported.
+-serl_definitions(
    [{specials,
-     [%% ast literals
+     [%% ast specials
       {'__float',{?MOD,'__mac_float'}}, 
       {'__integer',{?MOD,'__mac_integer'}}, 
       {'__string',{?MOD,'__mac_string'}}, 
@@ -73,7 +82,7 @@
      
     ]},
     {macros,[]},
-    {reader_macros,
+    {rmacros,
      [
       {'lit',{?MOD,'__rm_lit'}}
      ]},
