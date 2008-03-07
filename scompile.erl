@@ -71,9 +71,9 @@ read1(In) ->
 read1(In,Mod) ->
     reader:exp(#reader_S{input=In,curmod=Mod}).
 
-expand(Ast,TopLevelMod) ->
-    {_NewEnv,ErlAst}=transform(Ast,env:new(TopLevelMod)),
-    ErlAst. 
+expand(In,TopLevelMod) ->
+    Ast=read1(In),
+    transform(Ast,env:new(TopLevelMod)). 
 
 eval(In,TopLevelMod) ->
     eval(In,TopLevelMod,erl_eval:new_bindings()).
@@ -152,25 +152,25 @@ lookup_expander(Car,Env) ->
     end.
 
 lookup_special(Car,Env) ->
-    lookup(specials,Car,Env).
+    lookup(Env,specials,Car).
 
 lookup_macro(Car,Env) ->
-    lookup(macros,Car,Env).
+    lookup(Env,macros,Car).
 
-lookup(NSType,Key,Env) ->
+lookup(Env,NSType,Key) ->
     case Key of
 	?ast_atom3(_L,M,A) ->
 	    CurMod=curmod(),
 	    if M==CurMod ->
 		    %% local
-		    env:lookup(NSType,A,Env);
+		    env:lookup(Env,NSType,A);
 	       true ->
 		    %% module hygiene sees that the ast_atom is from
 		    %% another module, so it is implicitly a remote lookup.
 		    %% TODO should cache remote environment.
-		    env:lookup(NSType,A,env:new(M))
+		    env:lookup(env:new(M),NSType,A)
 	    end;
 	?ast_brace([?ast_atom(M),?ast_atom(A)]) ->
-	    env:lookup(NSType,A,env:new(M));
-	_  when is_atom(Key) -> env:lookup(NSType,Key,Env)
+	    env:lookup(env:new(M),NSType,A);
+	_  when is_atom(Key) -> env:lookup(Env,NSType,Key)
     end. 
