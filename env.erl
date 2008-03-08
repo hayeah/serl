@@ -1,9 +1,12 @@
 -module(env).
+-include("ast.hrl").
+
 -import(lists,[keysearch/3,
 	       map/2
 	      ]).
 -export([new/1,
-	 lookup/3,
+	 local_lookup/3,
+	 remote_lookup/3,
 	 flatten/2,
 	 exports_of/1,exports_of/2,exports_of/3,
 	 imports_of/1,
@@ -11,7 +14,7 @@
 	 toplevel_of/1,
 	 
 	 import/4,
-	 shadow/4,
+	 shadow/3,
 	 extend/3, 
 	 assoc/2,assoc_put/3,
 	 module_meta_info/2
@@ -21,7 +24,8 @@ error(Msg) ->
     error(Msg,[]).
 
 error(Msg,Args) ->
-    erlang:error({serl_env_error,lists:flatten(io_lib:format(Msg,Args))}).
+    io:format(Msg,Args),
+    erlang:error(serl_env_error).
 
 %% creates a new environment.
 %% The argument has to be a serl module.
@@ -61,33 +65,66 @@ flatten(Env,NSType) ->
     dict:to_list(Bs).
 
 
-lookup(Env,NSType,Key) -> 
-    case lookup_lexical(Env,NSType,Key) of
-	false -> case lookup_definitions(Env,NSType,Key) of 
-		     false -> lookup_imports(Env,NSType,Key); 
-		     Val -> Val
-		 end;
+%% -for a symbol a$home
+%% -look up the lexical scope for {a home} or {a true}
+%% -if not, look up the top-level of home for a
+
+local_lookup(Env,NSType,{M,A}) ->
+    case lookup_lexical(Env,NSType,{M,A}) of
+	false -> lookup_toplevel(Env,NSType,A);
 	Val -> Val
     end.
+
+remote_lookup(Env,NSType,{M,A}) ->
+    case lookup_lexical(Env,NSType,{M,A}) of
+	%% TODO cache toplevels
+	false -> lookup_toplevel(env:new(M),NSType,A);
+	Val -> Val
+    end.
+
+lookup_toplevel(Env,NSType,A) ->
+    case lookup_definitions(Env,NSType,A) of 
+	false -> lookup_imports(Env,NSType,A); 
+	Val -> Val
+    end.
+
+%% lookup(Env,NSType,Key) -> 
+%%     case lookup_lexical(Env,NSType,Key) of
+%% 	false -> case lookup_definitions(Env,NSType,Key) of 
+%% 		     false -> lookup_imports(Env,NSType,Key); 
+%% 		     Val -> Val
+%% 		 end;
+%% 	Val -> Val
+%%     end.
 				   
 								 
 lookup_lexical(Env,NSType,Key) ->
     %% fugly!
-    case assoc(Env,[lexical,NSType]) of
-	{ok,Scopes} ->
-	    case lookup_scopes(Key,Scopes) of
-		false -> assoc(Env,[lexical_base,NSType,Key]);
-		Val -> Val
-	    end;
-	false -> assoc(Env,[lexical_base,NSType,Key])
-    end.
+    LexVal=
+	case assoc(Env,[lexical,NSType]) of
+	    {ok,Scopes} -> lookup_scopes(Key,Scopes);
+	    _ -> false
+	end,
+    case LexVal of
+	false -> case assoc(Env,[lexical_base,NSType]) of
+		     {ok,Scope} -> lookup_scope(Key,Scope); 
+		     _ -> false
+		 end;
+	_ -> LexVal
+    end. 
 
 lookup_scopes(_Key,[]) ->
     false;
 lookup_scopes(Key,[Scope|Ss]) ->
-    case assoc(Scope,Key) of
-	{ok,Val} -> Val; 
-	false -> lookup_scopes(Key,Ss)
+    case lookup_scope(Key,Scope) of
+	false -> lookup_scopes(Key,Ss);
+	Val -> Val 
+    end.
+
+lookup_scope(_,[]) -> false;
+lookup_scope({Mod,Key}=K,[{{BMod,BKey},Val}|Bs]) ->
+    if ((Mod==true) or (Mod==BMod)) and (Key==BKey) -> {ok,Val};
+       true -> lookup_scope(K,Bs)
     end.
     
 
@@ -106,29 +143,18 @@ import(Env,NSType,Mod,Keys) ->
 	_ -> Imports=[]
     end,
     assoc_put(Env,[imports,Mod,NSType],ImportDefs++Imports). 
-
+    
 %% establishes a new lexical scope.
 %% map a list of symbols to gensyms
-shadow(Env,NSType,Prefix,Names) ->
-    ExistingAliases=[Alias || {_Name,Alias} <- flatten(Env,NSType)],
-    Gensyms=
-	erl_syntax_lib:new_variable_names(
-	  length(Names),
-	  fun (I) -> list_to_atom(Prefix++io_lib:print(I)) end,
-	  sets:from_list(ExistingAliases)),
-    Bindings=
-	lists:zipwith(
-	 fun (Name,Alias) -> {Name,Alias} end,
-	 Names,
-	 Gensyms),
-    assoc_cons(Env,[lexical,NSType],Bindings). 
+shadow(Env,NSType,Bindings) -> 
+    assoc_cons(Env,[lexical,NSType],Bindings).
 
 %% assign once bindings. Error if already existing.
 %% probably only used for variables. I can't imagine using it for any other purpose.
 extend(Env,NSType,Bs) ->
-    NewEnv=assoc_append(Env,[lexical_Base,NSType],Bs),
+    NewEnv=assoc_append(Env,[lexical_base,NSType],Bs),
     %% check for duplicate element.
-    {ok,NewBs}=assoc(NewEnv,[lexical_Base,NSType]),
+    {ok,NewBs}=assoc(NewEnv,[lexical_base,NSType]),
     T=(length(NewBs)==length(ordsets:from_list(NewBs))), %ordsets are implemented as alists.
     if T -> NewEnv;
        true -> error("Conflicting bindings. Extending with \n~p\n\tto:\n~p\n",[NewBs,Env])
@@ -260,3 +286,4 @@ meta_module_of(Mod) when is_atom(Mod) ->
 	not_existing -> false;
 	_ -> {ok,MetaMod}
     end.
+

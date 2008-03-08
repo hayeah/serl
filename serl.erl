@@ -71,7 +71,7 @@
 
 %% %%  If L is an integer or character literal, then Rep(L) = {integer,LINE,L}.
 
-'__sp_integer'([I],Env) ->
+'__sp_integer'(?ast_integer(I),Env) ->
     {Env,?erl_integer(lineno(),I)}.
 
 %% %%  If L is a float literal, then Rep(L) = {float,LINE,L}. 
@@ -79,11 +79,11 @@
 %%     ?erl_float(L,F).
 
 %%  If L is a string literal consisting of the characters C_1, ..., C_k, then Rep(L) = {string,LINE,[C_1, ..., C_k]}.
-'__sp_string'([S],Env) ->
+'__sp_string'(?ast_string(S),Env) ->
     {Env,?erl_string(lineno(),S)}.
 
 %%  If L is an atom literal, then Rep(L) = {atom,LINE,L}. 
-'__sp_atom'([A],Env) ->
+'__sp_atom'(?ast_atom(A),Env) ->
     {Env,?erl_atom(lineno(),A)}.
 
 %% %% Note that negative integer and float literals do not occur as such; they are parsed as an application of the unary negation operator.
@@ -106,10 +106,10 @@
 %% %%  If P is a universal pattern _, then Rep(P) = {var,LINE,'_'}. 
 pattern(?ast_var('_'),Env) ->
     {Env,?erl_var(lineno(),'_')};
-pattern(?ast_var(A),Env) ->
-    case env:lookup(Env,vars,A) of
+pattern(?ast_var3(L,M,A),Env) ->
+    case scompile:lookup(Env,vars,{M,A}) of
 	%% this is the function scope binding occurence
-	false -> {env:extend(Env,vars,[{A,A}]),?erl_var(lineno(),A)};
+	false -> {env:extend(Env,vars,[{{M,A},A}]),?erl_var(L,A)};
 	%% this is the lexical scope
 	_ -> transform(?cast_var(A),Env)
     end;
@@ -129,11 +129,10 @@ pattern(P,Env) ->
 %%  If E is a variable V, then Rep(E) = {var,LINE,A}, where A is an atom with a printname consisting of the same characters as V.
 %%HY: It's silly to call variables variables when they don't vary... I call them bindings.
 
-'__sp_var'([Name],Env) ->
-    case env:lookup(Env,vars,Name) of
-	false -> error("Variable not declared: ~p",[Name]);
-	Alias -> io:format("lookup ~p in ~p\n",[Name,env:assoc(Env,[lexical,vars])]),
-		      {Env,?erl_var(lineno(),Alias)}
+'__sp_var'(?ast_var3(L,M,A),Env) ->
+    case scompile:lookup(Env,vars,{M,A}) of
+	{ok,Alias} -> {Env,?erl_var(lineno(),Alias)}; 
+	false -> error("~p:~p Variable not declared: ~p",[M,L,A])
     end.
 
 
@@ -166,6 +165,7 @@ pattern(P,Env) ->
     {Env2,REs}=transform_each(Es,Env),
     {Env2,{block,lineno(),REs}}.
 
+
 '__sp_let'(Es,Env) ->
     {Bindings,[?ast_block(Body)]}=lists:splitwith(fun (E) ->
 					    case E of
@@ -174,21 +174,32 @@ pattern(P,Env) ->
 					    end
 				    end,
 				    Es), 
-    {NewBindings,Assignments}=let_bindings(Bindings,[],[]),
+    {NewNames,Assignments}=let_bindings(Bindings,[],[]),
+    ExistingAliases=[Alias || {_Key,Alias} <- env:flatten(Env,vars)],
+    Gensyms=
+	erl_syntax_lib:new_variable_names(
+	  length(NewNames),
+	  fun (I) -> list_to_atom("V"++io_lib:print(I)) end,
+	  sets:from_list(ExistingAliases)),
+    NewBindings=
+	lists:zipwith(
+	 fun (?ast_var3(_,M,A),Alias) -> {{M,A},Alias} end,
+	 NewNames,
+	 Gensyms),
     transform(?cast_paren([?cast_atom('do')|Assignments++Body]),
-	      env:shadow(Env,vars,"V",NewBindings)).
+	      env:shadow(Env,vars,NewBindings)).
 
 let_bindings([],VarAcc,AssAcc) ->
     {lists:reverse(VarAcc),lists:reverse(AssAcc)};
 let_bindings([B|Bindings],VarAcc,AssAcc) ->
     case B of
-	?ast_paren([?ast_var(Name)=Var,Val]) ->
+	?ast_paren([?ast_var(_)=Var,Val]) ->
 	    let_bindings(Bindings,
-			 [Name|VarAcc],
+			 [Var|VarAcc],
 			 [?cast_paren([?cast_atom('='),Var,Val])|AssAcc]);
-	?ast_var(Name) ->
+	?ast_var(_)=Var ->
 	    let_bindings(Bindings,
-			 [Name|VarAcc],
+			 [Var|VarAcc],
 			 AssAcc)
     end.
 

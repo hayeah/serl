@@ -10,6 +10,7 @@
 	 %compile1/1,
 	 curmod/0,
 	 lineno/0,
+	 lookup/3,
 	 warn/1,warn/2,error/1,error/2
 	 ]).
 -import(lists,[map/2,keysearch/3]).
@@ -109,25 +110,25 @@ transform(Exp,Env) ->
     %DExp=desugar:renest(Exp),
     DExp=Exp,
     case DExp of 
-	?ast_paren([Car|Body]) -> 
-	    case lookup_expander(Car,Env) of
-		%% special should get passed the environments. This makes scoping much easier.
-		{special,F} -> F(Body,Env);
-		%% maybe the transformer should be agnostic about every other values...
-		{macro,F} -> transform(F(Body),Env); 
-		_ -> case lookup_expander(?cast_atom('call'),Env) of
-			 %% this is probably correct. A function call should follow the convention of the active module.
-			 %% it could be a special form or a macro.
-			 %% %% TODO Hmmmm... should I inspect the function header so I know how 'call' should actually be used?
-			 {_,F} ->
-			     F([Car|Body]);
-			 _ -> error("cannot find an expander for functional call. ")
-		     end 
-	    end;
-	_ when is_tuple(DExp) ->
-	    [AstType,L,Mod|Body]=tuple_to_list(DExp),
-	    transform(?cast_paren([?ast_atom3(L,Mod,AstType)|Body]),Env) 
+	?ast_paren([Car|Body]) ->
+	    do_transform(Car,Body,Env) ;
+	_ when is_tuple(DExp) -> % an ast element
+	    do_transform(element(1,DExp),DExp,Env) 
     end.
+
+do_transform(Car,Body,Env) ->
+    case lookup_expander(Env,Car) of
+	{special,F} -> F(Body,Env);
+	{macro,F} -> transform(F(Body),Env);
+	_ -> case lookup_expander(Env,?cast_atom('call')) of
+		 %% this is probably correct. A function call should follow the convention of the active module.
+		 %% it could be a special form or a macro.
+		 %% %% TODO Hmmmm... should I inspect the function header so I know how 'call' should actually be used?
+		 {special,F} -> F([Car|Body]);
+		 {macro,F} -> transform(F(Body),Env);
+		 _ -> error("cannot find an expander for functional call. ")
+	     end
+    end. 
 
 %% doesn't really conform to "eval in some order"
 %% for a series of expressions, transform_each extends environment from left to right.
@@ -141,36 +142,48 @@ transform_each([E|Es],Env,Acc) ->
     {Env2,R}=transform(E,Env),
     transform_each(Es,Env2,[R|Acc]).
 
-lookup_expander(Car,Env) ->
+lookup_expander(Env,Car) ->
     %% macros shadow special forms
-    case lookup_macro(Car,Env) of
+    Key=case Car of
+	?ast_atom3(_L,M,A) ->
+	    {M,A};
+	?ast_brace([?ast_atom(M),?ast_atom(A)]) ->
+	    {M,A};
+	A when is_atom(A) ->
+	    {curmod(),A}
+    end, 
+    case lookup_macro(Env,Key) of
 	{ok,F} -> {macro,F};
-	_ -> case lookup_special(Car,Env) of
+	_ -> case lookup_special(Env,Key) of
 		 {ok,F} -> {special,F}; 
 		 _ -> false
 	     end
     end.
 
-lookup_special(Car,Env) ->
-    lookup(Env,specials,Car).
+lookup_special(Env,Key) ->
+    lookup(Env,specials,Key).
 
-lookup_macro(Car,Env) ->
-    lookup(Env,macros,Car).
+lookup_macro(Env,Key) ->
+    lookup(Env,macros,Key).
 
-lookup(Env,NSType,Key) ->
-    case Key of
-	?ast_atom3(_L,M,A) ->
-	    CurMod=curmod(),
-	    if M==CurMod ->
-		    %% local
-		    env:lookup(Env,NSType,A);
-	       true ->
-		    %% module hygiene sees that the ast_atom is from
-		    %% another module, so it is implicitly a remote lookup.
-		    %% TODO should cache remote environment.
-		    env:lookup(env:new(M),NSType,A)
-	    end;
-	?ast_brace([?ast_atom(M),?ast_atom(A)]) ->
-	    env:lookup(env:new(M),NSType,A);
-	_  when is_atom(Key) -> env:lookup(Env,NSType,Key)
-    end. 
+lookup(Env,NSType,{M,_A}=Key) ->
+    CurMod=curmod(),
+    if M==CurMod -> env:local_lookup(Env,NSType,Key);
+       true -> env:remote_lookup(Env,NSType,Key)
+    end.
+
+
+%%     case Key of
+%% 	_ when ?ast_atom3(_L,M,A)=Key;
+%% 	       ?ast_var3(_L,M,A)=Key ->
+%% 	    CurMod=curmod(),
+%% 	    case M of 
+%% 		CurMod -> env:local_lookup(Env,NSType,{M,A});
+%% 		true -> env:local_lookup(Env,NSType,{M,A});
+%% 		_ -> env:remote_lookup(Env,NSType,{M,A})
+%% 	    end; 
+%% 	?ast_brace([?ast_atom(M),?ast_atom(A)]) ->
+%% 	    env:remote_lookup(Env,NSType,{M,A});
+%% 	A when is_atom(A) -> env:local_lookup(Env,NSType,{CurMod,A})
+%%     end.
+
