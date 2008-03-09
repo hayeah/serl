@@ -4,33 +4,37 @@
 -import(lists,[keysearch/3,
 	       map/2
 	      ]).
--export([new/1,
+
+-import(scompile,[warn/1,warn/2,error/1,error/2]).
+
+-export([
+	 new/0,new/1,
 	 local_lookup/3,
 	 remote_lookup/3,
+	 toplevel_lookup/3,
 	 flatten/2,
 	 exports_of/1,exports_of/2,exports_of/3,
 	 imports_of/1,
 	 definitions_of/1,
 	 toplevel_of/1,
 	 
-	 import/4,
+	 import/2,import/4,
 	 shadow/3,
 	 extend/3, 
-	 assoc/2,assoc_put/3,
+	 assoc/2,assoc_put/3,assoc_cons/3,assoc_append/3,
 	 module_meta_info/2
 	]).
 
-error(Msg) ->
-    error(Msg,[]).
 
-error(Msg,Args) ->
-    io:format(Msg,Args),
-    erlang:error(serl_env_error).
+%% empty environment
+new() ->
+    [].
 
-%% creates a new environment.
-%% The argument has to be a serl module.
-new(TopLevelMod) ->
-    [{lexical,[]},{top_level_mod,TopLevelMod}|toplevel_of(TopLevelMod)]. 
+%% an environment with initial import.
+new(ImportMod) ->
+    Env=import(new(),ImportMod),
+    assoc_put(Env,[lexical],[]).
+
 
 %% collapse namespace
 flatten(Env,NSType) ->
@@ -71,18 +75,18 @@ flatten(Env,NSType) ->
 
 local_lookup(Env,NSType,{M,A}) ->
     case lookup_lexical(Env,NSType,{M,A}) of
-	false -> lookup_toplevel(Env,NSType,A);
+	false -> toplevel_lookup(Env,NSType,A);
 	Val -> Val
     end.
 
 remote_lookup(Env,NSType,{M,A}) ->
     case lookup_lexical(Env,NSType,{M,A}) of
 	%% TODO cache toplevels
-	false -> lookup_toplevel(env:new(M),NSType,A);
+	false -> toplevel_lookup(env:new(M),NSType,A);
 	Val -> Val
     end.
 
-lookup_toplevel(Env,NSType,A) ->
+toplevel_lookup(Env,NSType,A) ->
     case lookup_definitions(Env,NSType,A) of 
 	false -> lookup_imports(Env,NSType,A); 
 	Val -> Val
@@ -132,12 +136,30 @@ lookup_definitions(Env,NSType,Key) ->
     assoc(Env,[definitions,NSType,Key]).
 
 lookup_imports(Env,NSType,Key) ->
-    assoc(Env,[imports,NSType,Key]).
+    case assoc(Env,[imports]) of
+	{ok,Imports} -> lookup_imports_(Imports,NSType,Key);
+	_ -> false
+    end.
 
+%% it's annoying. A lot of these recursion helpers would be better
+%% expressed as lists:foreach and a return
+lookup_imports_([],_,_) -> false;
+lookup_imports_([{_Mod,NSs}|Imports],NSType,Key) ->
+    case assoc(NSs,[NSType,Key]) of
+	false -> lookup_imports_(Imports,NSType,Key);
+	V -> V
+    end.
+
+
+import(Env,Mod) ->
+    case exports_of(Mod) of
+	{ok,NS} -> assoc_cons(Env,[imports],{Mod,NS});
+	_ -> Env
+    end.
 
 %% doesn't check for shadowing.
-import(Env,NSType,Mod,Keys) ->
-    {NSType,ImportDefs}=exports_of(Mod,NSType,Keys),
+import(Env,Mod,NSType,Keys) ->
+    {ok,[{NSType,ImportDefs}]}=exports_of(Mod,NSType,Keys),
     case assoc(Env,[imports,Mod,NSType]) of
 	{ok,Val} -> Imports=Val;
 	_ -> Imports=[]
@@ -160,40 +182,88 @@ extend(Env,NSType,Bs) ->
        true -> error("Conflicting bindings. Extending with \n~p\n\tto:\n~p\n",[NewBs,Env])
     end.
 
-%% constructors:
 
 exports_of(Mod) ->
     case meta_module_of(Mod) of
 	%% treat as serl
 	{ok,MetaMod} ->
 	    {ok,Exports}=module_meta_info__(MetaMod,[serl_exports]),
-	    [exports_of__(Mod,MetaMod,NSType,Defs) || {NSType,Defs} <- Exports]
+	    {ok,[exports_of__(Mod,MetaMod,NSType,Defs) || {NSType,Defs} <- Exports]}
 	    ;
 	%% treat as compiled and loaded normal erlang modules
 	_ -> case code:which(Mod) of
 		 not_existing -> false;
-		 _ -> [{functions,Mod:module_info(exports)}]
+		 _ -> {ok,NS}=exports_of(Mod,functions,all),
+		      {ok,[NS]}
 	     end
     end.
+
 
 
 exports_of(Mod,NSType) ->
     case meta_module_of(Mod) of
 	{ok,MetaMod} ->
 	    case module_meta_info(Mod,[serl_exports,NSType]) of
-		{ok,Keys} -> exports_of__(Mod,MetaMod,NSType,Keys);
+		{ok,Keys} -> {ok,exports_of__(Mod,MetaMod,NSType,Keys)};
 		_ -> false
 	    end; 
-	_ -> false
+	_ -> case NSType of
+		 functions -> exports_of(Mod,functions,all); 
+		 _ -> false
+	     end
     end.
 
+%% ugh! This is so ugly.
 exports_of(Mod,NSType,Keys) ->
     case meta_module_of(Mod) of
 	{ok,MetaMod} ->
-	    exports_of__(Mod,MetaMod,NSType,Keys);
-	_ -> false
+	    {ok,exports_of__(Mod,MetaMod,NSType,Keys)};
+	_ -> %% import compatiblity with .erl modules. If compiled & available, check its module_info for exported functions.
+	    case code:ensure_loaded(Mod) of 
+		 {error,nofile} -> false; 
+		 _ -> FsDict=
+			  lists:foldl(fun ({F,Arity},D) ->
+					      orddict:append(F,Arity,D)
+				      end,
+				      orddict:new(),
+				      Mod:module_info(exports)),
+		      %% key is an atom, or a tuple of {atom,arity}
+		      %% if an atom, include all the arities.
+		      %% if a tuple, include only that arity.
+		      Fs=case Keys of
+			     all -> FsDict;
+			     _ -> lists:foldl(
+				    fun (Key,D) ->
+					    %% yuk! As though saying "yuk" absolves me of ugliness.
+					    case Key of
+						{Name,Arity} ->
+						    Arities=case orddict:find(Name,FsDict) of
+								{ok,V} -> V;
+								_ -> error("Undefined: ~p:~p/~p\n",[Mod,Name,Arity])
+							    end,
+						    T=lists:member(Arity,Arities),
+						    if T -> orddict:append(Name,Arity,D);
+						       true -> error("Undefined: ~p:~p/~p\n",[Mod,Name,Arity])
+						    end;
+						Name -> Arities=case orddict:find(Name,FsDict) of
+								    {ok,V} -> V;
+								    _ -> error("Undefined: ~p:~p\n",[Mod,Name])
+								end,
+							orddict:append_list(Name,Arities,D)
+					    end
+				    end,
+				    orddict:new(),
+				    Keys)
+			 end,
+		      Bs=[{F,[{Arity,{Mod,F}} || Arity <- Arities]}
+			  || {F,Arities} <- Fs],
+		      {ok,{functions,Bs}}
+		      
+	     end
     end.
-    
+
+%% TODO eleganify.
+%% TODO this should probably be named 'definitions_of'
 exports_of__(Mod,MetaMod,NSType,Keys) ->
     case module_meta_info__(MetaMod,[serl_definitions,NSType]) of
 	{ok,Bindings} ->
@@ -212,19 +282,21 @@ exports_of__(Mod,MetaMod,NSType,Keys) ->
 	__ -> error("No definitions for namespace ~p in module ~p",[NSType,Mod])
     end.
 
-
 imports_of(Mod) ->
     case module_meta_info(Mod,[serl_imports]) of
 	{ok,Imports} ->
-	    map(fun ({ImportMod,NSs}) -> 
+	    {ok,map(fun ({ImportMod,NSs}) -> 
 		 {ImportMod,[imports_from(ImportMod,NSType,Keys) || {NSType,Keys} <- NSs]}
 		end,
-		Imports);
-	_ -> []
+		Imports)};
+	_ -> false
     end.
 
 imports_from(Mod,NSType,Keys) ->
-    exports_of(Mod,NSType,Keys). 
+    case exports_of(Mod,NSType,Keys) of
+	{ok,Bs} -> Bs;
+	_ -> false
+    end.
 
 definitions_of(Mod) ->
     case module_meta_info(Mod,[serl_definitions]) of
@@ -233,7 +305,13 @@ definitions_of(Mod) ->
     end.
 
 toplevel_of(Mod) ->
-    [{definitions,definitions_of(Mod)},{imports,imports_of(Mod)}] .
+    Imports=
+	case imports_of(Mod) of
+	    {ok,V} -> V;
+	    _ -> []
+	end,
+    [{definitions,definitions_of(Mod)},
+     {imports,Imports}] .
 
 
 
@@ -268,6 +346,7 @@ assoc_append(AList,Keys,List) ->
 	    assoc_put(AList,Keys,List++OldList); 
 	false -> assoc_put(AList,Keys,List)
     end.
+    
 
 module_meta_info(Mod,Fs) when is_list(Fs) ->
     case meta_module_of(Mod) of
@@ -276,14 +355,14 @@ module_meta_info(Mod,Fs) when is_list(Fs) ->
     end;
 module_meta_info(Mod,F) when is_atom(F) ->
     module_meta_info(Mod,[F]).
-    
+
 module_meta_info__(MetaMod,Fs) ->
-    assoc(MetaMod:module_info(attributes),Fs). 
-    
+    assoc(MetaMod:module_info(attributes),Fs).
+
 meta_module_of(Mod) when is_atom(Mod) ->
     MetaMod=list_to_atom(atom_to_list(Mod)++"__meta"),
     case code:which(MetaMod) of
-	not_existing -> false;
+	non_existing -> false;
 	_ -> {ok,MetaMod}
     end.
 
