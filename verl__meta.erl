@@ -1,5 +1,5 @@
--module(serl__meta).
--define(MOD,serl).
+-module(verl__meta).
+-define(MOD,verl).
 
 -serl_exports(
    [{specials,all},
@@ -23,6 +23,7 @@
       {'__var',{?MOD,'__sp_var'}},
       {'__block',{?MOD,'__sp_block'}},
       {'__brace',{?MOD,'__sp_brace'}},
+      {'__eof',{?MOD,'__sp_eof'}},
       {'call',{?MOD,'__sp_call'}},
 
 	 
@@ -89,7 +90,8 @@
      ]},
     {functions,
      [
-      {'fmt',{io,format}}
+      {'fmt',[{name,{io,format}},
+	      {arity,[1,2]}]}
      ]}
    ]).
 

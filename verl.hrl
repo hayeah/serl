@@ -1,17 +1,17 @@
 
 -export([
 	 '__rm_lit'/2,
-
+	 '__sp_eof'/2,
 	 '__sp_block'/2,
 	 '__sp_brace'/2,
 	 
 	 % 4.1
-%%	 '__sp_module'/2,
+	 '__sp_module'/2,
 
-%% 	 '__sp_export'/2,
-%% 	 '__sp_import'/2,
+ 	 '__sp_export'/2,
+ 	 '__sp_import'/2,
 %% 	 '__sp_record'/2,
-%% 	 '__sp_def'/2,
+ 	 '__sp_def'/2,
 
 %% 	 % 4.2
  	 '__sp_integer'/2,
@@ -27,7 +27,6 @@
  	 '__sp_list'/2,
  	 '__sp_cons'/2,
 	 '__sp_do'/2,
-	 '__sp_let'/2,
 
 %% 	 '__sp_op'/2,
 
@@ -64,6 +63,7 @@
 
 %% 	 '__sp_case'/2,
 %% 	 '__sp_try'/2
+	 erl_parse_f/1,
 	 erl_parse_e/1
 	 
 	]). 

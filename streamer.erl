@@ -24,7 +24,7 @@
 -import(lists,[member/2]).
 
 
--define(line_count,'__stream_line_count').
+-define(line_count,{?MODULE,'lineno'}).
 
 error(Message) ->
     io:fwrite("Stream error, remaining:\n~p~n~n",[residue()]),

@@ -21,7 +21,8 @@
 	 import/2,import/4,
 	 shadow/3,
 	 extend/3, 
-	 assoc/2,assoc_put/3,assoc_cons/3,assoc_append/3,
+	 assoc/2,
+	 assoc_put/3,assoc_cons/3,assoc_append/3,
 	 module_meta_info/2
 	]).
 
@@ -154,17 +155,20 @@ lookup_imports_([{_Mod,NSs}|Imports],NSType,Key) ->
 import(Env,Mod) ->
     case exports_of(Mod) of
 	{ok,NS} -> assoc_cons(Env,[imports],{Mod,NS});
-	_ -> Env
+	_ -> throw(no_imports)
     end.
 
 %% doesn't check for shadowing.
 import(Env,Mod,NSType,Keys) ->
-    {ok,[{NSType,ImportDefs}]}=exports_of(Mod,NSType,Keys),
-    case assoc(Env,[imports,Mod,NSType]) of
-	{ok,Val} -> Imports=Val;
-	_ -> Imports=[]
-    end,
-    assoc_put(Env,[imports,Mod,NSType],ImportDefs++Imports). 
+    case exports_of(Mod,NSType,Keys) of
+	{ok,{NSType,ImportDefs}} ->
+	    %% case assoc(Env,[imports,Mod,NSType]) of
+%%  		{ok,Val} -> Imports=Val;
+%%  		_ -> Imports=[]
+%%  	    end,
+	    assoc_append(Env,[imports,Mod,NSType],ImportDefs);
+	_ -> throw(no_imports)
+    end. 
     
 %% establishes a new lexical scope.
 %% map a list of symbols to gensyms
@@ -192,7 +196,7 @@ exports_of(Mod) ->
 	    ;
 	%% treat as compiled and loaded normal erlang modules
 	_ -> case code:which(Mod) of
-		 not_existing -> false;
+		 non_existing -> false;
 		 _ -> {ok,NS}=exports_of(Mod,functions,all),
 		      {ok,[NS]}
 	     end
@@ -236,15 +240,15 @@ exports_of(Mod,NSType,Keys) ->
 				    fun (Key,D) ->
 					    %% yuk! As though saying "yuk" absolves me of ugliness.
 					    case Key of
-						{Name,Arity} ->
-						    Arities=case orddict:find(Name,FsDict) of
-								{ok,V} -> V;
-								_ -> error("Undefined: ~p:~p/~p\n",[Mod,Name,Arity])
-							    end,
-						    T=lists:member(Arity,Arities),
-						    if T -> orddict:append(Name,Arity,D);
-						       true -> error("Undefined: ~p:~p/~p\n",[Mod,Name,Arity])
-						    end;
+						{Name,Arities} ->
+						    map(fun (Arity) ->
+								case orddict:find(Name,FsDict) of
+								    {ok,V} -> V;
+								    _ -> error("Undefined: ~p:~p/~p\n",[Mod,Name,Arity])
+								end
+							end,
+							Arities),
+						    orddict:append_list(Name,Arities,D);
 						Name -> Arities=case orddict:find(Name,FsDict) of
 								    {ok,V} -> V;
 								    _ -> error("Undefined: ~p:~p\n",[Mod,Name])
@@ -327,13 +331,14 @@ assoc(AList,[Key|Keys]) ->
 	_ -> false
     end.
 
-assoc_put(AList,[Key],Val) ->
-    lists:keystore(Key,1,AList,{Key,Val});
+%% make sure that a new element is placed in front of the alist.
+assoc_put(_AList,[],Val) ->
+    Val;
 assoc_put(AList,[Key|Keys],Val) -> 
     case keysearch(Key,1,AList) of
 	{value,{_Key,AList2}} when is_list(AList2) ->
 	    lists:keystore(Key,1,AList,{Key,assoc_put(AList2,Keys,Val)});
-	_ -> lists:keystore(Key,1,AList,{Key,assoc_put([],Keys,Val)})
+	_ -> [{Key,assoc_put([],Keys,Val)}|AList] 
     end.
 
 

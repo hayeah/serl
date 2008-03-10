@@ -4,7 +4,7 @@
 -module(reader).
 
 -export([exp/1,
-	 exps/1
+	 exp/2
 	]).
 
 -include("ast.hrl").
@@ -40,40 +40,39 @@
 	 {$#,$\#},{$\\,$\\},{$\",$\"}]).
 
 
-%%%% TODO. Maybe do the reading in a separate process so it's the streamer state is encapsulated on this input.
-%% exps(In) ->
-%%     Pid=self(),
-%%     Resp=spawn_link(fun () -> streamer:init(In),
-%% 			      Pid ! {self(),all_exps()}
-%% 	       end),
-%%     receive {Resp,Exps} -> Exps. 
-
 %% TODO think of a better way for streamer to keep state.
--define(reader_state,'__reader_state').
+-define(state,{?MODULE,'state'}).
 
 get_state() ->
-    S=get(?reader_state),
-    S#reader_S{lineno=lineno(),input=S#reader_S.input}.
-set_state(S) when is_record(S,reader_S) ->
-    put(?reader_state,S),
-    lineno(S#reader_S.lineno),
-    streamer:set_port(S#reader_S.input). 
+    S=get(?state),
+    S#scompile_S{reader_lineno=lineno(),input=streamer:get_port()}.
+
+set_state(S) when is_record(S,scompile_S) ->
+    put(?state,S),
+    lineno(S#scompile_S.reader_lineno),
+    streamer:set_port(S#scompile_S.input). 
 
 curmod() ->
     S=get_state(),
-    S#reader_S.curmod.
+    S#scompile_S.curmod.
 
-exps(S) ->
-    set_state(S),
-    all_exps().
+-define(env,{?MODULE,'env'}).
+
+%% curenv() is used only for reader macro lookup.
+curenv() ->
+    get(?env). 
+curenv(Env) ->
+    put(?env,Env).    
+
+exp(In) -> 
+    exp(env:new(serl),#scompile_S{input=In}).
     
-exp(S) ->
+exp(Env,S) ->
     set_state(S),
-    R=an_exp(),
-    case peek() of
-	eof -> R;
-	_ -> error("Parse has leftover text:")
-    end. 
+    curenv(Env),
+    Ast=an_exp(),
+    S2=get_state(), %% sequentially!
+    {S2,curenv(),Ast}. 
 
 error(Message) ->
     error(Message,[]).
@@ -207,20 +206,20 @@ string_interpolate() ->
 
 a_reader_macro() ->
     read(),
-    Car=case peek() of
+    ?ast_atom(Name)=case peek() of
 	%% ${ == 123}
 	123 -> exp_dispatch(123); %% possibly a remote call.
 	_ -> a_symbol()
     end,
-    case lookup_reader_macro(Car) of
-	{value,F} ->
+    Env=curenv(),
+    case env:toplevel_lookup(Env,rmacro,Name) of
+	{ok,F} ->
 	    {Args,Here}=reader_macro_args([]),
-	    F(Args,Here);
-	_ -> error("Undefined reader macro: \n~p\n",[Car])
+	    {Env2,Ast}=F(Args,Here,Env),
+	    curenv(Env2),
+	    Ast;
+	_ -> error("Undefined reader macro: \n~p\n",[Name])
     end.
-
-lookup_reader_macro(Name) ->
-    scompile:lookup_namespace(rmacros,Name).
 
 reader_macro_args(Acc) ->
     skip_while(?spacen),
@@ -325,12 +324,5 @@ an_exp() -> skip_while(?spacen),
 		  skip_while(?spacen), 
 		  R
 	 end.
-
-all_exps() -> all_exps([]).
-all_exps(Acc) ->
-    case E=an_exp() of
-	eof -> lists:reverse(Acc);
-	_ -> all_exps([E|Acc])
-    end.
 
     
