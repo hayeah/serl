@@ -1,6 +1,8 @@
 
 -export([
 	 '__rm_lit'/2,
+	 '__sp_quote'/2,
+	 '__sp_bquote'/2,
 	 '__sp_eof'/2,
 	 '__sp_block'/2,
 	 '__sp_brace'/2,
@@ -56,13 +58,18 @@
 %% 	 '__sp_rec-val'/2,
 
 %% 	 '__sp_catch'/2,
-%% 	 '__sp_call'/2
+ 	 '__sp_call'/2,
 	 
 %% 	 '__sp_do'/2,
 %% 	 '__sp_if'/2,
 
 %% 	 '__sp_case'/2,
 %% 	 '__sp_try'/2
+
+	 '__mac_block'/1,
+	 '__mac_paren'/1,
+	 '__mac_brace'/1,
+	 
 	 erl_parse_f/1,
 	 erl_parse_e/1
 	 

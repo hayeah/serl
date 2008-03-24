@@ -4,8 +4,10 @@
 
 -export([
 	 read/1,read/2,
-	 expand/1,expand/2, 
+	 expand/1,expand/2,
+	 %expands/1,expands/2, 
 	 eval/1,eval/2,eval/3,
+	 %evals/1,evals/2,evals/3,
 	 compile/1,compile/2,
 	 transform/2, transform_each/2,
 	 map_env0/3,
@@ -90,41 +92,63 @@ read(In) ->
     read(In,verl).
 read(In,TLM) ->
     new_process(fun read_/1,[env:new(TLM)],
-		#scompile_S{input=In}).
-    
+		#scompile_S{input=In}). 
 
 read_(Env) ->
     {S,Env2,Ast}=reader:exp(Env,get_state()),
     set_state(S),
     {Env2,Ast}.
 
-expand(In) ->
-    expand(In,verl).
-expand(In,TLM) ->
-    new_process(fun expand_/1,[env:new(TLM)],
-		#scompile_S{input=In}).
+%% expands(In) ->
+%%     expands(In,verl).
+%% expands(In,TLM) ->
+%%     expand(read(In,TLM),TLM). 
+
+expand(Ast) ->
+    expand(Ast,env:new(verl)).
+expand(Ast,Env) ->
+    new_process(fun expand_/2,
+		[Ast,Env]).
     
-expand_(Env) ->
-    {Env2,Ast}=read_(Env),
-    transform(Ast,Env2).
+expand_(Ast,Env) ->
+    transform(Ast,Env).
 
-eval(In) ->
-    eval(In,verl).
-eval(In,TopLevelMod) ->
-    eval(In,TopLevelMod,erl_eval:new_bindings()).
-eval(In,TLM,Bindings) ->
-    new_process(fun eval_/2,
-		[env:new(TLM),Bindings],
-		#scompile_S{input=In}).
+%% evals(In) ->
+%%     evals(In,verl).
+%% evals(In,TopLevelMod) ->
+%%     evals(In,TopLevelMod,erl_eval:new_bindings()).
+%% evals(In,TLM,Bindings) ->
+%%     Ast=read(In,TLM),
+%%     eval(Ast,TLM,Bindings).
 
-eval_(Env,Bindings) ->
-    {Env2,Ast}=read_(Env),
-    {Env3,ErlAst}=transform(Ast,Env2),
+eval(Ast) ->
+    %% by default eval with verl as the top-level.
+    eval(Ast,env:new(verl)).
+eval(Ast,Env) ->
+    eval(Ast,Env,erl_eval:new_bindings()).
+eval(Ast,Env,Bindings) ->
+    new_process(fun eval_/3,
+		[Ast,Env,Bindings]).
+
+eval_(Ast,Env,Bindings) ->
+    {Env2,ErlAst}=transform(Ast,Env),
     erl_eval:expr(ErlAst,Bindings,
 		  {value, fun (Name,Arg) ->
-				  local_funcall_handler(Name,Arg,Env3)
+				  local_funcall_handler(Name,Arg,Env2)
 			  end},
 		  {value, fun remote_funcall_handler/2}).
+    
+local_funcall_handler(Name,Args,Env) ->
+    case env:lookup(functions,Name,Env) of
+	{value,{Mod,F}} -> apply(Mod,F,Args);
+	{value,F} -> apply(F,Args);
+	%% TODO should throw undef exception.
+	_ -> error("undefined function: ~p\n",[Name])
+    end.
+
+remote_funcall_handler(F,Args) ->
+    F(Args).
+
 
 %% TODO maybe allow parameterization of symbol macros.
 compile(In) ->
@@ -168,7 +192,8 @@ compile_loop(Env,Count) ->
 
 
      
-
+new_process(Fun,Args) ->
+    new_process(Fun,Args,#scompile_S{}).
 new_process(Fun,Args,S) ->
     Return=self(),
     Sync=make_ref(),
@@ -182,17 +207,6 @@ new_process(Fun,Args,S) ->
     after 120000 ->
 	    error("Compiler Timeout")
     end. 
-    
-local_funcall_handler(Name,Args,Env) ->
-    case env:lookup(functions,Name,Env) of
-	{value,{Mod,F}} -> apply(Mod,F,Args);
-	{value,F} -> apply(F,Args);
-	%% TODO should throw undef exception.
-	_ -> error("undefined function: ~p\n",[Name])
-    end.
-
-remote_funcall_handler(F,Args) ->
-    F(Args).
 
 
 %% compile(Exp) ->
@@ -213,13 +227,13 @@ do_transform(Car,Body,Env) ->
     case lookup_expander(Env,Car) of
 	{special,F} -> F(Body,Env);
 	{macro,F} -> transform(F(Body),Env);
-	_ -> case lookup_expander(Env,?cast_atom('call')) of
+	_ -> case lookup_expander(Env,?cast_atom('__call')) of
 		 %% this is probably correct. A function call should follow the convention of the active module.
 		 %% it could be a special form or a macro.
 		 %% %% TODO Hmmmm... should I inspect the function header so I know how 'call' should actually be used?
-		 {special,F} -> F([Car|Body]);
+		 {special,F} -> F([Car|Body],Env);
 		 {macro,F} -> transform(F(Body),Env);
-		 _ -> error("cannot find an expander for functional call. ")
+		 _ -> error("cannot find an expander for functional call.")
 	     end
     end. 
 

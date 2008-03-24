@@ -15,9 +15,16 @@
 
 -define(spacen,"\t\s\n").
 -define(space,"\t\s").
--define(special_atom_chars,".~:;,'`").
--define(reserved_chars,"!@#$?").
--define(delimiters,"#(){}[]\""++?special_atom_chars++?spacen++?reserved_chars).
+-define(nesting_chars,".~:").
+-define(quoting_chars,";,'`").
+-define(reserved_chars,"!@#$%^&\\|?").
+-define(delimiters,
+	"(){}[]\""++
+	?nesting_chars++
+	?quoting_chars++
+	?spacen++
+	?reserved_chars).
+
 -import(lists,[reverse/1,member/2]).
 -import(streamer,[lineno/1,
 		  lineno/0,
@@ -88,7 +95,6 @@ is_alpha(C) -> (($a =< C) and (C =< $z)) or is_upper(C).
 is_alpha_num(C) -> is_digit(C)  or is_alpha(C).
 is_atom_char(C) -> not (lists:member(C,?delimiters)).
 is_atom_first_char(C) -> not (is_digit(C) or is_delimiter(C)).
-is_special_atom_char(C) -> lists:member(C,?special_atom_chars). 
 is_delimiter(C) -> lists:member(C,?delimiters).
 
 
@@ -295,17 +301,33 @@ exp_dispatch(123) ->
     ?cast_brace(a_list("{}")); %% {}
 exp_dispatch(91) ->
     ?cast_block(a_list("[]")); %% []
-%% $" == 34, ditto
+%% $" == 34 string
 exp_dispatch(34) ->
     a_string();
 exp_dispatch($#) -> 
     a_reader_macro();
+%% $\' == 39  quote
+exp_dispatch(39) ->
+    read(),
+    E=an_exp(),
+    ?cast_quote(E);
+%% $` backquote
+exp_dispatch($`) ->
+    read(),
+    E=an_exp(),
+    ?cast_bquote(E);
+exp_dispatch($,) ->
+    read(),
+    E=an_exp(),
+    ?cast_unquote(E);
+exp_dispatch($;) ->
+    read(),
+    E=an_exp(),
+    ?cast_sunquote(E); 
 exp_dispatch(C) ->
-    SpecialAtom=is_special_atom_char(C),
     Digit=is_digit(C) or (C==$-),
     Symbol=is_atom_first_char(C),
-    if SpecialAtom -> read(),?cast_satom(C);
-       %% If the first peeked char is $-, there is an overlap between Symbol and Digit, peek one more.
+    if %% If the first peeked char is $-, there is an overlap between Symbol and Digit, peek one more.
        Digit,Symbol -> read(),
 		       C2=peek(),
 		       Digit2=is_digit(C2),

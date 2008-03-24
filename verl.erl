@@ -33,8 +33,46 @@
 '__rm_lit'([],Here) ->
     ?cast_string(Here).
 
+
+%% the quotation forms might as well be macros.
+%% but it's easier to implement them as special forms (direct translation to erlang ast).
+
+'__sp_quote'(?ast_quote3(L,_,E),Env) -> 
+    {Env,erl_syntax:revert(erl_syntax:set_pos(erl_syntax:abstract(E),L))}.
+
+
+'__sp_bquote'(?ast_bquote(E),Env) ->
+    transform(bq:completely_expand(E),Env).
+
+'__mac_block'([Es]) ->
+    ?cast_brace([?cast_atom('__block'),
+		 ?cast_integer(lineno()),
+		 ?cast_atom(curmod()),
+		 Es
+		]);
+'__mac_block'([Es,L,M]) ->
+    ?cast_brace([?cast_atom('__block'),L ,M ,Es]).
+
+'__mac_paren'([Es]) ->
+    ?cast_brace([?cast_atom('__paren'),
+		 ?cast_integer(lineno()),
+		 ?cast_atom(curmod()),
+		 Es
+		]);
+'__mac_paren'([Es,L,M]) ->
+    ?cast_brace([?cast_atom('__paren'),L ,M ,Es]).
+
+'__mac_brace'([Es]) ->
+    ?cast_brace([?cast_atom('__brace'),
+		 ?cast_integer(lineno()),
+		 ?cast_atom(curmod()),
+		 Es
+		]);
+'__mac_brace'([Es,L,M]) ->
+    ?cast_brace([?cast_atom('__brace'),L ,M ,Es]).
+
 %% a common idiom is a list of blocks seperated by ':' (foo a b c d: e f g h: i j k l)
-%% this functions return the blocks in a list.
+%% this functions return a list of blocks.
 
 to_blocks(Es) ->
     {FirstBlock,Blocks}=
@@ -65,6 +103,7 @@ to_blocks(Es) ->
 	    [A] -> {A,""};
 	    [A,S] -> {A,S}
 	end,
+    %% transforming the body should only affect the lexical environment. So we can toss that away.
     {_,?erl_atom(_,FName)}=transform(Name,Env),
     Arity=length(Params),
     case env:assoc(Env,[definitions,functions,FName,Arity]) of
@@ -258,6 +297,8 @@ pattern(?ast_var3(L,M,A),Env) ->
     end;
 pattern(P,Env) ->
     %% is a macro, should expand to one of the above.
+    %% should expand once, then try to generate pattern, if fails, expand once more.
+    error("macro not supported in pattern"),
     {Env2,RP}=transform(P,Env),
     pattern(RP,Env2).
 
@@ -307,6 +348,19 @@ pattern(P,Env) ->
 '__sp_do'(Es,Env) -> 
     {Env2,REs}=transform_each(Es,Env),
     {Env2,{block,lineno(),REs}}.
+
+%%  If E is E_m:E_0(E_1, ..., E_k), then Rep(E) = {call,LINE,{remote,LINE,Rep(E_m),Rep(E_0)},[Rep(E_1), ..., Rep(E_k)]}. 
+'__sp_call'([?ast_brace([M,F])|Es],Env) ->
+    {Env2,Mod}=transform(M,Env),
+    {Env3,Fn}=transform(F,Env2),
+    {Env4,Body}=transform_each(Es,Env3),
+    {Env4,{call,lineno(),{remote,lineno(),Mod,Fn},Body}};
+
+%%  If E is E_0(E_1, ..., E_k), then Rep(E) = {call,LINE,Rep(E_0),[Rep(E_1), ..., Rep(E_k)]}.
+'__sp_call'([F|Es],Env) ->
+    {Env2,Fn}=transform(F,Env),
+    {Env3,Body}=transform_each(Es,Env2),
+    {Env3,{call,lineno(),Fn,Body}}.
 
 
 %% 4.5 Clauses

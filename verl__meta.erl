@@ -15,7 +15,7 @@
 %% even though they appear in this list, they can't be used unless exported.
 -serl_definitions(
    [{specials,
-     [%% ast specials
+     [%% ast specials 
       {'__float',{?MOD,'__sp_float'}}, 
       {'__integer',{?MOD,'__sp_integer'}}, 
       {'__string',{?MOD,'__sp_string'}}, 
@@ -24,8 +24,10 @@
       {'__block',{?MOD,'__sp_block'}},
       {'__brace',{?MOD,'__sp_brace'}},
       {'__eof',{?MOD,'__sp_eof'}},
-      {'call',{?MOD,'__sp_call'}},
-
+      {'__call',{?MOD,'__sp_call'}},
+      {'__quote',{?MOD,'__sp_quote'}},
+      {'__bquote',{?MOD,'__sp_bquote'}},
+      
 	 
     %% 4.1
 	 {'module',{?MOD,'__sp_module'}},
@@ -34,15 +36,17 @@
 	 {'record',{?MOD,'__sp_record'}},
 	 {'def',{?MOD,'__sp_def'}},
 
-	 %% 4.2
-	 {'integer',{?MOD,'__sp_integer'}},
-	 {'float',{?MOD,'__sp_float'}},
-	 {'string',{?MOD,'__sp_string'}},
-	 {'atom',{?MOD,'__sp_atom'}},
+%% 	 %% 4.2
+%% 	 {'integer',{?MOD,'__sp_integer'}},
+%% 	 {'float',{?MOD,'__sp_float'}},
+%% 	 {'string',{?MOD,'__sp_string'}},
+%% 	 {'atom',{?MOD,'__sp_atom'}},
 
 	 %% 4.4
 	 {'=',{?MOD,'__sp_='}},
-	 {'var',{?MOD,'__sp_var'}},
+
+%%       {'var',{?MOD,'__sp_var'}},
+      
 	 {'tuple',{?MOD,'__sp_tuple'}},
 	 {'list',{?MOD,'__sp_list'}},
 	 {'cons',{?MOD,'__sp_cons'}},
@@ -83,7 +87,11 @@
      {'try',{?MOD,'__sp_try'}}
      
     ]},
-    {macros,[]},
+    {macros,
+     [{'block',{?MOD,'__mac_block'}},
+      {'paren',{?MOD,'__mac_paren'}},
+      {'brace',{?MOD,'__mac_brace'}}
+     ]},
     {rmacros,
      [
       {'lit',{?MOD,'__rm_lit'}}

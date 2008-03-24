@@ -41,3 +41,20 @@
 -define(cast_brace(Body),?ast_brace3(lineno(),curmod(),Body)).
 -define(cast_block(Body),?ast_block3(lineno(),curmod(),Body)).
 
+
+-define(ast_quote3(L,M,E),{'__quote',L,M,E}).
+-define(ast_bquote3(L,M,E),{'__bquote',L,M,E}).
+-define(ast_unquote3(L,M,E),{'__unquote',L,M,E}).
+-define(ast_sunquote3(L,M,E),{'__sunquote',L,M,E}).
+
+-define(ast_quote(E),?ast_quote3(_,_,E)).
+-define(ast_bquote(E),?ast_bquote3(_,_,E)).
+-define(ast_unquote(E),?ast_unquote3(_,_,E)).
+-define(ast_sunquote(E),?ast_sunquote3(_,_,E)).
+
+-define(cast_quote(E),?ast_quote3(lineno(),curmod(),E)).
+-define(cast_bquote(E),?ast_bquote3(lineno(),curmod(),E)).
+-define(cast_unquote(E),?ast_unquote3(lineno(),curmod(),E)).
+-define(cast_sunquote(E),?ast_sunquote3(lineno(),curmod(),E)).
+
+

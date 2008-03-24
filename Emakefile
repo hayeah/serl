@@ -2,6 +2,8 @@
 env.
 streamer.
 reader.
+printer.
+bq.
 %%desugar.
 scompile.
 verl.
