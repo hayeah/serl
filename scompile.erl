@@ -151,8 +151,8 @@ remote_funcall_handler(F,Args) ->
 
 
 %% TODO maybe allow parameterization of symbol macros.
-compile(In) ->
-    compile(In,verl).
+compile(Mod) ->
+    compile(Mod,verl).
 compile(Mod,TLM) when is_atom(Mod) ->
     %% TODO modify streamer to parse binary.
     In=case file:read_file(atom_to_list(Mod)++".serl") of

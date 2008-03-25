@@ -26,7 +26,7 @@
 	 module_meta_info/2
 	]).
 
-
+-compile(export_all).
 %% empty environment
 new() ->
     [].
@@ -217,7 +217,6 @@ exports_of(Mod,NSType) ->
 	     end
     end.
 
-%% ugh! This is so ugly.
 exports_of(Mod,NSType,Keys) ->
     case meta_module_of(Mod) of
 	{ok,MetaMod} ->
@@ -225,44 +224,17 @@ exports_of(Mod,NSType,Keys) ->
 	_ -> %% import compatiblity with .erl modules. If compiled & available, check its module_info for exported functions.
 	    case code:ensure_loaded(Mod) of 
 		 {error,nofile} -> false; 
-		 _ -> FsDict=
-			  lists:foldl(fun ({F,Arity},D) ->
-					      orddict:append(F,Arity,D)
-				      end,
-				      orddict:new(),
-				      Mod:module_info(exports)),
-		      %% key is an atom, or a tuple of {atom,arity}
-		      %% if an atom, include all the arities.
-		      %% if a tuple, include only that arity.
-		      Fs=case Keys of
-			     all -> FsDict;
-			     _ -> lists:foldl(
-				    fun (Key,D) ->
-					    %% yuk! As though saying "yuk" absolves me of ugliness.
-					    case Key of
-						{Name,Arities} ->
-						    map(fun (Arity) ->
-								case orddict:find(Name,FsDict) of
-								    {ok,V} -> V;
-								    _ -> error("Undefined: ~p:~p/~p\n",[Mod,Name,Arity])
-								end
-							end,
-							Arities),
-						    orddict:append_list(Name,Arities,D);
-						Name -> Arities=case orddict:find(Name,FsDict) of
-								    {ok,V} -> V;
-								    _ -> error("Undefined: ~p:~p\n",[Mod,Name])
-								end,
-							orddict:append_list(Name,Arities,D)
-					    end
-				    end,
-				    orddict:new(),
-				    Keys)
-			 end,
-		      Bs=[{F,[{Arity,{Mod,F}} || Arity <- Arities]}
-			  || {F,Arities} <- Fs],
-		      {ok,{functions,Bs}}
-		      
+		 _ ->
+		    Exports=ordsets:from_list([F || {F,_Arity} <- Mod:module_info(exports)]),
+		    case Keys of
+			all -> {ok,{functions,[{B,{Mod,B}} || B <- Exports]}};
+			_ -> Names=ordsets:from_list(Keys),
+			     Bs=ordsets:intersection(Names,Exports),
+			     if length(Bs)==length(Keys) -> {ok,{functions,[{B,{Mod,B}} || B <- Bs]}}; 
+				true -> error("Undefined functions ~p in module ~p",
+					      [ordsets:subtract(Names,Exports),Mod])
+			     end 
+		    end 
 	     end
     end.
 

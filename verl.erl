@@ -15,19 +15,12 @@
 		 ]).
 -import(lists,[map/2,member/2]).
 
+-compile(export_all).
+
 %% -define(atomic_literals,[integer,float,string,atom]).
 %% -define(patterns,[match,var,tuple,nil,cons,op,record,record_index]++?atomic_literals).
 %% -define(guards,[var,tuple,nil,cons,bin,op,record,record_index,record_field,call]++?atomic_literals).
 
--define(erl_integer(L,I),{integer,L,I}).
--define(erl_float(L,F),{float,L,F}).
--define(erl_string(L,S),{string,L,S}).
--define(erl_atom(L,A),{atom,L,A}).
--define(erl_var(L,A),{var,L,A}).
-
--define(module_sec,1).
--define(header_sec,2).
--define(def_sec,10).
 %% Serl Extension
 
 '__rm_lit'([],Here) ->
@@ -86,34 +79,135 @@ to_blocks(Es) ->
     [?cast_block(FirstBlock)|Blocks].
     
 
+%% %% (defm foo "a macro":
+%% %%  ((a): 'foo)
+%% %%  ((A B): '(,A ,B))
+%% %%  )
+
+%% '__sp_defm'(Es,Env) ->
+%%     [?ast_block(Header),?ast_block(Clauses)]=to_blocks(Es),
+%%     %% massage a clause ((A ...): ...) to (([A ...]): ...)
+%%     %%%% convuluted...
+%%     Clauses2=
+%% 	[begin Arg=?cast_paren(?cast_block(Param)),
+%% 	       ?cast_paren([Arg|GuardedBody])
+%% 	 end
+%% 	 || ?ast_paren([?ast_paren(Param)|GuardedBody]) <- Clauses],
+%%     {Name,Doc}=
+%% 	case Header of
+%% 	    [?ast_atom(A)] -> {A,""};
+%% 	    [?ast_atom(A),?ast_string(S)] -> {A,S}
+%% 	end,
+    
+%%     %% macro is compiled using the meta-environment 
+%%     MEnv=env:assoc(Env,[macro_env]),
+%%     Ast={function,lineno(), Name, 1,
+%% 	 [clause_function(C,MEnv) || C <- Clauses2]},
+%%     Val=erl_eval:expr(FAst,erl_eval:new_bindings()),
+%%     %% augument environment with the new macro
+%%     {defm(Env,FName,Val,Ast,Doc),?def_sec}.
+
+%% defm(Env,Name,Val,Ast,Doc) ->
+%%     case env:assoc(Env,[definitions,macros,Name]) of
+%% 	{ok,_} -> error("Macro already defined: ~p/~p\n", [Name]); 
+%% 	_ -> ok
+%%     end,
+%%     Env2=env:assoc_put(Env,[definitions,macros,Name],Val),
+%%     Env3=env:assoc_put(Env2,[definitions,macros_info,ast,Name],Ast),
+%%     Env4=env:assoc_put(Env3,[definitions,macros_info,doc,Name],Doc),
+%%     Env4.
+
+
 %% (def foo
 %%  "a function foo": 
 %%   ((a b c) when guards: a b c)
 %%   ((c d e): a b c) 
 %%   )
 
-
 '__sp_def'(Es,Env) ->
-    [?ast_block(Header),?ast_block(Clauses)]=to_blocks(Es),
-    %% get the parameter list of the first functional clause.
-    [C1|_]=Clauses,
-    ?ast_paren([?ast_paren(Params)|_])=C1,
-    {Name,_Doc}=
-	case Header of
-	    [A] -> {A,""};
-	    [A,S] -> {A,S}
-	end,
-    %% transforming the body should only affect the lexical environment. So we can toss that away.
-    {_,?erl_atom(_,FName)}=transform(Name,Env),
-    Arity=length(Params),
+    {FName,Arity,_Doc,Ast}=parse_def(Es,Env),
     case env:assoc(Env,[definitions,functions,FName,Arity]) of
 	{ok,_} -> error("Function redefined: ~p/~p\n", [FName,Arity]); 
 	_ -> ok
     end,
-    Env2=env:assoc_put(Env,[definitions,functions,FName,Arity],
-		       {function,lineno(), FName, Arity,
-			[clause_function(C,Env) || C <- Clauses]}),
+    Env2=env:assoc_put(Env,[definitions,functions,FName,Arity], Ast),
     {Env2,?def_sec}.
+
+get_def(Env,Name) ->
+    case env:assoc(Env,[definitions,functions,Name]) of
+	{ok,Fs} -> Fs;
+	_ -> []
+    end.
+
+parse_def(Es,Env) ->
+    [?ast_block(Header),?ast_block(Clauses)]=to_blocks(Es),
+    %% get the parameter list of the first functional clause.
+    Arities=[length(Params) || ?ast_paren([?ast_paren(Params)|_]) <- Clauses],
+    %% check arities are the same for all clauses
+    T=(length(ordsets:from_list(Arities))==1),
+    if T -> ok;
+       true -> error("Different arities for function clauses.")
+    end,
+    Arity=hd(Arities),
+    {?ast_atom(FName),Doc}=
+	case Header of
+	    [A] -> {A,""};
+	    [A,?ast_string(S)] -> {A,S}
+	end,
+    %% transforming the body should only affect the lexical environment. So we discard the returned environment.
+    Ast={function,lineno(),FName, Arity,
+	 [clause_function(Clause,Env) || Clause <- Clauses]},
+    {FName,Arity,Doc,Ast}.
+    
+%% (compile-for expand run: <form>*) 
+%%%% the forms must be toplevel forms for the same section
+
+'__sp_compile_for'(Es,Env) -> 
+    [?ast_block(As),?ast_block(Forms)] = to_blocks(Es),
+    Times=ordset:from_list([A || ?ast_atom(A) <- As]),
+    %% if compiling for both expand and run times, expand-time forms are compiled first.
+    %% This order is an implementation detail.
+    compile_for(Times,Forms,Env).
+
+compile_for([run],Forms,Env) ->
+    compile_for(run,Forms,Env);
+compile_for([expand],Forms,Env) ->
+    compile_for(expand,Forms,Env);
+compile_for([expand,run],Forms,Env) ->
+    %% forms for expand and run times must agree to the section they are in.
+    {Env2,S1}=compile_for(expand,Forms,Env),
+    {Env3,S2}=compile_for(run,Forms,Env2), 
+    if S1==S2 -> {Env3,S1}; 
+       true -> error("compile-for: expand and runtime forms belong to different compile sections")
+    end;
+compile_for(run,Forms,Env) ->
+    {Env2,Rs}=transform_each(Forms,Env),
+    Section=hd(Rs),
+    lists:foreach(
+      fun (I) ->
+	      if I==Section -> true;
+		 true -> error("compile-for: not all forms are toplevel from the same section")
+	      end
+      end,
+      Rs),
+    {Env2,Section};
+compile_for(expand,Forms,Env) ->
+    MEnv=env:assoc(Env,[compile_env]),
+    {MEnv2,Rs}=transform_each(Forms,MEnv),
+    Section=hd(Rs),
+    lists:foreach(
+      fun (I) ->
+	      if I==Section -> true;
+		 true -> error("compile-for: not all forms are toplevel from the same section")
+	      end
+      end,
+      Rs),
+    {env:assoc_put(Env,[compile_env],MEnv2),Section}.
+
+
+
+'__sp_bof'([],Env) ->
+    {env:assoc_put(Env,[compile_env,env:new(mverl)]),0}.
 
 '__sp_eof'([],Env) ->
     emit(Env). 
@@ -142,17 +236,19 @@ gen_module(Env) ->
     case assoc(Env,[module]) of
 	{ok,{Mod,L}} -> {attribute,L,module,Mod}
     end.
-%% (export (a 1) (b 1 2 3))
+
+%% (export a b c)
 gen_exports(Env) ->
-    Exports=case env:assoc(Env,[exports,functions]) of
-	   {ok,V} -> V
-       end,
-    Keys=map(fun (?ast_paren([?ast_atom3(L,_,F)|Arities])) ->
-		     {F,L,[Arity || ?ast_integer(Arity) <- Arities]} 
-	     end,
-	     Exports),
+    Exports=
+	case env:assoc(Env,[exports,functions]) of
+	    {ok,Names} ->
+		[{Name,L,Arity} ||
+		    ?ast_atom3(L,_Mod,Name) <- Names,
+		    {Arity,_Ast} <- get_def(Env,Name)]; 
+	    _ -> []
+	end, 
     %% just let the erlang compiler check if exported functions are defined.
-    [{attribute,L,export,[{F,Arity}]} || {F,L,Arities} <- Keys, Arity <- Arities].
+    [{attribute,L,export,[{F,Arity}]} || {F,L,Arity} <- Exports].
 
 %% emit_meta(Env) -> 
 %% %%     Bs=[{F,[{Arity,{curmod(),F}} || Arity <- Arities]}
@@ -190,7 +286,7 @@ gen_exports(Env) ->
 
 
 %% %%  If F is an attribute -export([Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,export,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}.
-%% (export (a 1) (b 1 2 3))
+%% (export a b)
 '__sp_export'(Fs,Env) -> 
     {env:assoc_append(Env,[exports,functions],Fs),?header_sec}.
 
@@ -209,36 +305,30 @@ gen_exports(Env) ->
 %% erl-spec pg120:
 %% for an imported foo, all calls in the module calls the imported foo.
 %% is foo is exported, it is the defined foo that is exported.
-%%
-%% HY: unforunate that this is the case...
-%% (import mod (a 1 2) (b 0 1))
+
+%% (import mod a b c)
 '__sp_import'([?ast_atom(Mod)|Fs],Env) ->
-    Keys=map(fun (?ast_paren([?ast_atom(F)|Arities])) ->
-		     {F,[Arity || ?ast_integer(Arity) <- Arities]} 
-	     end,
-	     Fs),
+    Imports=ordsets:from_list([A || ?ast_atom(A) <- Fs]),
+    %% check for conflicts
     lists:foreach(
-      fun ({F,Arities}) ->
-	      lists:foreach(
-		fun (Arity) ->
-			case env:toplevel_lookup(Env,functions,[F,Arity]) of
-			    {ok,{Mod2,FName}} -> error("Conflicting import ~p:~p/~p with ~p:~p/~p",
-						       [Mod,F,Arity,Mod2,FName,Arity]);
-			    _ -> ok
-			end
-		end,
-		Arities) 
+      fun (F) ->
+	      case env:toplevel_lookup(Env,functions,[F]) of
+		  {ok,{Mod2,F2}} -> error("Conflicting import ~p:~p with ~p:~p",
+					  [Mod,F,Mod2,F2]);
+		  _ -> ok
+	      end
       end,
-      Keys),
-    Env2=try env:import(Env,Mod,functions,Keys)
+      Imports),
+    Env2=try env:import(Env,Mod,functions,Imports)
 	 catch no_imports ->
-		 env:assoc_put
-		   (Env,[imports,Mod,functions],
-		    [{F,[{Arity,{Mod,F}} || Arity <- Arities]}
-		     || {F,Arities} <- Keys]) 
+		 env:assoc_put(
+		   Env,
+		   [imports,Mod,functions],
+		   [{F,{Mod,F}} || F <- Imports]) 
 	 end,
     {Env2,?header_sec}.
-
+    
+    
 
 %% %% %%  If F is a wild attribute -A(T), then Rep(F) = {attribute,LINE,A,T}. 
 %% %% '__mac_wild'([wild|_]) ->
@@ -357,10 +447,18 @@ pattern(P,Env) ->
     {Env4,{call,lineno(),{remote,lineno(),Mod,Fn},Body}};
 
 %%  If E is E_0(E_1, ..., E_k), then Rep(E) = {call,LINE,Rep(E_0),[Rep(E_1), ..., Rep(E_k)]}.
-'__sp_call'([F|Es],Env) ->
-    {Env2,Fn}=transform(F,Env),
+'__sp_call'([?ast_atom(Name)=E0|Es],Env) ->
+    case env:toplevel_lookup(Env,functions,Name) of
+	{ok,{M,F}} -> '__sp_call'([?cast_brace([?cast_atom(M),?cast_atom(F)])|Es],Env);
+	_ -> 
+	    {Env2,F}=transform(E0,Env),
+	    {Env3,Body}=transform_each(Es,Env2),
+	    {Env3,{call,lineno(),F,Body}}
+    end;
+'__sp_call'([E0|Es],Env) ->
+    {Env2,F}=transform(E0,Env),
     {Env3,Body}=transform_each(Es,Env2),
-    {Env3,{call,lineno(),Fn,Body}}.
+    {Env3,{call,lineno(),F,Body}}.
 
 
 %% 4.5 Clauses
