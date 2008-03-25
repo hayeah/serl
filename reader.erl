@@ -149,11 +149,50 @@ a_list([OpenParen,CloseParen]) -> char([OpenParen]),a_list_rec(CloseParen,[]).
 
 a_list_rec(CloseParen,Acc) ->
     C=peek(),
-    % 41 == $)
     if C==CloseParen -> read(), lists:reverse(Acc); 
        C==eof -> error("Unexpected eof while reading list.");
        true -> a_list_rec(CloseParen,[an_exp()|Acc])
     end.
+
+a_paren() ->
+    char("("),
+    paren([]).
+
+%% (a b . if :c d e ) => (if :c d e (a b))
+%% (a b . if :c d e ) => (if [c d e] (a b))
+%%%% my original implementation does the second way.
+%%%% Let me think about which way is better.
+%%%% The second is more syntatically consistent.
+
+paren(Acc) ->
+    skip_while(?spacen),
+    case peek() of
+	%% $) == 41
+	41 -> read(), ?cast_paren(reverse(Acc));
+	$: -> read(), paren_block([],Acc);
+	%% $. == 46
+	46 -> read(), paren_nest(Acc);
+	%% $~ == 126
+	%% 126 -> read(), paren_splice(Acc); 
+	eof -> error("Unexpected eof while reading paren.");
+	_ -> paren([an_exp()|Acc])
+    end.
+
+paren_nest(Acc) ->
+    Nest=paren([]),
+    ?cast_paren(Nest++[?cast_paren(reverse(Acc))]). 
+    
+paren_block(Block,Acc) ->
+    skip_while(?spacen),
+    case peek() of
+	41 -> read(),?cast_paren(reverse([?cast_block(reverse(Block))|Acc]));
+	$: -> read(),paren_block([],[?cast_block(reverse(Block))|Acc]);
+	46 -> read(),
+	      paren_nest(reverse([?cast_block(reverse(Block))|Acc]));
+	eof -> error("Unexpected eof while reading paren.");
+	_ -> paren_block([an_exp()|Block],Acc)
+    end.
+
 
 a_string() ->
     read(),
@@ -296,7 +335,7 @@ here_short(Close) when is_integer(Close) ->
 %% $( == 40,  but it messes up indentation
 %% $) == 41
 exp_dispatch(40) ->
-    ?cast_paren(a_list("()")); %% ()
+    a_paren(); %% ()
 exp_dispatch(123) ->
     ?cast_brace(a_list("{}")); %% {}
 exp_dispatch(91) ->
