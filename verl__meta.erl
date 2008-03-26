@@ -2,18 +2,6 @@
 -define(MOD,verl).
 
 -serl_exports(
-   [{specials,all},
-    {macros,all},
-    {rmacros,all},
-    {functions,all}
-   ]).
-
-
-
-%% these are the definitions of the module.
-%% normally they contain all the definitions, but sensitive internal definitions may be omitted.
-%% even though they appear in this list, they can't be used unless exported.
--serl_definitions(
    [{specials,
      [%% ast specials 
       {'__float',{?MOD,'__sp_float'}}, 
@@ -27,66 +15,67 @@
       {'__call',{?MOD,'__sp_call'}},
       {'__quote',{?MOD,'__sp_quote'}},
       {'__bquote',{?MOD,'__sp_bquote'}},
-      
-	 
-    %% 4.1
-	 {'module',{?MOD,'__sp_module'}},
-	 {'export',{?MOD,'__sp_export'}},
-	 {'import',{?MOD,'__sp_import'}},
-	 {'record',{?MOD,'__sp_record'}},
-	 {'def',{?MOD,'__sp_def'}},
 
-%% 	 %% 4.2
-%% 	 {'integer',{?MOD,'__sp_integer'}},
-%% 	 {'float',{?MOD,'__sp_float'}},
-%% 	 {'string',{?MOD,'__sp_string'}},
-%% 	 {'atom',{?MOD,'__sp_atom'}},
 
-	 %% 4.4
-	 {'=',{?MOD,'__sp_='}},
+      %% 4.1
+      {'module',{?MOD,'__sp_module'}},
+      {'export',{?MOD,'__sp_export'}},
+      {'import',{?MOD,'__sp_import'}},
+      {'record',{?MOD,'__sp_record'}},
+      {'def',{?MOD,'__sp_def'}},
 
-%%       {'var',{?MOD,'__sp_var'}},
-      
-	 {'tuple',{?MOD,'__sp_tuple'}},
-	 {'list',{?MOD,'__sp_list'}},
-	 {'cons',{?MOD,'__sp_cons'}},
+      %% 	 %% 4.2
+      %% 	 {'integer',{?MOD,'__sp_integer'}},
+      %% 	 {'float',{?MOD,'__sp_float'}},
+      %% 	 {'string',{?MOD,'__sp_string'}},
+      %% 	 {'atom',{?MOD,'__sp_atom'}},
+
+      %% 4.4
+      {'=',{?MOD,'__sp_='}},
+
+      %%       {'var',{?MOD,'__sp_var'}},
+
+      {'tuple',{?MOD,'__sp_tuple'}},
+      {'list',{?MOD,'__sp_list'}},
+      {'cons',{?MOD,'__sp_cons'}},
       {'do',{?MOD,'__sp_do'}},
       {'let',{?MOD,'__sp_let'}},
 
-	 {'op',{?MOD,'__sp_op'}},
+      {'op',{?MOD,'__sp_op'}},
 
-	 %{'!',{?MOD,'__sp_!'}},
-	 {'+',{?MOD,'__sp_+'}},
-	 {'-',{?MOD,'__sp_-'}},
-	 {'*',{?MOD,'__sp_*'}},
-	 {'/',{?MOD,'__sp_/'}},	 
-	 {'rem',{?MOD,'__sp_rem'}},
-	 
-	 {'++',{?MOD,'__sp_++'}},
-	 
-	 {'==',{?MOD,'__sp_=='}},
-	 {'<',{?MOD,'__sp_<'}},
-	 {'>',{?MOD,'__sp_>'}},
-	 {'>=',{?MOD,'__sp_>='}},
-	 {'=<',{?MOD,'__sp_=<'}},
-	 
-	 
-	 {'and',{?MOD,'__sp_and'}},
-	 {'or',{?MOD,'__sp_or'}},
-	 {'andalso',{?MOD,'__sp_andalso'}},
-	 {'orelse',{?MOD,'__sp_orelse'}},
-	 {'not',{?MOD,'__sp_not'}},
-	 
-	 {'rec',{?MOD,'__sp_rec'}},
-	 {'rec-index',{?MOD,'__sp_rec-index'}},
-	 {'rec-val',{?MOD,'__sp_rec-val'}},
-	 {'catch',{?MOD,'__sp_catch'}},
+      {'+',{?MOD,'__sp_+'}},
+      {'-',{?MOD,'__sp_-'}},
+      {'*',{?MOD,'__sp_*'}},
+      {'/',{?MOD,'__sp_/'}},	 
+      {'rem',{?MOD,'__sp_rem'}},
 
-	 {'if',{?MOD,'__sp_if'}},
-	 {'case',{?MOD,'__sp_case'}},
-     {'try',{?MOD,'__sp_try'}}
-     
-    ]},
+      {'++',{?MOD,'__sp_++'}},
+
+      {'==',{?MOD,'__sp_=='}},
+      {'<',{?MOD,'__sp_<'}},
+      {'>',{?MOD,'__sp_>'}},
+      {'>=',{?MOD,'__sp_>='}},
+      {'=<',{?MOD,'__sp_=<'}},
+
+
+      {'and',{?MOD,'__sp_and'}},
+      {'or',{?MOD,'__sp_or'}},
+      {'andalso',{?MOD,'__sp_andalso'}},
+      {'orelse',{?MOD,'__sp_orelse'}},
+      {'not',{?MOD,'__sp_not'}},
+
+      {'rec',{?MOD,'__sp_rec'}},
+      {'rec-index',{?MOD,'__sp_rec-index'}},
+      {'rec-val',{?MOD,'__sp_rec-val'}},
+      {'catch',{?MOD,'__sp_catch'}},
+
+      {'if',{?MOD,'__sp_if'}},
+      {'case',{?MOD,'__sp_case'}},
+      {'try',{?MOD,'__sp_try'}},
+
+      {'begin',{?MOD,'__sp_begin'}}
+
+     ]},
     {macros,
      [{'block',{?MOD,'__mac_block'}},
       {'paren',{?MOD,'__mac_paren'}},
@@ -102,6 +91,14 @@
 	      {arity,[1,2]}]}
      ]}
    ]).
+
+
+
+%% these are the definitions of the module.
+%% normally they contain all the definitions, but sensitive internal definitions may be omitted.
+%% even though they appear in this list, they can't be used unless exported.
+-serl_definitions(
+   []).
 
 
     

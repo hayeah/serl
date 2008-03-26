@@ -10,8 +10,9 @@
 	 transform/2, transform_each/2, map_env0/3,
 	 
 	 gensym/1,reset_gensym/0,
-	 new_scope/3,new_def/4,
-	 lookup/3,
+	 lexical_shadow/3,lexical_extend/3,
+	 new_def/4,
+	 lookup/3,toplevel_lookup/3,
 	 warn/1,warn/2,error/1,error/2
 	 ]).
 -import(lists,[map/2,keysearch/3]).
@@ -38,9 +39,9 @@ gensym(N) ->
     OldC=
 	case get(?gensym) of
 	    undefined -> put(?gensym,N),0;
-	    C when is_integer(C)-> C
-	end,
-    put(?gensym,OldC+N),
+	    C when is_integer(C)-> put(?gensym,C+N)
+				   
+	end, 
     [list_to_atom("$"++io_lib:print(I)) || I <- lists:seq(OldC,OldC+N-1)].
     
 
@@ -312,12 +313,29 @@ toplevel_lookup(Env,NSType,A) ->
 %% Lexical Scoping
 
 %% map a list of symbols to gensyms
-new_scope(Env,NSType,Bindings) ->
+lexical_shadow(Env,NSType,Bindings) ->
     %% Bindings is a list of {M,A}
     %% M and A are atoms
     Bs=lists:zip(Bindings,
 		 gensym(length(Bindings))),
     assoc_cons(Env,[lexical,NSType],Bs).
+
+lexical_extend(Env,NSType,NewKeys) ->
+    %% Bindings is a list of {M,A}
+    %% M and A are atoms
+    {Scope,Scopes}=
+	case assoc(Env,[lexical,NSType]) of
+	    {ok,[H|T]} -> {H,T};
+	    _ -> {[],[]}
+	end, 
+    OldKeys=ordsets:from_list([Key || {Key,_} <- Scope]),
+    case ordsets:intersection(OldKeys,ordsets:from_list(NewKeys)) of
+	[] -> NewBs=lists:zip(NewKeys,
+			      gensym(length(NewKeys))), 
+	      assoc_put(Env,[lexical,NSType],[NewBs++Scope|Scopes]);
+	Conflicts -> error("Lexical binding conflicts: ~p",[Conflicts])
+    end.
+    
 
 new_def(Env,NSType,Key,Def) ->
     assoc_put(Env,[definitions,NSType,Key],Def).

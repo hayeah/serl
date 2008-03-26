@@ -10,6 +10,7 @@
 		  error/2,
 		  curmod/0,
 		  lineno/0,
+		  lookup/3,
 		  transform/2,
 		  transform_each/2
 		 ]).
@@ -27,85 +28,61 @@
     ?cast_string(Here).
 
 
-%% the quotation forms might as well be macros.
-%% but it's easier to implement them as special forms (direct translation to erlang ast).
-
-'__sp_quote'(?ast_quote3(L,_,E),Env) -> 
-    {Env,erl_syntax:revert(erl_syntax:set_pos(erl_syntax:abstract(E),L))}.
-
-
-'__sp_bquote'(?ast_bquote(E),Env) ->
-    transform(bq:completely_expand(E),Env).
-
-'__mac_block'([Es]) ->
-    ?cast_brace([?cast_atom('__block'),
-		 ?cast_integer(lineno()),
-		 ?cast_atom(curmod()),
-		 Es
-		]);
-'__mac_block'([Es,L,M]) ->
-    ?cast_brace([?cast_atom('__block'),L ,M ,Es]).
-
-'__mac_paren'([Es]) ->
-    ?cast_brace([?cast_atom('__paren'),
-		 ?cast_integer(lineno()),
-		 ?cast_atom(curmod()),
-		 Es
-		]);
-'__mac_paren'([Es,L,M]) ->
-    ?cast_brace([?cast_atom('__paren'),L ,M ,Es]).
-
-'__mac_brace'([Es]) ->
-    ?cast_brace([?cast_atom('__brace'),
-		 ?cast_integer(lineno()),
-		 ?cast_atom(curmod()),
-		 Es
-		]);
-'__mac_brace'([Es,L,M]) ->
-    ?cast_brace([?cast_atom('__brace'),L ,M ,Es]).
-
-%% a common idiom is a list of blocks seperated by ':' (foo a b c d: e f g h: i j k l)
-%% this functions return a list of blocks.
-
-to_blocks(Es) ->
-    {FirstBlock,Blocks}=
-	lists:splitwith(fun (E) ->
-			 case E of
-			     ?ast_block(_) -> false;
-			     _ -> true
-			 end
-		    end,
-		    Es),
-    [?cast_block(FirstBlock)|Blocks].
-    
+'__sp_bof'([],Env) ->
+    {env:assoc_put(Env,[compile_env,env:new(mverl)]),0}.
 
 %% %% (defm foo "a macro":
 %% %%  ((a): 'foo)
 %% %%  ((A B): '(,A ,B))
 %% %%  )
 
+%% (defm foo "a macro":
+%%  (A: 'foo)
+%%  ([A B]: '(,A ,B))
+%%  )
+
+%% (case $V (A: 'foo) ([A B]: 'foo))
+
+%% %% macros are interpreted.
 %% '__sp_defm'(Es,Env) ->
 %%     [?ast_block(Header),?ast_block(Clauses)]=to_blocks(Es),
-%%     %% massage a clause ((A ...): ...) to (([A ...]): ...)
-%%     %%%% convuluted...
-%%     Clauses2=
-%% 	[begin Arg=?cast_paren(?cast_block(Param)),
-%% 	       ?cast_paren([Arg|GuardedBody])
-%% 	 end
-%% 	 || ?ast_paren([?ast_paren(Param)|GuardedBody]) <- Clauses],
+%% %%     Clauses2=
+%% %% 	[{Param,Body}
+%% %% 	 || ?ast_paren([Param,Body]) <- Clauses],
+    
 %%     {Name,Doc}=
 %% 	case Header of
 %% 	    [?ast_atom(A)] -> {A,""};
 %% 	    [?ast_atom(A),?ast_string(S)] -> {A,S}
 %% 	end,
     
-%%     %% macro is compiled using the meta-environment 
-%%     MEnv=env:assoc(Env,[macro_env]),
-%%     Ast={function,lineno(), Name, 1,
-%% 	 [clause_function(C,MEnv) || C <- Clauses2]},
-%%     Val=erl_eval:expr(FAst,erl_eval:new_bindings()),
+%%     %% macro is compiled using the meta-environment
+%%     [GSym]=scompile:gensym(1), 
+%%     MEnv=env:assoc(Env,[compile_env]),
+%%     {_,Ast}=transform(?cast_paren([?cast_atom('case'),?cast_var(GSym),Clauses]),Env), 
+%%     %% the macro is an ast interpreted each time it is used
+%%     %% Ast={function,lineno(), Name, 1,
+%% %% 	 [clause_function(C,MEnv) || C <- Clauses2]},
+    
+%%     %% The current expansion environment is closed over.
+%%     %% the macro is not visible to its own definition.
+%%     %%%% but the macro /can/ be recursive.
+%%     %% functions defined after the macro are not visible.
+%%     %%%% I think this is sensible...
+%%     Val=fun (MacData) ->
+%% 	 erl_eval:expr(
+%% 	   Ast,
+%% 	   erl_eval:add_binding(GSym,MacData,erl_eval:new_bindings()),
+%% 	   {value, fun (Name,Arg) ->
+%% 			   local_funcall_handler(Name,Arg,Env)
+%% 		   end},
+%% 	   {value, fun remote_funcall_handler/2}	   
+%% 	  )
+%% 	end
+    
 %%     %% augument environment with the new macro
-%%     {defm(Env,FName,Val,Ast,Doc),?def_sec}.
+%%     {defm(Env,Name,Val,Ast,Doc),?def_sec}.
+
 
 %% defm(Env,Name,Val,Ast,Doc) ->
 %%     case env:assoc(Env,[definitions,macros,Name]) of
@@ -144,7 +121,8 @@ parse_def(Es,Env) ->
     %% get the parameter list of the first functional clause.
     Arities=[length(Params) || ?ast_paren([?ast_paren(Params)|_]) <- Clauses],
     %% check arities are the same for all clauses
-    T=(length(ordsets:from_list(Arities))==1),
+    T=lists:all(fun (Arity) -> Arity==hd(Arities) end,
+		Arities),
     if T -> ok;
        true -> error("Different arities for function clauses.")
     end,
@@ -156,7 +134,7 @@ parse_def(Es,Env) ->
 	end,
     %% transforming the body should only affect the lexical environment. So we discard the returned environment.
     Ast={function,lineno(),FName, Arity,
-	 [clause_function(Clause,Env) || Clause <- Clauses]},
+	 [function_clause(C,Env) || C <- Clauses]},
     {FName,Arity,Doc,Ast}.
     
 %% (compile-for expand run: <form>*) 
@@ -206,9 +184,6 @@ compile_for(expand,Forms,Env) ->
 
 
 
-'__sp_bof'([],Env) ->
-    {env:assoc_put(Env,[compile_env,env:new(mverl)]),0}.
-
 '__sp_eof'([],Env) ->
     emit(Env). 
 
@@ -255,17 +230,15 @@ gen_exports(Env) ->
 %% %% 	|| {F,Arities} <- Keys]
 %%     foo.
 
-%% '__mac_defm'([Name,Body]) ->
-%%     {def,foo,Name,Body}.
 
 %% Translate [e0 e1 ...] to a list if not handled by some other macro
-
 '__sp_block'(?ast_block(Exps),Env) ->
     transform(?cast_paren([?cast_atom(list),?cast_block(Exps)]),Env).
 
 %% Translate {e0 e1 ...} to a tuple if not handled by some other macro
 '__sp_brace'(?ast_brace(Exps),Env) ->
     transform(?cast_paren([?cast_atom(tuple),?cast_block(Exps)]),Env).
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% 4.1 Module declarations and forms
@@ -312,7 +285,7 @@ gen_exports(Env) ->
     %% check for conflicts
     lists:foreach(
       fun (F) ->
-	      case env:toplevel_lookup(Env,functions,[F]) of
+	      case scompile:toplevel_lookup(Env,functions,F) of
 		  {ok,{Mod2,F2}} -> error("Conflicting import ~p:~p with ~p:~p",
 					  [Mod,F,Mod2,F2]);
 		  _ -> ok
@@ -372,25 +345,25 @@ gen_exports(Env) ->
 %% %%  If P is an atomic literal L, then Rep(P) = Rep(L).
 
 patterns(Patterns,Env) ->
-    scompile:map_env0(Env,fun pattern/2,Patterns).
+    scompile:map_env0(fun pattern/2,Patterns,Env).
 
-%% %%  If P is a variable pattern V, then Rep(P) = {var,LINE,A}, where A is an atom with a printname consisting of the same characters as V. 
-%% %%  If P is a universal pattern _, then Rep(P) = {var,LINE,'_'}. 
-pattern(?ast_var('_'),Env) ->
-    {Env,?erl_var(lineno(),'_')};
-pattern(?ast_var3(L,M,A),Env) ->
-    case scompile:lookup(Env,vars,{M,A}) of
-	%% this is the function scope binding occurence
-	false -> {env:extend(Env,vars,[{{M,A},A}]),?erl_var(L,A)};
-	%% this is the lexical scope
-	_ -> transform(?cast_var(A),Env)
-    end;
+pattern(?ast_quote(_Q),_Env) ->
+    error("quote not supported in pattern");
+pattern(?ast_var3(L,_,'_'),Env) ->
+    {Env,?erl_var(L,'_')};
+pattern(?ast_var3(_L,M,V)=Var,Env) ->
+    case lookup(Env,vars,{M,V}) of
+	%% the use occurence
+	{ok,_Alias} -> transform(Var,Env);
+	%% the binding occurence
+	false -> transform(Var,scompile:lexical_extend(Env,vars,[{M,V}])) 
+    end; 
 pattern(P,Env) ->
-    %% is a macro, should expand to one of the above.
-    %% should expand once, then try to generate pattern, if fails, expand once more.
-    error("macro not supported in pattern"),
-    {Env2,RP}=transform(P,Env),
-    pattern(RP,Env2).
+    {Env2,P2}=scompile:expand1(P,Env),
+    pattern(P2,Env2).
+
+%% %% %%  If P is a variable pattern V, then Rep(P) = {var,LINE,A}, where A is an atom with a printname consisting of the same characters as V. 
+%% %% %%  If P is a universal pattern _, then Rep(P) = {var,LINE,'_'}.
 
 
 %%  If E is P = E_0, then Rep(E) = {match,LINE,Rep(P),Rep(E_0)}.
@@ -404,8 +377,8 @@ pattern(P,Env) ->
 %%HY: It's silly to call variables variables when they don't vary... I call them bindings.
 
 '__sp_var'(?ast_var3(L,M,A),Env) ->
-    case scompile:lookup(Env,vars,{M,A}) of
-	{ok,Alias} -> {Env,?erl_var(lineno(),Alias)}; 
+    case lookup(Env,vars,{M,A}) of
+	{ok,Alias} -> {Env,?erl_var(L,Alias)}; 
 	false -> error("~p:~p Variable not declared: ~p",[M,L,A])
     end.
 
@@ -435,72 +408,149 @@ pattern(P,Env) ->
     {Env2,Z}=transform(Cdr,Env1),
     {Env2,{cons,lineno(),A,Z}}.
 
-'__sp_do'(Es,Env) -> 
+
+%% %%  If E is case E_0 of Cc_1 ; ... ; Cc_k end, where E_0 is an expression and each Cc_i is a case clause then Rep(E) = {'case',LINE,Rep(E_0),[Rep(Cc_1), ..., Rep(Cc_k)]}.
+%% <case-expr> := (case <exp> <case-clause>+)
+%% <case-clause> := (<pattern>: <form>+) | (<pattern> when <guard>: <form>+)
+'__sp_case'([E|Clauses],Env) ->
+    %% TODO this doesn't respect erlang semantics where the bindings in case clauses are visible outside.
+    {Env2,RE0}=transform(E,Env),
+    {Env2,
+     {'case',lineno(),
+      RE0,
+      [begin {_Env,RC}=case_clause(C,Env2),RC end
+       || C <- Clauses ]}}.
+
+%% If E is begin B end, where B is a body, then Rep(E) = {block,LINE,Rep(B)}.
+'__sp_begin'(Es,Env) -> 
     {Env2,REs}=transform_each(Es,Env),
     {Env2,{block,lineno(),REs}}.
 
 %%  If E is E_m:E_0(E_1, ..., E_k), then Rep(E) = {call,LINE,{remote,LINE,Rep(E_m),Rep(E_0)},[Rep(E_1), ..., Rep(E_k)]}. 
 '__sp_call'([?ast_brace([M,F])|Es],Env) ->
-    {Env2,Mod}=transform(M,Env),
-    {Env3,Fn}=transform(F,Env2),
-    {Env4,Body}=transform_each(Es,Env3),
-    {Env4,{call,lineno(),{remote,lineno(),Mod,Fn},Body}};
+    {Env2,RM}=transform(M,Env),
+    {Env3,RF}=transform(F,Env2),
+    {Env4,REs}=transform_each(Es,Env3),
+    {Env4,{call,lineno(),{remote,lineno(),RM,RF},REs}};
 
 %%  If E is E_0(E_1, ..., E_k), then Rep(E) = {call,LINE,Rep(E_0),[Rep(E_1), ..., Rep(E_k)]}.
-'__sp_call'([?ast_atom(Name)=E0|Es],Env) ->
-    case env:toplevel_lookup(Env,functions,Name) of
-	{ok,{M,F}} -> '__sp_call'([?cast_brace([?cast_atom(M),?cast_atom(F)])|Es],Env);
-	_ -> 
-	    {Env2,F}=transform(E0,Env),
-	    {Env3,Body}=transform_each(Es,Env2),
-	    {Env3,{call,lineno(),F,Body}}
+'__sp_call'([?ast_atom3(_L,M,F)|Es]=E,Env) ->
+    %% Test hygiene to see if the symbol came from another module.
+    IsRemote=(M==curmod()), 
+    if IsRemote -> '__sp_call'([?cast_brace([?cast_atom(M),?cast_atom(F)])|Es],Env);
+       true ->
+	    case lookup(Env,functions,{M,F}) of 
+		{ok,{M2,F}} ->
+		    %% call to imported function
+		    '__sp_call'([?cast_brace([?cast_atom(M2),
+					      ?cast_atom(F)])|Es],Env);
+		{ok,F} ->
+		    %% call to lexical or module function (defined)
+		    {Env2,REs}=transform_each(Es,Env),
+		    {Env2,{call,lineno(),?erl_atom(lineno(),F),REs}}; 
+		_ -> %% call to module function (not yet defined)
+		    make_call(E,Env) 
+	    end
     end;
-'__sp_call'([E0|Es],Env) ->
-    {Env2,F}=transform(E0,Env),
-    {Env3,Body}=transform_each(Es,Env2),
-    {Env3,{call,lineno(),F,Body}}.
+'__sp_call'(E,Env) ->
+    make_call(E,Env).
+
+make_call([E0|Es],Env) ->
+    {Env2,RE0}=transform(E0,Env),
+    {Env3,REs}=transform_each(Es,Env2),
+    {Env3,{call,lineno(),RE0,REs}}.
 
 
 %% 4.5 Clauses
+
+%% erlang's guarded clauses take guard-sequences
+
+%% serl's guarded clauses just take one guard (a list of guard-tests):
+%% (Pat when <guard-test>+: <form>+)
+%% use (or <guard-test>+) to express guard-sequence
+
 %% There are function clauses, if clauses, case clauses and catch clauses. 
 %% A clause C is one of the following alternatives:
 
-%%  If C is a function clause ( Ps ) -> B where Ps is a pattern sequence and B is a body, then Rep(C) = {clause,LINE,Rep(Ps),[],Rep(B)}.
+function_clause(?ast_paren(Clause),Env) ->
+    [?ast_block(Match),?ast_block(Forms)]=to_blocks(Clause),
+    case Match of
+	%%  If C is a function clause ( Ps ) -> B where Ps is a pattern sequence and B is a body, then Rep(C) = {clause,LINE,Rep(Ps),[],Rep(B)}.
+	%% ((<pattern>*): <form>+)
+	[?ast_paren(Patterns)] ->
+	    clause(Patterns,[],Forms,Env);
+	%%  If C is a function clause ( Ps ) when Gs -> B where Ps is a pattern sequence, Gs is a guard sequence and B is a body, then Rep(C) = {clause,LINE,Rep(Ps),Rep(Gs),Rep(B)}.
+	%% ((<pattern>*) when <guard-test>+: <form>+)
+	[?ast_paren(Patterns),?ast_atom('when'),GuardTests] ->
+	    clause(Patterns,GuardTests,Forms,Env)
+    end.
 
-%%  If C is a function clause ( Ps ) when Gs -> B where Ps is a pattern sequence, Gs is a guard sequence and B is a body, then Rep(C) = {clause,LINE,Rep(Ps),Rep(Gs),Rep(B)}.
 
-clause_function(?ast_paren(Es),Env) ->
-    [?ast_block(MatchHead),?ast_block(Body)]=to_blocks(Es),
-    %% TODO handle guards
-    [?ast_paren(Patterns)]=MatchHead,
-    clause([Patterns,[],Body],Env).
+%% <case-clause> := (<pattern>: <exp>+) | (<pattern> when <guard>: <exp>+)
+case_clause(?ast_paren(Clause),Env) ->
+    [?ast_block(Match),?ast_block(Forms)]=to_blocks(Clause),
+    case Match of
+	%% If C is a case clause P -> B where P is a pattern and B is a body, then Rep(C) = {clause,LINE,[Rep(P)],[],Rep(B)}.
+	%% (<pattern>: <exp>+)
+	[Pattern] ->
+	    clause([Pattern],[],Forms,Env);
+	%% If C is a case clause P when Gs -> B where P is a pattern, Gs is a guard sequence and B is a body, then Rep(C) = {clause,LINE,[Rep(P)],Rep(Gs),Rep(B)}.
+	%% (<pattern> when <guard>: <exp>+)
+	[Pattern,?ast_atom('when'),GuardTests] ->
+	    clause([Pattern],GuardTests,Forms,Env)
+    end.
 
-%% clause_function([Patterns,Guards,?ast_block(Body)]) ->
-%%     clause([Patterns,when_guards(Guards),Body]).
-
-
-%% when_guards(?ast_block([?ast_atom(_,'when')|Guards])) ->
-%%     GS=map(fun (?ast_block(_Tests)=Guard) -> Guard;
-%% 	       (Test) -> ?ast_block([Test])
-%% 	end,
-%% 	Guards),
-%%     ?ast_brace(GS).
-
-%% clause([Patterns,[],Body]) ->
-%%     clause([Patterns,?ast_brace([]),Body]);
-
-clause([Patterns,[],Body],Env) ->
-    %% TODO this doesn't respect erlang semantics where the bindings in case clauses are visible outside.
+clause(Patterns,_Guard,Body,Env) ->
+    %% A <guard> is a list of <guard-test>
     {Env2,Ps}=patterns(Patterns,Env),
-    {_,Es}=transform_each(Body,Env2),
-    {clause,lineno(),
-     Ps,
-     [],%guards(Guards),
-     Es}.
+    {Env3,Es}=transform_each(Body,Env2), 
+    %{clause,lineno(), Ps, guard(Guard), Es}
+    {Env3,{clause,lineno(), Ps, [], Es}}.
 
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Quotation
 
-    
+'__sp_quote'(?ast_quote3(L,_,E),Env) ->
+    %% the quotation forms might as well be macros.
+    %% but it's easier to implement them as special forms (direct translation to erlang ast).
+    {Env,erl_syntax:revert(erl_syntax:set_pos(erl_syntax:abstract(E),L))}.
+
+
+'__sp_bquote'(?ast_bquote(E),Env) ->
+    transform(bq:completely_expand(E),Env).
+
+'__mac_block'([Es]) ->
+    ?cast_brace([?cast_atom('__block'),
+		 ?cast_integer(lineno()),
+		 ?cast_atom(curmod()),
+		 Es
+		]);
+'__mac_block'([Es,L,M]) ->
+    ?cast_brace([?cast_atom('__block'),L ,M ,Es]).
+
+'__mac_paren'([Es]) ->
+    ?cast_brace([?cast_atom('__paren'),
+		 ?cast_integer(lineno()),
+		 ?cast_atom(curmod()),
+		 Es
+		]);
+'__mac_paren'([Es,L,M]) ->
+    ?cast_brace([?cast_atom('__paren'),L ,M ,Es]).
+
+'__mac_brace'([Es]) ->
+    ?cast_brace([?cast_atom('__brace'),
+		 ?cast_integer(lineno()),
+		 ?cast_atom(curmod()),
+		 Es
+		]);
+'__mac_brace'([Es,L,M]) ->
+    ?cast_brace([?cast_atom('__brace'),L ,M ,Es]).
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Utility Functions
+
 erl_parse_f(In) ->
     case erl_scan:string(In) of
 	{ok,Tks,_} ->
@@ -516,3 +566,29 @@ erl_parse_e(In) ->
 		{ok,[R]} -> R
 	    end
     end.
+
+read(In) -> scompile:read(In,?MODULE).
+
+    
+sexpand(In) ->
+    {Env,Ast}=read(In),
+    scompile:expand(Ast,Env).
+
+seval(In) ->
+    {Env,Ast}=read(In),
+    scompile:eval(Ast,Env).
+    
+    
+%% a common idiom is a list of blocks seperated by ':' (foo a b c d: e f g h: i j k l)
+%% this functions return a list of blocks.
+
+to_blocks(Es) ->
+    {FirstBlock,Blocks}=
+	lists:splitwith(fun (E) ->
+			 case E of
+			     ?ast_block(_) -> false;
+			     _ -> true
+			 end
+		    end,
+		    Es),
+    [?cast_block(FirstBlock)|Blocks].
