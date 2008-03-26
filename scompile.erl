@@ -2,23 +2,21 @@
 -include("ast.hrl").
 -include("state.hrl").
 
--export([
+-export([curmod/0, lineno/0,
 	 read/1,read/2,
 	 expand/1,expand/2,
-	 %expands/1,expands/2, 
 	 eval/1,eval/2,eval/3,
-	 %evals/1,evals/2,evals/3,
 	 compile/1,compile/2,
-	 transform/2, transform_each/2,
-	 map_env0/3,
-	 %compile1/1,
-	 curmod/0,
-	 lineno/0,
-	 gensym/1,
+	 transform/2, transform_each/2, map_env0/3,
+	 
+	 gensym/1,reset_gensym/0,
+	 new_scope/3,new_def/4,
 	 lookup/3,
 	 warn/1,warn/2,error/1,error/2
 	 ]).
 -import(lists,[map/2,keysearch/3]).
+-import(env,[assoc/2,
+	     assoc_put/3,assoc_cons/3,assoc_append/3]).
 
 
 %% global process vars
@@ -32,6 +30,9 @@ lineno(N) -> put(?lineno,N).
 
 curmod() -> get(?curmod).
 curmod(M) -> put(?curmod,M).
+
+reset_gensym() ->
+    put(?gensym,0),ok.
 
 gensym(N) ->
     OldC=
@@ -139,7 +140,7 @@ eval_(Ast,Env,Bindings) ->
 		  {value, fun remote_funcall_handler/2}).
     
 local_funcall_handler(Name,Args,Env) ->
-    case env:lookup(functions,Name,Env) of
+    case env:lookup(Env,functions,Name) of
 	{value,{Mod,F}} -> apply(Mod,F,Args);
 	{value,F} -> apply(F,Args);
 	%% TODO should throw undef exception.
@@ -165,7 +166,8 @@ compile(Mod,TLM) when is_atom(Mod) ->
 
 %% transforms expressions for side effect.
 compile_(Env) ->
-    compile_loop(Env,0).
+    {Env2,0}=transform(?cast_paren([?cast_atom('__bof')]),Env),
+    compile_loop(Env2,0).
 
 %% I want a way to restrict toplevel forms...
 %% one easy way is for toplevel forms to return false as the transformed ast!
@@ -242,17 +244,20 @@ do_transform(Car,Body,Env) ->
 %%%% this doesn't catch error like:  X=1+X.
 %%%% but the erlang compiler would catch it, so let's not worry about it.
 transform_each(Es,Env) ->
-    map_env0(Env,fun transform/2, Es).
+    map_env0(fun transform/2, Es,Env).
 
 %% apply transformation function over expressions, start with Env.
-map_env0(Env,F,Es) ->
-    map_env0(Env,F,Es,[]). 
-map_env0(Env,_F,[],Acc) ->
+map_env0(F,Es,Env) ->
+    map_env0(F,Es,[],Env). 
+map_env0(_F,[],Acc,Env) ->
     {Env,lists:reverse(Acc)};
-map_env0(Env,F,[E|Es],Acc) ->
+map_env0(F,[E|Es],Acc,Env) ->
     {Env2,R}=F(E,Env),
-    map_env0(Env2,F,Es,[R|Acc]).
+    map_env0(F,Es,[R|Acc],Env2).
     
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Environment
 
 lookup_expander(Env,Car) ->
     %% macros shadow special forms
@@ -263,23 +268,105 @@ lookup_expander(Env,Car) ->
 	    {M,A};
 	A when is_atom(A) ->
 	    {curmod(),A}
-    end, 
-    case lookup_macro(Env,Key) of
+    end,
+    case lookup(Env,macros,Key) of
 	{ok,F} -> {macro,F};
-	_ -> case lookup_special(Env,Key) of
+	_ -> case lookup(Env,specials,Key) of
 		 {ok,F} -> {special,F}; 
 		 _ -> false
 	     end
     end.
 
-lookup_special(Env,Key) ->
-    lookup(Env,specials,Key).
-
-lookup_macro(Env,Key) ->
-    lookup(Env,macros,Key).
-
 lookup(Env,NSType,{M,_A}=Key) ->
     CurMod=curmod(),
-    if M==CurMod -> env:local_lookup(Env,NSType,Key);
-       true -> env:remote_lookup(Env,NSType,Key)
+    if M==CurMod -> local_lookup(Env,NSType,Key);
+       true -> remote_lookup(Env,NSType,Key)
+    end.
+
+
+
+%% -for a symbol a$home
+%% -look up the lexical scope for {a home} or {a true}
+%% -if not, look up the top-level of home for a
+
+local_lookup(Env,NSType,{M,A}) ->
+    case lexical_lookup(Env,NSType,{M,A}) of
+	false -> toplevel_lookup(Env,NSType,A);
+	Val -> Val
+    end.
+
+remote_lookup(Env,NSType,{M,A}) ->
+    case lexical_lookup(Env,NSType,{M,A}) of
+	%% TODO cache toplevels
+	false -> toplevel_lookup(env:new(M),NSType,A);
+	Val -> Val
+    end.
+
+toplevel_lookup(Env,NSType,A) ->
+    case lookup_definitions(Env,NSType,A) of 
+	false -> lookup_imports(Env,NSType,A); 
+	Val -> Val
+    end.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Lexical Scoping
+
+%% map a list of symbols to gensyms
+new_scope(Env,NSType,Bindings) ->
+    %% Bindings is a list of {M,A}
+    %% M and A are atoms
+    Bs=lists:zip(Bindings,
+		 gensym(length(Bindings))),
+    assoc_cons(Env,[lexical,NSType],Bs).
+
+new_def(Env,NSType,Key,Def) ->
+    assoc_put(Env,[definitions,NSType,Key],Def).
+
+%% %% assign once bindings. Error if already existing.
+%% %% probably only used for variables. I can't imagine using it for any other purpose.
+%% lexical_extend(Env,NSType,Bs) ->
+%%     NewEnv=assoc_append(Env,[lexical_base,NSType],Bs),
+%%     %% check for duplicate element.
+%%     {ok,NewBs}=assoc(NewEnv,[lexical_base,NSType]),
+%%     T=(length(NewBs)==length(ordsets:from_list(NewBs))),
+%%     if T -> NewEnv;
+%%        true -> error("Conflicting bindings. Extending with \n~p\n\tto:\n~p\n",[NewBs,Env])
+%%     end.
+
+lexical_lookup(Env,NSType,Key) ->
+    case assoc(Env,[lexical,NSType]) of
+	{ok,Scopes} -> lookup_scopes(Key,Scopes);
+	_ -> false
+    end.
+
+lookup_scopes(_Key,[]) ->
+    false;
+lookup_scopes(Key,[Scope|Ss]) ->
+    case lookup_scope(Key,Scope) of
+	false -> lookup_scopes(Key,Ss);
+	Val -> Val 
+    end.
+
+lookup_scope(_,[]) -> false;
+lookup_scope({Mod,Key}=K,[{{BMod,BKey},Val}|Bs]) ->
+    if ((Mod==true) or (Mod==BMod)) and (Key==BKey) -> {ok,Val};
+       true -> lookup_scope(K,Bs)
+    end.
+    
+lookup_definitions(Env,NSType,Key) ->
+    assoc(Env,[definitions,NSType,Key]).
+
+lookup_imports(Env,NSType,Key) ->
+    case assoc(Env,[imports]) of
+	{ok,Imports} -> lookup_imports_(Imports,NSType,Key);
+	_ -> false
+    end.
+
+%% it's annoying. A lot of these recursion helpers would be better
+%% expressed as lists:foreach and a return
+lookup_imports_([],_,_) -> false;
+lookup_imports_([{_Mod,NSs}|Imports],NSType,Key) ->
+    case assoc(NSs,[NSType,Key]) of
+	false -> lookup_imports_(Imports,NSType,Key);
+	V -> V
     end.

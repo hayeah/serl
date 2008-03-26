@@ -9,24 +9,23 @@
 
 -export([
 	 new/0,new/1,
-	 local_lookup/3,
-	 remote_lookup/3,
-	 toplevel_lookup/3,
+	 import/2,import/4,
+	 
+%% 	 local_lookup/3,
+%% 	 remote_lookup/3,
+%% 	 toplevel_lookup/3,
+	 
 	 flatten/2,
 	 exports_of/1,exports_of/2,exports_of/3,
 	 imports_of/1,
 	 definitions_of/1,
-	 toplevel_of/1,
+ 	 toplevel_of/1,
 	 
-	 import/2,import/4,
-	 shadow/3,
-	 extend/3, 
 	 assoc/2,
 	 assoc_put/3,assoc_cons/3,assoc_append/3,
 	 module_meta_info/2
 	]).
 
--compile(export_all).
 %% empty environment
 new() ->
     [].
@@ -70,88 +69,6 @@ flatten(Env,NSType) ->
     dict:to_list(Bs).
 
 
-%% -for a symbol a$home
-%% -look up the lexical scope for {a home} or {a true}
-%% -if not, look up the top-level of home for a
-
-local_lookup(Env,NSType,{M,A}) ->
-    case lookup_lexical(Env,NSType,{M,A}) of
-	false -> toplevel_lookup(Env,NSType,A);
-	Val -> Val
-    end.
-
-remote_lookup(Env,NSType,{M,A}) ->
-    case lookup_lexical(Env,NSType,{M,A}) of
-	%% TODO cache toplevels
-	false -> toplevel_lookup(env:new(M),NSType,A);
-	Val -> Val
-    end.
-
-toplevel_lookup(Env,NSType,A) ->
-    case lookup_definitions(Env,NSType,A) of 
-	false -> lookup_imports(Env,NSType,A); 
-	Val -> Val
-    end.
-
-%% lookup(Env,NSType,Key) -> 
-%%     case lookup_lexical(Env,NSType,Key) of
-%% 	false -> case lookup_definitions(Env,NSType,Key) of 
-%% 		     false -> lookup_imports(Env,NSType,Key); 
-%% 		     Val -> Val
-%% 		 end;
-%% 	Val -> Val
-%%     end.
-				   
-								 
-lookup_lexical(Env,NSType,Key) ->
-    %% fugly!
-    LexVal=
-	case assoc(Env,[lexical,NSType]) of
-	    {ok,Scopes} -> lookup_scopes(Key,Scopes);
-	    _ -> false
-	end,
-    case LexVal of
-	false -> case assoc(Env,[lexical_base,NSType]) of
-		     {ok,Scope} -> lookup_scope(Key,Scope); 
-		     _ -> false
-		 end;
-	_ -> LexVal
-    end. 
-
-lookup_scopes(_Key,[]) ->
-    false;
-lookup_scopes(Key,[Scope|Ss]) ->
-    case lookup_scope(Key,Scope) of
-	false -> lookup_scopes(Key,Ss);
-	Val -> Val 
-    end.
-
-lookup_scope(_,[]) -> false;
-lookup_scope({Mod,Key}=K,[{{BMod,BKey},Val}|Bs]) ->
-    if ((Mod==true) or (Mod==BMod)) and (Key==BKey) -> {ok,Val};
-       true -> lookup_scope(K,Bs)
-    end.
-    
-
-lookup_definitions(Env,NSType,Key) ->
-    assoc(Env,[definitions,NSType,Key]).
-
-lookup_imports(Env,NSType,Key) ->
-    case assoc(Env,[imports]) of
-	{ok,Imports} -> lookup_imports_(Imports,NSType,Key);
-	_ -> false
-    end.
-
-%% it's annoying. A lot of these recursion helpers would be better
-%% expressed as lists:foreach and a return
-lookup_imports_([],_,_) -> false;
-lookup_imports_([{_Mod,NSs}|Imports],NSType,Key) ->
-    case assoc(NSs,[NSType,Key]) of
-	false -> lookup_imports_(Imports,NSType,Key);
-	V -> V
-    end.
-
-
 import(Env,Mod) ->
     case exports_of(Mod) of
 	{ok,NS} -> assoc_cons(Env,[imports],{Mod,NS});
@@ -169,32 +86,14 @@ import(Env,Mod,NSType,Keys) ->
 	    assoc_append(Env,[imports,Mod,NSType],ImportDefs);
 	_ -> throw(no_imports)
     end. 
-    
-%% establishes a new lexical scope.
-%% map a list of symbols to gensyms
-shadow(Env,NSType,Bindings) -> 
-    assoc_cons(Env,[lexical,NSType],Bindings).
-
-%% assign once bindings. Error if already existing.
-%% probably only used for variables. I can't imagine using it for any other purpose.
-extend(Env,NSType,Bs) ->
-    NewEnv=assoc_append(Env,[lexical_base,NSType],Bs),
-    %% check for duplicate element.
-    {ok,NewBs}=assoc(NewEnv,[lexical_base,NSType]),
-    T=(length(NewBs)==length(ordsets:from_list(NewBs))), %ordsets are implemented as alists.
-    if T -> NewEnv;
-       true -> error("Conflicting bindings. Extending with \n~p\n\tto:\n~p\n",[NewBs,Env])
-    end.
 
 
 exports_of(Mod) ->
-    case meta_module_of(Mod) of
+    case module_meta_info(Mod,[serl_exports]) of
 	%% treat as serl
-	{ok,MetaMod} ->
-	    {ok,Exports}=module_meta_info__(MetaMod,[serl_exports]),
-	    {ok,[exports_of__(Mod,MetaMod,NSType,Defs) || {NSType,Defs} <- Exports]}
-	    ;
+	{ok,NSs} -> {ok,NSs};
 	%% treat as compiled and loaded normal erlang modules
+	%% use M:module_info(exports) to get exported functions.
 	_ -> case code:which(Mod) of
 		 non_existing -> false;
 		 _ -> {ok,NS}=exports_of(Mod,functions,all),
@@ -203,25 +102,27 @@ exports_of(Mod) ->
     end.
 
 
-
 exports_of(Mod,NSType) ->
-    case meta_module_of(Mod) of
-	{ok,MetaMod} ->
-	    case module_meta_info(Mod,[serl_exports,NSType]) of
-		{ok,Keys} -> {ok,exports_of__(Mod,MetaMod,NSType,Keys)};
-		_ -> false
-	    end; 
-	_ -> case NSType of
-		 functions -> exports_of(Mod,functions,all); 
-		 _ -> false
-	     end
+    case exports_of(Mod,NSType,all) of
+	{ok,NSs} -> {ok,NSs};
+	_ when NSType==functions -> exports_of(Mod,functions,all);
+	_ -> false
     end.
 
 exports_of(Mod,NSType,Keys) ->
-    case meta_module_of(Mod) of
-	{ok,MetaMod} ->
-	    {ok,exports_of__(Mod,MetaMod,NSType,Keys)};
-	_ -> %% import compatiblity with .erl modules. If compiled & available, check its module_info for exported functions.
+    case module_meta_info(Mod,[serl_exports,NSType]) of
+	{ok,NS} ->
+	    case Keys of
+		all -> {ok,{NSType,NS}};
+		_ -> Bs=[case keysearch(Key,1,NS) of
+			     {value,B} -> B;
+			     _ -> error("No definition for ~p in namespace ~p in module ~p", [Key,NSType,Mod])
+			 end
+			 || Key <- Keys],
+		     {ok,{NSType,Bs}}
+	    end;
+	_ when NSType==functions-> 
+	    %% import compatiblity with .erl modules. If compiled & available, check its module_info for exported functions.
 	    case code:ensure_loaded(Mod) of 
 		 {error,nofile} -> false; 
 		 _ ->
@@ -230,32 +131,13 @@ exports_of(Mod,NSType,Keys) ->
 			all -> {ok,{functions,[{B,{Mod,B}} || B <- Exports]}};
 			_ -> Names=ordsets:from_list(Keys),
 			     Bs=ordsets:intersection(Names,Exports),
-			     if length(Bs)==length(Keys) -> {ok,{functions,[{B,{Mod,B}} || B <- Bs]}}; 
+			     if length(Bs)==length(Keys) -> {ok,{functions,[{B,{Mod,B}} || B <- Bs]}};
 				true -> error("Undefined functions ~p in module ~p",
 					      [ordsets:subtract(Names,Exports),Mod])
 			     end 
 		    end 
-	     end
-    end.
-
-%% TODO eleganify.
-%% TODO this should probably be named 'definitions_of'
-exports_of__(Mod,MetaMod,NSType,Keys) ->
-    case module_meta_info__(MetaMod,[serl_definitions,NSType]) of
-	{ok,Bindings} ->
-	    case Keys of
-		all -> {NSType,Bindings};
-		_ -> Bs=map(
-		       fun (Key) ->
-			 case keysearch(Key,1,Bindings) of
-			    {value,B} -> B;
-			     _ -> error("No definition for ~p in namespace ~p in module ~p", [Key,NSType,Mod])
-			 end
-		       end,
-		       Keys),
-		     {NSType,Bs}
-	    end;
-	__ -> error("No definitions for namespace ~p in module ~p",[NSType,Mod])
+	     end;
+	_ -> false
     end.
 
 imports_of(Mod) ->
@@ -286,8 +168,10 @@ toplevel_of(Mod) ->
 	    {ok,V} -> V;
 	    _ -> []
 	end,
+    %% THINK: What is the toplevel?
+    %% "Toplevel" is probably used for the shell.
     [{definitions,definitions_of(Mod)},
-     {imports,Imports}] .
+     {imports,Imports}].
 
 
 
