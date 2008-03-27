@@ -3,26 +3,30 @@
 
 -serl_exports(
    [{specials,
-     [%% ast specials 
+     [%% pseudo forms
+      {'__bof',{?MOD,'__sp_bof'}},
+      {'__eof',{?MOD,'__sp_eof'}},
+      %% ast specials 
       {'__float',{?MOD,'__sp_float'}}, 
       {'__integer',{?MOD,'__sp_integer'}}, 
       {'__string',{?MOD,'__sp_string'}}, 
       {'__atom',{?MOD,'__sp_atom'}}, 
       {'__var',{?MOD,'__sp_var'}},
       {'__block',{?MOD,'__sp_block'}},
-      {'__brace',{?MOD,'__sp_brace'}},
-      {'__eof',{?MOD,'__sp_eof'}},
+      {'__brace',{?MOD,'__sp_brace'}}, 
       {'__call',{?MOD,'__sp_call'}},
       {'__quote',{?MOD,'__sp_quote'}},
       {'__bquote',{?MOD,'__sp_bquote'}},
 
-
+      %% extensions
+      {'eval-binding',{?MOD,'__sp_eval-binding'}},
       %% 4.1
       {'module',{?MOD,'__sp_module'}},
       {'export',{?MOD,'__sp_export'}},
       {'import',{?MOD,'__sp_import'}},
       {'record',{?MOD,'__sp_record'}},
       {'def',{?MOD,'__sp_def'}},
+      {'defm',{?MOD,'__sp_defm'}},
 
       %% 	 %% 4.2
       %% 	 {'integer',{?MOD,'__sp_integer'}},

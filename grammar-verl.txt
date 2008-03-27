@@ -1,0 +1,39 @@
+<module> := <header>* <definitions>*
+
+<header> := <import> | <export>
+
+<import> := (import <atom> <import-name>*)
+<import-name> := <atom>
+
+<export> := (import <export-name>*)
+<export-name> := <atom>
+
+<definition> := <def> | <defm>
+
+<defm> := (defm <atom> <string>? : <macro-clause>*)
+<macro-clause> := (<pattern> [[when <guard>]]? : <exp>+)
+
+<def> := (def <atom> <string>?: <function-clause>*)
+<function-clause> := ((<pattern>*) [[when <guard>]]? : <exp>+)
+
+
+<exp> := <literal> |
+      	 <var> |
+	 <case-expr> 
+
+<literal> := <atom> | <integer> | <float> | <string>
+
+<case-expr> := (case <exp> <case-clause>+)
+
+
+<case-clause> := (<pattern>: <exp>+) | (<pattern> when <guard>: <exp>+)
+
+<guard> := <guard-test>+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Notes:
+
+<*-clause>
+-bindings established in <*-clause> are not visible outside the clause body

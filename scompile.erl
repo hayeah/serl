@@ -5,7 +5,7 @@
 -export([curmod/0, lineno/0,
 	 read/1,read/2,
 	 expand/1,expand/2,
-	 eval/1,eval/2,eval/3,
+	 eval/1,eval/2,eval/3,eval_erl/3,
 	 compile/1,compile/2,
 	 transform/2, transform_each/2, map_env0/3,
 	 
@@ -124,21 +124,33 @@ expand_(Ast,Env) ->
 %%     eval(Ast,TLM,Bindings).
 
 eval(Ast) ->
-    %% by default eval with verl as the top-level.
+    %% by default eval with verl as the initial import.
     eval(Ast,env:new(verl)).
 eval(Ast,Env) ->
-    eval(Ast,Env,erl_eval:new_bindings()).
+    eval(Ast,Env,[]).
 eval(Ast,Env,Bindings) ->
     new_process(fun eval_/3,
 		[Ast,Env,Bindings]).
 
 eval_(Ast,Env,Bindings) ->
     {Env2,ErlAst}=transform(Ast,Env),
-    erl_eval:expr(ErlAst,Bindings,
-		  {value, fun (Name,Arg) ->
-				  local_funcall_handler(Name,Arg,Env2)
-			  end},
-		  {value, fun remote_funcall_handler/2}).
+    {Val,NewBindings}=eval_erl(ErlAst,Bindings,Env2),
+    {Env2,Val,NewBindings}.
+    
+eval_erl(ErlAst,Bindings,Env) ->
+    {value,Val,NewBindings}=erl_eval:expr(
+      ErlAst,
+      lists:foldl(
+	fun ({Key,Val},Acc) ->
+		erl_eval:add_binding(Key,Val,Acc)
+	end,
+	erl_eval:new_bindings(),
+	Bindings), 
+      {value, fun (Name,Arg) ->
+		      local_funcall_handler(Name,Arg,Env)
+	      end},
+      {value, fun remote_funcall_handler/2}),
+    {Val,erl_eval:bindings(NewBindings)}.
     
 local_funcall_handler(Name,Args,Env) ->
     case env:lookup(Env,functions,Name) of

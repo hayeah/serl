@@ -27,73 +27,134 @@
 '__rm_lit'([],Here) ->
     ?cast_string(Here).
 
+%% Translate [e0 e1 ...] to a list if not handled by some other macro
+'__sp_block'(?ast_block(Exps),Env) ->
+    transform(?cast_paren([?cast_atom(list),?cast_block(Exps)]),Env).
+
+%% Translate {e0 e1 ...} to a tuple if not handled by some other macro
+'__sp_brace'(?ast_brace(Exps),Env) ->
+    transform(?cast_paren([?cast_atom(tuple),?cast_block(Exps)]),Env).
+
+%% (eval-binding <var>) gets the value in eval-bindings named by <var>
+%% %% this is strictly a value expression.
+%% %% (eval-binding <var>) simply compiles to <var>, bypassing binding check.
+'__sp_eval-binding'([?ast_atom3(L,_M,V)],Env) ->
+    {Env,?erl_var(L,V)};
+'__sp_eval-binding'([?ast_var3(L,_M,V)],Env) ->
+    {Env,?erl_var(L,V)}.
+
+
+'__sp_eof'([],Env) ->
+    emit(Env). 
+
+emit(Env) ->
+    Module=gen_module(Env),
+    Exports=gen_exports(Env),
+    Defs=case env:assoc(Env,[definitions,functions]) of
+	     {ok,Defuns} ->
+		 [Def || {_FName,FDef} <- Defuns, {_Arity,Def} <- FDef]
+	 end, 
+    Forms=[Module]++Exports++Defs,
+    %%compile_forms(atom_to_list(curmod())++".beam",Forms),
+    {Env,Forms}.
+
+compile_forms(FileName,Forms) ->
+    Bin=case compile:forms(Forms) of
+	    {ok,_Mod,B} -> B;
+	    {ok,_,B,_Warnings} -> B;
+	    {error,Errors,Warnings} -> error("Compile Error: \n~p\n~p\n",[Errors,Warnings]);
+	    error -> error("Compile Error.")
+	end,
+    file:write_file(FileName,Bin).
+
+gen_module(Env) ->
+    case assoc(Env,[module]) of
+	{ok,{Mod,L}} -> {attribute,L,module,Mod}
+    end.
+
+%% (export a b c)
+gen_exports(Env) ->
+    Exports=
+	case env:assoc(Env,[exports,functions]) of
+	    {ok,Names} ->
+		[{Name,L,Arity} ||
+		    ?ast_atom3(L,_Mod,Name) <- Names,
+		    {Arity,_Ast} <- get_def(Env,Name)]; 
+	    _ -> []
+	end, 
+    %% just let the erlang compiler check if exported functions are defined.
+    [{attribute,L,export,[{F,Arity}]} || {F,L,Arity} <- Exports].
+
+%% emit_meta(Env) -> 
+%% %%     Bs=[{F,[{Arity,{curmod(),F}} || Arity <- Arities]}
+%% %% 	|| {F,Arities} <- Keys]
+%%     foo.
+
 
 '__sp_bof'([],Env) ->
-    {env:assoc_put(Env,[compile_env,env:new(mverl)]),0}.
+    {put_meta_env(Env,env:toplevel_of(mverl)),0}.
 
-%% %% (defm foo "a macro":
-%% %%  ((a): 'foo)
-%% %%  ((A B): '(,A ,B))
-%% %%  )
+get_meta_env(Env) ->
+    env:assoc(Env,[compile_env]).
+put_meta_env(Env,MEnv) ->
+    env:assoc_put(Env,[compile_env],MEnv).
 
 %% (defm foo "a macro":
 %%  (A: 'foo)
-%%  ([A B]: '(,A ,B))
+%%  ([A B]: 'bar)
 %%  )
 
-%% (case $V (A: 'foo) ([A B]: 'foo))
-
-%% %% macros are interpreted.
-%% '__sp_defm'(Es,Env) ->
-%%     [?ast_block(Header),?ast_block(Clauses)]=to_blocks(Es),
-%% %%     Clauses2=
-%% %% 	[{Param,Body}
-%% %% 	 || ?ast_paren([Param,Body]) <- Clauses],
-    
-%%     {Name,Doc}=
-%% 	case Header of
-%% 	    [?ast_atom(A)] -> {A,""};
-%% 	    [?ast_atom(A),?ast_string(S)] -> {A,S}
-%% 	end,
-    
-%%     %% macro is compiled using the meta-environment
-%%     [GSym]=scompile:gensym(1), 
-%%     MEnv=env:assoc(Env,[compile_env]),
-%%     {_,Ast}=transform(?cast_paren([?cast_atom('case'),?cast_var(GSym),Clauses]),Env), 
-%%     %% the macro is an ast interpreted each time it is used
-%%     %% Ast={function,lineno(), Name, 1,
-%% %% 	 [clause_function(C,MEnv) || C <- Clauses2]},
-    
-%%     %% The current expansion environment is closed over.
-%%     %% the macro is not visible to its own definition.
-%%     %%%% but the macro /can/ be recursive.
-%%     %% functions defined after the macro are not visible.
-%%     %%%% I think this is sensible...
-%%     Val=fun (MacData) ->
-%% 	 erl_eval:expr(
-%% 	   Ast,
-%% 	   erl_eval:add_binding(GSym,MacData,erl_eval:new_bindings()),
-%% 	   {value, fun (Name,Arg) ->
-%% 			   local_funcall_handler(Name,Arg,Env)
-%% 		   end},
-%% 	   {value, fun remote_funcall_handler/2}	   
-%% 	  )
-%% 	end
-    
-%%     %% augument environment with the new macro
-%%     {defm(Env,Name,Val,Ast,Doc),?def_sec}.
-
-
-%% defm(Env,Name,Val,Ast,Doc) ->
-%%     case env:assoc(Env,[definitions,macros,Name]) of
-%% 	{ok,_} -> error("Macro already defined: ~p/~p\n", [Name]); 
-%% 	_ -> ok
-%%     end,
-%%     Env2=env:assoc_put(Env,[definitions,macros,Name],Val),
-%%     Env3=env:assoc_put(Env2,[definitions,macros_info,ast,Name],Ast),
-%%     Env4=env:assoc_put(Env3,[definitions,macros_info,doc,Name],Doc),
-%%     Env4.
-
+%% macros are interpreted when used within the compiling module.
+'__sp_defm'(Es,Env) ->
+    [?ast_block(Header),?ast_block(Clauses)]=to_blocks(Es), 
+    {Name,Doc}=
+	case Header of
+	    [?ast_atom(A)] -> {A,""};
+	    [?ast_atom(A),?ast_string(S)] -> {A,S}
+	end,
+    case env:assoc(Env,[definitions,macros,Name]) of
+	{ok,_} -> error("Macro already defined: ~p/~p\n", [Name]); 
+	_ -> ok
+    end,
+    %% macro is compiled using the meta-environment
+    [GSym]=scompile:gensym(1), 
+    {ok,MEnv}=get_meta_env(Env),
+    %% the ast to be evaled when macro is used.
+    %% (case $V (A: 'foo) ([A B]: 'bar))
+    {_,Ast}=transform(
+	      ?cast_paren(
+		 [?cast_atom('case'),?cast_paren([?cast_atom('eval-binding'),
+						  ?cast_var(GSym)])
+		  |Clauses]),
+	      MEnv),
+    %% the ast to be compiled in the meta-module
+    %% %% (def $mac$<macro-name>: (($V): (case $V (A: 'foo) ([A B]: 'bar))) )
+    MacName=list_to_atom("$mac$"++atom_to_list(Name)),
+    FnAst={function,lineno(), MacName, 1,
+	   function_clause(
+	     ?cast_paren([?cast_paren([?cast_var(GSym)]),
+			  ?cast_block(
+			     [?cast_paren(
+				 [?cast_atom('case'),?cast_var(GSym)
+				  |Clauses])])]),
+	     MEnv)}, 
+    %% the macro function interprets the erl-ast of the macro definition
+    %% the macro function closes over the current  meta-environment.
+    %% the macro is not visible to its own definition.
+    %% %% but the macro /can/ be used recursively.
+    %% functions defined after the macro are not visible.
+    %% %% I think this is sensible... 
+    FnVal=fun (MacData) ->
+		  {_,Val,_}=erl_eval:expr(Ast,[{GSym,MacData}],MEnv),
+		  Val
+	  end, 
+    %% augument environment with the new macro 
+    Env2=scompile:new_def(Env,macros,Name,FnVal),
+    Env3=scompile:new_def(Env2,macros_info,Name,[{ast,FnAst},{doc,Doc}]),
+    %% do the same for MEnv, so macro is usable for macro definitions that come later.
+    MEnv2=scompile:new_def(MEnv,macros,Name,FnVal),
+    Env4=put_meta_env(Env3,MEnv2),
+    {Env4,?def_sec}.
 
 %% (def foo
 %%  "a function foo": 
@@ -170,7 +231,7 @@ compile_for(run,Forms,Env) ->
       Rs),
     {Env2,Section};
 compile_for(expand,Forms,Env) ->
-    MEnv=env:assoc(Env,[compile_env]),
+    MEnv=get_meta_env(Env),
     {MEnv2,Rs}=transform_each(Forms,MEnv),
     Section=hd(Rs),
     lists:foreach(
@@ -180,64 +241,9 @@ compile_for(expand,Forms,Env) ->
 	      end
       end,
       Rs),
-    {env:assoc_put(Env,[compile_env],MEnv2),Section}.
+    {put_meta_env(Env,MEnv2),Section}.
 
 
-
-'__sp_eof'([],Env) ->
-    emit(Env). 
-
-emit(Env) ->
-    Module=gen_module(Env),
-    Exports=gen_exports(Env),
-    Defs=case env:assoc(Env,[definitions,functions]) of
-	     {ok,Defuns} ->
-		 [Def || {_FName,FDef} <- Defuns, {_Arity,Def} <- FDef]
-	 end, 
-    Forms=[Module]++Exports++Defs,
-    compile_forms(atom_to_list(curmod())++".beam",Forms),
-    Env.
-
-compile_forms(FileName,Forms) ->
-    Bin=case compile:forms(Forms) of
-	    {ok,_Mod,B} -> B;
-	    {ok,_,B,_Warnings} -> B;
-	    {error,Errors,Warnings} -> error("Compile Error: \n~p\n~p\n",[Errors,Warnings]);
-	    error -> error("Compile Error.")
-	end,
-    file:write_file(FileName,Bin).
-
-gen_module(Env) ->
-    case assoc(Env,[module]) of
-	{ok,{Mod,L}} -> {attribute,L,module,Mod}
-    end.
-
-%% (export a b c)
-gen_exports(Env) ->
-    Exports=
-	case env:assoc(Env,[exports,functions]) of
-	    {ok,Names} ->
-		[{Name,L,Arity} ||
-		    ?ast_atom3(L,_Mod,Name) <- Names,
-		    {Arity,_Ast} <- get_def(Env,Name)]; 
-	    _ -> []
-	end, 
-    %% just let the erlang compiler check if exported functions are defined.
-    [{attribute,L,export,[{F,Arity}]} || {F,L,Arity} <- Exports].
-
-%% emit_meta(Env) -> 
-%% %%     Bs=[{F,[{Arity,{curmod(),F}} || Arity <- Arities]}
-%% %% 	|| {F,Arities} <- Keys]
-%%     foo.
-
-
-%% Translate [e0 e1 ...] to a list if not handled by some other macro
-'__sp_block'(?ast_block(Exps),Env) ->
-    transform(?cast_paren([?cast_atom(list),?cast_block(Exps)]),Env).
-
-%% Translate {e0 e1 ...} to a tuple if not handled by some other macro
-'__sp_brace'(?ast_brace(Exps),Env) ->
-    transform(?cast_paren([?cast_atom(tuple),?cast_block(Exps)]),Env).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -344,6 +350,7 @@ gen_exports(Env) ->
 %% %% Individual patterns are represented as follows: 
 %% %%  If P is an atomic literal L, then Rep(P) = Rep(L).
 
+
 patterns(Patterns,Env) ->
     scompile:map_env0(fun pattern/2,Patterns,Env).
 
@@ -357,8 +364,19 @@ pattern(?ast_var3(_L,M,V)=Var,Env) ->
 	{ok,_Alias} -> transform(Var,Env);
 	%% the binding occurence
 	false -> transform(Var,scompile:lexical_extend(Env,vars,[{M,V}])) 
-    end; 
+    end;
+pattern(?ast_block(Es)=List,Env) ->
+    %% first pass generates the bindings
+    {Env2,_}=patterns(Es,Env),
+    %% second pass generates the code
+    transform(List,Env2);
+pattern(?ast_brace(Es)=List,Env) ->
+    %% first pass generates the bindings
+    {Env2,_}=patterns(Es,Env),
+    %% second pass generates the code
+    transform(List,Env2); 
 pattern(P,Env) ->
+    error("Unsupported pattern: ~p\n",[P]),
     {Env2,P2}=scompile:expand1(P,Env),
     pattern(P2,Env2).
 
@@ -413,13 +431,12 @@ pattern(P,Env) ->
 %% <case-expr> := (case <exp> <case-clause>+)
 %% <case-clause> := (<pattern>: <form>+) | (<pattern> when <guard>: <form>+)
 '__sp_case'([E|Clauses],Env) ->
-    %% TODO this doesn't respect erlang semantics where the bindings in case clauses are visible outside.
+    %% this doesn't respect erlang semantics where the bindings in case clauses are visible outside.
     {Env2,RE0}=transform(E,Env),
     {Env2,
      {'case',lineno(),
       RE0,
-      [begin {_Env,RC}=case_clause(C,Env2),RC end
-       || C <- Clauses ]}}.
+      [case_clause(C,Env2)|| C <- Clauses ]}}.
 
 %% If E is begin B end, where B is a body, then Rep(E) = {block,LINE,Rep(B)}.
 '__sp_begin'(Es,Env) -> 
@@ -435,9 +452,10 @@ pattern(P,Env) ->
 
 %%  If E is E_0(E_1, ..., E_k), then Rep(E) = {call,LINE,Rep(E_0),[Rep(E_1), ..., Rep(E_k)]}.
 '__sp_call'([?ast_atom3(_L,M,F)|Es]=E,Env) ->
-    %% Test hygiene to see if the symbol came from another module.
+    %% For hygiene, test to see if the symbol came from another module.
     IsRemote=(M==curmod()), 
-    if IsRemote -> '__sp_call'([?cast_brace([?cast_atom(M),?cast_atom(F)])|Es],Env);
+    if IsRemote ->
+	    '__sp_call'([?cast_brace([?cast_atom(M),?cast_atom(F)])|Es],Env);
        true ->
 	    case lookup(Env,functions,{M,F}) of 
 		{ok,{M2,F}} ->
@@ -469,6 +487,8 @@ make_call([E0|Es],Env) ->
 %% (Pat when <guard-test>+: <form>+)
 %% use (or <guard-test>+) to express guard-sequence
 
+%% bindings made in serl's clauses are not visible outside.
+
 %% There are function clauses, if clauses, case clauses and catch clauses. 
 %% A clause C is one of the following alternatives:
 
@@ -487,25 +507,24 @@ function_clause(?ast_paren(Clause),Env) ->
 
 
 %% <case-clause> := (<pattern>: <exp>+) | (<pattern> when <guard>: <exp>+)
-case_clause(?ast_paren(Clause),Env) ->
-    [?ast_block(Match),?ast_block(Forms)]=to_blocks(Clause),
-    case Match of
+case_clause(?ast_paren([Pattern|GuardedBody]),Env) ->
+    case GuardedBody of
 	%% If C is a case clause P -> B where P is a pattern and B is a body, then Rep(C) = {clause,LINE,[Rep(P)],[],Rep(B)}.
 	%% (<pattern>: <exp>+)
-	[Pattern] ->
+	[?ast_block(Forms)] ->
 	    clause([Pattern],[],Forms,Env);
 	%% If C is a case clause P when Gs -> B where P is a pattern, Gs is a guard sequence and B is a body, then Rep(C) = {clause,LINE,[Rep(P)],Rep(Gs),Rep(B)}.
 	%% (<pattern> when <guard>: <exp>+)
-	[Pattern,?ast_atom('when'),GuardTests] ->
-	    clause([Pattern],GuardTests,Forms,Env)
+	[?ast_atom('when'),Guard,?ast_block(Forms)] ->
+	    clause([Pattern],Guard,Forms,Env)
     end.
 
 clause(Patterns,_Guard,Body,Env) ->
     %% A <guard> is a list of <guard-test>
     {Env2,Ps}=patterns(Patterns,Env),
-    {Env3,Es}=transform_each(Body,Env2), 
+    {_,Es}=transform_each(Body,Env2), 
     %{clause,lineno(), Ps, guard(Guard), Es}
-    {Env3,{clause,lineno(), Ps, [], Es}}.
+    {clause,lineno(), Ps, [], Es}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -577,11 +596,18 @@ sexpand(In) ->
 seval(In) ->
     {Env,Ast}=read(In),
     scompile:eval(Ast,Env).
+seval(In,Bindings) ->
+    {Env,Ast}=read(In),
+    scompile:eval(Ast,Env,Bindings).
     
     
 %% a common idiom is a list of blocks seperated by ':' (foo a b c d: e f g h: i j k l)
 %% this functions return a list of blocks.
 
+%% this is somewhat problematic
+%% no [] is allowed in the first list of items
+%% (foo [a b] c d: e f g) would fail, perhaps surprisingly.
+%%%% at least it surprised me.
 to_blocks(Es) ->
     {FirstBlock,Blocks}=
 	lists:splitwith(fun (E) ->
