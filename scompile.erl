@@ -211,14 +211,13 @@ new_process(Fun,Args) ->
     new_process(Fun,Args,#scompile_S{}).
 new_process(Fun,Args,S) ->
     Return=self(),
-    Sync=make_ref(),
-    spawn_link(
-      fun () -> set_state(S),
-		R=apply(Fun,Args),
-		Return ! {Sync,R}
-      end),
+    Sync=spawn_link(
+	   fun () -> set_state(S),
+		     R=apply(Fun,Args),
+		     Return ! {self(),R}
+	   end),
     receive
-	{Sync,R} -> R
+	{Sync,R} -> R 
     after 120000 ->
 	    %% time out after 2 minutes
 	    error("Compiler Timeout")
@@ -242,7 +241,6 @@ do_transform(?ast_paren([Car|Body])=Exp,Env) ->
 		error:{serl_error,Reason} ->
 			io:format("~s:~w: ~s\n",
 				  [curmod(),lineno(),Reason]), 
-		    %% printer:p(Exp),
 		    erlang:error({serl_error,Reason}) 
 	    end;
 	{macro,F} ->

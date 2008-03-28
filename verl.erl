@@ -188,7 +188,7 @@ put_meta_env(Env,MEnv) ->
 	    [A,?ast_string(S)] -> {A,S}
 	end, 
     case env:assoc(Env,[definitions,functions,FName,Arity]) of
-	{ok,_} -> error("Function redefined: ~p/~p\n", [FName,Arity]); 
+	{ok,_} -> error("Function already defined: ~p/~p", [FName,Arity]); 
 	_ -> ok
     end,
     %% transforming the body should only affect the lexical environment. So we discard the returned environment.

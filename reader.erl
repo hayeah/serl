@@ -339,6 +339,9 @@ here_short(Close) when is_integer(Close) ->
     Str2=lists:dropwhile(fun (C) -> member(C,?spacen) end,reverse(Str1)),
     reverse(Str2).
     
+a_comment() ->
+    skip_until("\n"),
+    nil.
 
 %% $( == 40,  but it messes up indentation
 %% $) == 41
@@ -351,8 +354,11 @@ exp_dispatch(91) ->
 %% $" == 34 string
 exp_dispatch(34) ->
     a_string();
-exp_dispatch($#) -> 
-    a_reader_macro();
+exp_dispatch($#) ->
+    case peek() of
+	$# -> read(), a_comment();
+	_ -> a_reader_macro()
+    end;
 %% $\' == 39  quote
 exp_dispatch(39) ->
     read(),
@@ -388,10 +394,12 @@ exp_dispatch(C) ->
 
 an_exp() -> skip_while(?spacen),
 	 case peek() of
-	     eof -> eof;
-	     _ -> R=exp_dispatch(peek()),
-		  skip_while(?spacen), 
-		  R
+	     eof -> eof; 
+	     _ -> case exp_dispatch(peek()) of
+		      nil -> an_exp();
+		      R-> skip_while(?spacen),
+			  R
+		  end
 	 end.
 
     
