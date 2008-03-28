@@ -259,7 +259,7 @@ compile_for(expand,Forms,Env) ->
 ?defsp('__sp_module',[?ast_atom(Mod)]) ->
     CM=curmod(),
     if CM==Mod -> ok;
-       true -> error("incorrect module name: ~p\n",[Mod])
+       true -> error("Module name mismatch: ~p",[Mod])
     end,
     {assoc_put(Env,[module],{attribute,Line,module,Mod}),
      ?module_sec}.
@@ -379,7 +379,7 @@ pattern(?ast_brace(Es)=List,Env) ->
     %% second pass generates the code
     transform(List,Env2); 
 pattern(P,Env) ->
-    error("Unsupported pattern: ~p\n",[P]),
+    error("Invalid pattern."),
     {Env2,P2}=scompile:expand1(P,Env),
     pattern(P2,Env2).
 
@@ -400,7 +400,7 @@ pattern(P,Env) ->
 '__sp_var'(?ast_paren([?ast_atom3(Line,M,_),V]),Env) ->
     case lookup(Env,vars,{M,V}) of
 	{ok,Alias} -> {Env,?erl_var(Line,Alias)}; 
-	false -> error("~p:~p Variable not declared: ~p",[M,Line,V])
+	false -> error("Variable not declared: ~s",[V])
     end.
 
 

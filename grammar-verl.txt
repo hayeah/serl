@@ -24,7 +24,12 @@
 <literal> := <atom> | <integer> | <float> | <string>
 
 <case-expr> := (case <exp> <case-clause>+)
-
+<try-expr> :=
+ (try exp
+      [[:of (<pattern> <exp>+)+]]?
+      [[:catch (<pattern> <exp>+)+]]?
+      [[:after <exp>+]]?
+     )
 
 <case-clause> := (<pattern>: <exp>+) | (<pattern> when <guard>: <exp>+)
 

@@ -81,13 +81,13 @@ get_state(Field) ->
 warn(Message) ->
     warn(Message,[]).
 warn(Message,Args) ->
-    io:format(Message,Args).
+   io:format(Message,Args).
 
 error(Message) ->
     error(Message,[]).
 error(Message,Args) ->
-    io:format(Message,Args),
-    erlang:error(serl_error).
+    Reason=io_lib:format(Message,Args),
+    erlang:error({serl_error,Reason}).
 
 
 read(In) ->
@@ -177,7 +177,7 @@ compile(Mod,TLM) when is_atom(Mod) ->
 		[env:new(TLM)],
 		#scompile_S{curmod=Mod,input=In}).
 
-%% transforms expressions for side effect.
+%% transforms expressions for side effect on the environment.
 compile_(Env) ->
     {Env2,0}=transform(?cast_paren([?cast_atom('__bof')]),Env),
     compile_loop(Env2,0).
@@ -220,6 +220,7 @@ new_process(Fun,Args,S) ->
     receive
 	{Sync,R} -> R
     after 120000 ->
+	    %% time out after 2 minutes
 	    error("Compiler Timeout")
     end. 
 
@@ -228,14 +229,34 @@ transform(?ast_paren3(L,_M,_)=Exp,Env) ->
     lineno(L),
     do_transform(Exp,Env);
 transform(Exp,Env) when is_tuple(Exp) ->
-    [Car,L,M|Body]=tuple_to_list(Exp),
+    [Car,L,M|Es]=tuple_to_list(Exp),
+    %% source tracking
     lineno(L), 
-    do_transform(?cast_paren([?ast_atom3(L,M,Car)|Body]),Env).
+    do_transform(?cast_paren([?ast_atom3(L,M,Car)|Es]),Env).
 
 do_transform(?ast_paren([Car|Body])=Exp,Env) ->
     case lookup_expander(Env,Car) of
-	{special,F} -> F(Exp,Env);
-	{macro,F} -> transform(F(Exp),Env);
+	{special,F} ->
+	    try F(Exp,Env)
+	    catch
+		error:{serl_error,Reason} ->
+			io:format("~s:~w: ~s\n",
+				  [curmod(),lineno(),Reason]), 
+		    %% printer:p(Exp),
+		    erlang:error({serl_error,Reason}) 
+	    end;
+	{macro,F} ->
+	    Exp2=
+		try F(Exp)
+		catch
+		    error:{serl_error,Reason} ->
+			io:format("~s:~w: ~s\n",
+				  [curmod(),lineno(),Reason]),
+			printer:p(Exp),
+			erlang:error({serl_error,lists:flatten(Reason)})
+		end,
+	    %% maintain tail recursiveness
+	    transform(Exp2,Env);
 	_ -> case lookup_expander(Env,?cast_atom('__call')) of
 		 false -> error("No expander for function call.");
 		 _ -> transform(?cast_paren([?cast_atom('__call'),Car|Body]),
@@ -243,20 +264,6 @@ do_transform(?ast_paren([Car|Body])=Exp,Env) ->
 	     end
     end.
 
-%% transform(Exp,Env) ->
-%%     case Exp of 
-%% 	?ast_paren3(L,_M,[Car|Body]) ->
-%% 	    %% source tracking
-%% 	    lineno(L),
-%% 	    do_transform(Car,Body,Env) ;
-%% 	%% TODO no need to distinguish between ast and normal expressions.
-%% 	_ when is_tuple(Exp) -> % an ast element 
-%% 	    L=element(2,Exp), %% somewhat a kludge... requires every ast to have L as the second element.
-%% 	    lineno(L),
-%% 	    %% Exp2=?cast_paren(tuple_to_list(Exp)), 
-%% 	    Exp2=Exp,
-%% 	    do_transform(element(1,Exp),Exp,Env) 
-%%     end.
 
 %% doesn't really conform to "eval in some order"
 %% for a series of expressions, transform_each extends environment from left to right.
