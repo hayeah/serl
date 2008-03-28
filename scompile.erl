@@ -11,7 +11,7 @@
 	 
 	 gensym/1,reset_gensym/0,
 	 lexical_shadow/3,lexical_extend/3,
-	 new_def/4,
+	 get_def/3,new_def/4,
 	 lookup/3,toplevel_lookup/3,
 	 warn/1,warn/2,error/1,error/2
 	 ]).
@@ -223,34 +223,40 @@ new_process(Fun,Args,S) ->
 	    error("Compiler Timeout")
     end. 
 
+transform(?ast_paren3(L,_M,_)=Exp,Env) ->
+    %% source tracking
+    lineno(L),
+    do_transform(Exp,Env);
+transform(Exp,Env) when is_tuple(Exp) ->
+    [Car,L,M|Body]=tuple_to_list(Exp),
+    lineno(L), 
+    do_transform(?cast_paren([?ast_atom3(L,M,Car)|Body]),Env).
 
-%% compile(Exp) ->
-%%     foo.
-%%     %%transform().
-
-transform(Exp,Env) ->
-    %DExp=desugar:renest(Exp),
-    DExp=Exp,
-    case DExp of 
-	?ast_paren([Car|Body]) ->
-	    do_transform(Car,Body,Env) ;
-	_ when is_tuple(DExp) -> % an ast element
-	    do_transform(element(1,DExp),DExp,Env) 
+do_transform(?ast_paren([Car|Body])=Exp,Env) ->
+    case lookup_expander(Env,Car) of
+	{special,F} -> F(Exp,Env);
+	{macro,F} -> transform(F(Exp),Env);
+	_ -> case lookup_expander(Env,?cast_atom('__call')) of
+		 false -> error("No expander for function call.");
+		 _ -> transform(?cast_paren([?cast_atom('__call'),Car|Body]),
+				Env) 
+	     end
     end.
 
-do_transform(Car,Body,Env) ->
-    case lookup_expander(Env,Car) of
-	{special,F} -> F(Body,Env);
-	{macro,F} -> transform(F(Body),Env);
-	_ -> case lookup_expander(Env,?cast_atom('__call')) of
-		 %% this is probably correct. A function call should follow the convention of the active module.
-		 %% it could be a special form or a macro.
-		 %% %% TODO Hmmmm... should I inspect the function header so I know how 'call' should actually be used?
-		 {special,F} -> F([Car|Body],Env);
-		 {macro,F} -> transform(F(Body),Env);
-		 _ -> error("cannot find an expander for functional call.")
-	     end
-    end. 
+%% transform(Exp,Env) ->
+%%     case Exp of 
+%% 	?ast_paren3(L,_M,[Car|Body]) ->
+%% 	    %% source tracking
+%% 	    lineno(L),
+%% 	    do_transform(Car,Body,Env) ;
+%% 	%% TODO no need to distinguish between ast and normal expressions.
+%% 	_ when is_tuple(Exp) -> % an ast element 
+%% 	    L=element(2,Exp), %% somewhat a kludge... requires every ast to have L as the second element.
+%% 	    lineno(L),
+%% 	    %% Exp2=?cast_paren(tuple_to_list(Exp)), 
+%% 	    Exp2=Exp,
+%% 	    do_transform(element(1,Exp),Exp,Env) 
+%%     end.
 
 %% doesn't really conform to "eval in some order"
 %% for a series of expressions, transform_each extends environment from left to right.
@@ -348,7 +354,8 @@ lexical_extend(Env,NSType,NewKeys) ->
 	Conflicts -> error("Lexical binding conflicts: ~p",[Conflicts])
     end.
     
-
+get_def(Env,NSType,Key) ->
+    assoc(Env,[definitions,NSType,Key]).
 new_def(Env,NSType,Key,Def) ->
     assoc_put(Env,[definitions,NSType,Key],Def).
 

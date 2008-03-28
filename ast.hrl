@@ -1,6 +1,6 @@
 
 %% AST datatypes
-
+%% the first 3 elements of every AST type must be name,lineno,module
 
 -define(ast_float3(L,Mod,F),{'__float',L,Mod,F}). 
 -define(ast_integer3(L,Mod,I),{'__integer',L,Mod,I}). 
@@ -13,6 +13,10 @@
 -define(ast_paren3(L,Mod,Body),{'__paren',L,Mod,Body}).
 -define(ast_brace3(L,Mod,Body),{'__brace',L,Mod,Body}).
 -define(ast_block3(L,Mod,Body),{'__block',L,Mod,Body}).
+
+-define(ast_paren2(L,Body),{'__paren',L,curmod(),Body}).
+-define(ast_brace2(L,Body),{'__brace',L,curmod(),Body}).
+-define(ast_block2(L,Body),{'__block',L,curmod(),Body}).
 
 %% ast accessors, used for pattern matching
 

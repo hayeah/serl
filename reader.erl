@@ -155,8 +155,8 @@ a_list_rec(CloseParen,Acc) ->
     end.
 
 a_paren() ->
-    char("("),
-    paren([]).
+    char("("), 
+    paren([],lineno()).
 
 %% (a b . if :c d e ) => (if :c d e (a b))
 %% (a b . if :c d e ) => (if [c d e] (a b))
@@ -164,33 +164,41 @@ a_paren() ->
 %%%% Let me think about which way is better.
 %%%% The second is more syntatically consistent.
 
-paren(Acc) ->
+paren(Acc,Line) ->
     skip_while(?spacen),
     case peek() of
 	%% $) == 41
-	41 -> read(), ?cast_paren(reverse(Acc));
-	$: -> read(), paren_block([],Acc);
+	41 -> read(), ?ast_paren2(Line,reverse(Acc));
+	$: -> read(), paren_block([],Acc,lineno(),Line);
 	%% $. == 46
-	46 -> read(), paren_nest(Acc);
+	46 -> read(), paren_nest(Acc,Line);
 	%% $~ == 126
 	%% 126 -> read(), paren_splice(Acc); 
 	eof -> error("Unexpected eof while reading paren.");
-	_ -> paren([an_exp()|Acc])
+	_ -> paren([an_exp()|Acc],Line)
     end.
 
-paren_nest(Acc) ->
-    Nest=paren([]),
-    ?cast_paren(Nest++[?cast_paren(reverse(Acc))]). 
+paren_nest(Acc,ContainerLine) ->
+    LineofNest=lineno(),
+    Nest=paren([],LineofNest),
+    ?ast_paren2(LineofNest,
+		Nest++[?ast_paren2(ContainerLine,reverse(Acc))]). 
     
-paren_block(Block,Acc) ->
+paren_block(Block,Acc,Line,ContainerLine) ->
+    %% Line is the start of :
+    %% ContainerLine is the opening ( or . where : is contained within.
     skip_while(?spacen),
     case peek() of
-	41 -> read(),?cast_paren(reverse([?cast_block(reverse(Block))|Acc]));
-	$: -> read(),paren_block([],[?cast_block(reverse(Block))|Acc]);
+	41 -> read(),?ast_paren2(ContainerLine,
+				 reverse([?ast_block2(Line,reverse(Block))|Acc]));
+	$: -> read(),paren_block([],
+				 [?ast_block2(Line,reverse(Block))|Acc],
+				 lineno(),ContainerLine);
 	46 -> read(),
-	      paren_nest(reverse([?cast_block(reverse(Block))|Acc]));
+	      paren_nest(reverse([?ast_block2(Line,reverse(Block))|Acc]),
+			 ContainerLine);
 	eof -> error("Unexpected eof while reading paren.");
-	_ -> paren_block([an_exp()|Block],Acc)
+	_ -> paren_block([an_exp()|Block],Acc,Line,ContainerLine)
     end.
 
 
