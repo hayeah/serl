@@ -21,6 +21,7 @@
 %% -define(defsp(Name,Args),Name(Args,Env)).
 
 -define(defsp(Name,Args),Name(?ast_paren3(Line,_Mod,[_|Args]),Env)).
+-define(defm(Name,Args),Name(?ast_paren3(_,_Mod,[_|Args]))).
 
 %% -define(atomic_literals,[integer,float,string,atom]).
 %% -define(patterns,[match,var,tuple,nil,cons,op,record,record_index]++?atomic_literals).
@@ -34,7 +35,7 @@
 %% Translate [e0 e1 ...] to a list if not handled by some other macro
 ?defsp('__sp_block',[Es]) ->
     Line,
-    transform(?cast_paren([?cast_atom(list),?cast_block(Es)]),Env).
+    transform(?cast_paren([?cast_atom(ls),?cast_block(Es)]),Env).
 
 %% Translate {e0 e1 ...} to a tuple if not handled by some other macro
 ?defsp('__sp_brace',[Es]) ->
@@ -553,39 +554,49 @@ clause(Patterns,_Guard,Body,Line,Env) ->
     %% but it's easier to implement them as special forms (direct translation to erlang ast).
     {Env,erl_syntax:revert(erl_syntax:set_pos(erl_syntax:abstract(E),Line))}.
 
-
 ?defsp('__sp_bquote',?ast_bquote(E)) ->
     Line,
     transform(bq:completely_expand(E),Env).
 
 
-%% '__mac_block'([Es]) ->
-%%     ?cast_brace([?cast_atom('__block'),
-%% 		 ?cast_integer(lineno()),
-%% 		 ?cast_atom(curmod()),
-%% 		 Es
-%% 		]);
-%% '__mac_block'([Es,L,M]) ->
-%%     ?cast_brace([?cast_atom('__block'),L ,M ,Es]).
+-define(defast_mac(Name,Type),
+	?defm(Name,[E]) ->
+	       mk_ast(Type,E,lineno(),curmod()); 
+	?defm(Name,[E,L,M]) ->
+	       mk_ast(Type,E,L,M)).
 
-%% '__mac_paren'([Es]) ->
-%%     ?cast_brace([?cast_atom('__paren'),
-%% 		 ?cast_integer(lineno()),
-%% 		 ?cast_atom(curmod()),
-%% 		 Es
-%% 		]);
-%% '__mac_paren'([Es,L,M]) ->
-%%     ?cast_brace([?cast_atom('__paren'),L ,M ,Es]).
+-define(defasts_mac(Name,Type),
+	?defm(Name,[?ast_block(Es)]) ->
+	       ?cast_block([?cast_paren([?cast_atom(Type),E]) || E <- Es]);
+	?defm(Name,[?ast_block(Es),?ast_block([L,M])]) ->
+	       ?cast_block([?cast_paren([?cast_atom(Type),E,L,M]) || E <- Es])).
 
-%% '__mac_brace'([Es]) ->
-%%     ?cast_brace([?cast_atom('__brace'),
-%% 		 ?cast_integer(lineno()),
-%% 		 ?cast_atom(curmod()),
-%% 		 Es
-%% 		]);
-%% '__mac_brace'([Es,L,M]) ->
-%%     ?cast_brace([?cast_atom('__brace'),L ,M ,Es]).
+mk_ast(Type,E,L,M) ->
+    ?cast_brace([?cast_atom(Type),L ,M ,E]).
 
+%% (atom: a) => 'a
+?defast_mac('__mac_float','__float'). 
+?defast_mac('__mac_integer','__integer'). 
+?defast_mac('__mac_string','__string'). 
+?defast_mac('__mac_atom','__atom'). 
+?defast_mac('__mac_var','__var'). 
+?defast_mac('__mac_paren','__paren'). 
+?defast_mac('__mac_brace','__brace').
+?defast_mac('__mac_block','__block').
+
+%% (atoms: a b c) => ['a 'b 'c]
+%% (atoms: a b c: L M)
+?defasts_mac('__mac_floats','__float'). 
+?defasts_mac('__mac_integers','__integer'). 
+?defasts_mac('__mac_strings','__string'). 
+?defasts_mac('__mac_atoms','__atom'). 
+?defasts_mac('__mac_vars','__var'). 
+?defasts_mac('__mac_parens','__paren'). 
+?defasts_mac('__mac_braces','__brace').
+?defasts_mac('__mac_blocks','__block').
+
+
+    
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Utility Functions
@@ -612,16 +623,31 @@ sread(In) ->
     {_,Ast}=read(In),
     printer:p(Ast),
     Ast.
+
+sexpand1(In) ->
+    {Env,Ast}=read(In),
+    scompile:expand1(Ast,Env).
+
 sexpand(In) ->
     {Env,Ast}=read(In),
     scompile:expand(Ast,Env).
+
+psexpand1(In) ->
+    {Env,Ast}=read(In),
+    {_,R}=scompile:expand1(Ast,Env),
+    printer:p(R).
+
+psexpand(In) ->
+    {Env,Ast}=read(In),
+    {_,R}=scompile:expand(Ast,Env),
+    printer:p(R).
 
 seval(In) ->
     {Env,Ast}=read(In),
     scompile:eval(Ast,Env).
 seval(In,Bindings) ->
     {Env,Ast}=read(In),
-    scompile:eval(Ast,Env,Bindings).
+    scompile:eval(Ast,Env,Bindings). 
     
     
 %% a common idiom is a list of blocks seperated by ':' (foo a b c d: e f g h: i j k l)

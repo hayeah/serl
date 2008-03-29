@@ -4,10 +4,10 @@
 
 -export([curmod/0, lineno/0,
 	 read/1,read/2,
-	 expand/1,expand/2,
+	 expand1/1,expand1/2,expand/1,expand/2,
 	 eval/1,eval/2,eval/3,eval_erl/3,
 	 compile/1,compile/2,
-	 transform/2, transform_each/2, map_env0/3,
+	 transform1/2, transform/2, transform_each/2, map_env0/3,
 	 
 	 gensym/1,reset_gensym/0,
 	 lexical_shadow/3,lexical_extend/3,
@@ -106,14 +106,25 @@ read_(Env) ->
 %% expands(In,TLM) ->
 %%     expand(read(In,TLM),TLM). 
 
+expand1(Ast) ->
+    expand1(Ast,env:new(verl)).
+expand1(Ast,Env) ->
+    new_process(fun expand1_/2,
+		[Ast,Env]). 
+expand1_(Ast,Env) ->
+    transform1(Ast,Env).
+
 expand(Ast) ->
     expand(Ast,env:new(verl)).
+
 expand(Ast,Env) ->
     new_process(fun expand_/2,
 		[Ast,Env]).
     
 expand_(Ast,Env) ->
     transform(Ast,Env).
+
+
 
 %% evals(In) ->
 %%     evals(In,verl).
@@ -223,20 +234,37 @@ new_process(Fun,Args,S) ->
 	    error("Compiler Timeout")
     end. 
 
-transform(?ast_paren3(L,_M,_)=Exp,Env) ->
+transform1(?ast_paren3(L,_M,_)=Exp,Env) ->
     %% source tracking
     lineno(L),
-    do_transform(Exp,Env);
-transform(Exp,Env) when is_tuple(Exp) ->
+    case do_transform(Exp,Env) of
+	{special,Result} -> Result;
+	{macro,Result} -> Result
+    end;
+transform1(Exp,Env) when is_tuple(Exp) ->
     [Car,L,M|Es]=tuple_to_list(Exp),
     %% source tracking
     lineno(L), 
-    do_transform(?cast_paren([?ast_atom3(L,M,Car)|Es]),Env).
+    transform1(?cast_paren([?ast_atom3(L,M,Car)|Es]),Env).
 
+transform(?ast_paren3(L,_M,_)=Exp,Env) ->
+    %% source tracking
+    lineno(L),
+    case do_transform(Exp,Env) of
+	{special,{_Env2,_Result}=Result} -> Result;
+	{macro,{_,Exp2}} -> transform(Exp2,Env)
+    end;
+transform(Exp,Env) when is_tuple(Exp) ->
+    [Car,L,M,E]=tuple_to_list(Exp),
+    %% source tracking
+    lineno(L), 
+    transform(?cast_paren([?ast_atom3(L,M,Car),E]),Env).
+
+%% do one expansion
 do_transform(?ast_paren([Car|Body])=Exp,Env) ->
     case lookup_expander(Env,Car) of
 	{special,F} ->
-	    try F(Exp,Env)
+	    try {special,F(Exp,Env)}
 	    catch
 		{serl_error,Reason} ->
 			io:format("~s:~w: ~s\n",
@@ -245,19 +273,17 @@ do_transform(?ast_paren([Car|Body])=Exp,Env) ->
 		    erlang:error({serl_error,Reason}) 
 	    end;
 	{macro,F} ->
-	    Exp2=
-		try F(Exp)
-		catch
-		    {serl_error,Reason} ->
-			io:format("~s:~w: ~s\n",
-				  [curmod(),lineno(),Reason]),
-			printer:p(Exp),
-			%% raise the exception as error class so it's not caught again by previous transform calls.
-			erlang:error({serl_error,lists:flatten(Reason)})
-		end,
-	    %% maintain tail recursiveness
-	    transform(Exp2,Env);
+	    try {macro,{Env,F(Exp)}}
+	    catch
+		{serl_error,Reason} ->
+		    io:format("~s:~w: ~s\n",
+			      [curmod(),lineno(),Reason]),
+		    printer:p(Exp),
+		    %% raise the exception as error class so it's not caught again by previous transform calls.
+		    erlang:error({serl_error,lists:flatten(Reason)})
+	    end;
 	_ -> case lookup_expander(Env,?cast_atom('__call')) of
+		 %% make sure to raise error, otherwise go into loop.
 		 false -> error("No expander for function call.");
 		 _ -> transform(?cast_paren([?cast_atom('__call'),Car|Body]),
 				Env) 

@@ -1,3 +1,6 @@
+%% Guy L. Steele proved it right. I have not tested it (not exhuastively anyway).
+%% See CLTL Appendix B.
+
 -module(bq).
 -include("ast.hrl").
 
@@ -5,7 +8,7 @@
 		  error/2]
 	).
 
--export([qq/1,qqp/1,
+-export([q/1,qq/1,qqp/1,
 	 simplify/1,
 	 completely_expand/1
  	]).
@@ -31,6 +34,10 @@ curmod() ->
 lineno() ->
     1.
 
+q(In) ->
+    {_Env,?ast_bquote(X)}=scompile:read(In),
+    simplify(expand(X)).
+    
 qq(In) ->
     {_Env,?ast_bquote(X)}=scompile:read(In),
     completely_expand(X).
@@ -50,6 +57,8 @@ gen_code({data,D}) ->
 gen_code({ls,_}=L) ->
     gen_glist(L);
 gen_code({'ls*',_,_}=L) ->
+    gen_glist(L);
+gen_code({cat,_}=L) ->
     gen_glist(L); 
 gen_code({block,GL}) -> 
     %% should provide macros block,paren,brace to build syntax objects.
@@ -150,7 +159,7 @@ attach_append(Item,Result) ->
 		 true -> {cat,Item}
 	      end;
 	{cat,Args} -> {cat,[Item|Args]};
-	_ -> {cat,[Item|Result]}
+	_ -> {cat,[Item,Result]}
     end.
 
 attach_conses(Items,Result) ->
