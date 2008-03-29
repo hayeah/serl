@@ -37,6 +37,7 @@ p(Arg) ->
 %% 	    ?ast_atom('__var') -> p_var(T);
 %% 	    _ -> p_paren(L)
 %%     end;
+
 p_(?ast_paren(L)) -> p_paren(L);
 p_(?ast_block(L)) -> p_block(L);
 p_(?ast_brace(L)) -> p_brace(L);
@@ -69,8 +70,14 @@ p_var(V) ->
 p_paren(L) ->
     p_glist("()",L).
 
-p_block(L) ->
-    p_glist("[]",L).
+p_block([]) ->
+    io:put_chars(":");
+p_block([H|T]) ->
+    io:put_chars(":"),
+    p_(H),
+    lists:foreach(
+      fun (I) -> io:put_chars(" "),p_(I) end,
+      T). 
 
 p_brace(L) ->
     p_glist("{}",L).

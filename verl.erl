@@ -413,15 +413,24 @@ pattern(P,Env) ->
 
 %% %%  If E is [], then Rep(E) = {nil,LINE}.
 
-?defsp('__sp_list',[]) ->
-    {Env,{nil,Line}};
-?defsp('__sp_list',[?ast_block([])]) ->
-    {Env,{nil,Line}};
-?defsp('__sp_list',[?ast_block([H|T])]) ->
+?defsp('__sp_ls*',[?ast_block(Items),?ast_block([Tail])]) ->
+    transform('mk_list*'(Items,Tail,Line),Env).
+
+?defsp('__sp_ls',[]) ->
+    {Env,{nil,Line}}; 
+?defsp('__sp_ls',[?ast_block(Items)]) ->
     Line,
-    transform(?cast_paren([?cast_atom(cons),H,
-			   ?cast_paren([?cast_atom(list),?cast_block(T)])]),
-	     Env).
+    transform('mk_list*'(Items,?cast_paren([?cast_atom(ls)]),
+			Line),
+	      Env).
+
+'mk_list*'(Items,Tail,_Line) ->
+    lists:foldr(
+      fun (H,T) ->
+	      ?cast_paren([?cast_atom(cons),H,T])
+      end,
+      Tail,
+      Items).
 
 %% %%  If E is a cons skeleton [E_h | E_t], then Rep(E) = {cons,LINE,Rep(E_h),Rep(E_t)}.
 
@@ -599,7 +608,10 @@ erl_parse_e(In) ->
 
 read(In) -> scompile:read(In,?MODULE).
 
-    
+sread(In) ->
+    {_,Ast}=read(In),
+    printer:p(Ast),
+    Ast.
 sexpand(In) ->
     {Env,Ast}=read(In),
     scompile:expand(Ast,Env).

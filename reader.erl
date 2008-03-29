@@ -97,6 +97,13 @@ is_atom_char(C) -> not (lists:member(C,?delimiters)).
 is_atom_first_char(C) -> not (is_digit(C) or is_delimiter(C)).
 is_delimiter(C) -> lists:member(C,?delimiters).
 
+spacen() ->
+    skip_while(?spacen),
+    case peek() of
+	$# -> a_comment(),spacen();
+	_ -> nil
+    end.
+
 
 %% digit() -> char_if(is_digit). 
 %% alpha() -> char_if(is_alpha).
@@ -165,7 +172,7 @@ a_paren() ->
 %%%% The second is more syntatically consistent.
 
 paren(Acc,Line) ->
-    skip_while(?spacen),
+    spacen(),
     case peek() of
 	%% $) == 41
 	41 -> read(), ?ast_paren2(Line,reverse(Acc));
@@ -187,7 +194,7 @@ paren_nest(Acc,ContainerLine) ->
 paren_block(Block,Acc,Line,ContainerLine) ->
     %% Line is the start of :
     %% ContainerLine is the opening ( or . where : is contained within.
-    skip_while(?spacen),
+    spacen(),
     case peek() of
 	41 -> read(),?ast_paren2(ContainerLine,
 				 reverse([?ast_block2(Line,reverse(Block))|Acc]));
@@ -201,6 +208,29 @@ paren_block(Block,Acc,Line,ContainerLine) ->
 	_ -> paren_block([an_exp()|Block],Acc,Line,ContainerLine)
     end.
 
+a_block() ->
+    char("["),
+    block([],lineno()).
+
+block(Acc,Line) ->
+    spacen(),
+    case peek() of
+	%% $] 93
+	93-> ?ast_paren2(Line,[?ast_atom3(Line,curmod(),'ls'),
+			       ?ast_block2(Line,reverse(Acc))]);
+	$| -> if Acc==[] -> error("No head for literal list: [|...]");
+		 true -> ok
+	      end,
+	      read(),
+	      Tail=an_exp(),
+	      case peek() of
+		  93 -> ?ast_paren2(Line,[?ast_atom3(Line,curmod(),'ls*'),
+					  ?ast_block2(Line,reverse(Acc)),
+					  ?ast_block2(Line,[Tail])]);
+		  _ -> error("Expecting literal list to close.")
+	      end; 
+	_ -> block([an_exp()|Acc],Line)
+    end.
 
 a_string() ->
     read(),
@@ -275,7 +305,7 @@ a_reader_macro() ->
     end.
 
 reader_macro_args(Acc) ->
-    skip_while(?spacen),
+    spacen(),
     C=peek(), 
     %% ${ == 123
     IsArg=(C==123),
@@ -316,7 +346,7 @@ here_long_check(Tag,Acc) ->
 here_long_check(OTag,[],Acc) ->
     C=peek(),
     Sp=member(C,?spacen),
-    if Sp -> skip_while(?spacen),
+    if Sp -> spacen(),
 	     reverse(Acc);
        C==eof -> reverse(Acc);
        true -> here_long(OTag,reverse(OTag)++Acc)
@@ -350,15 +380,17 @@ exp_dispatch(40) ->
 exp_dispatch(123) ->
     ?cast_brace(a_list("{}")); %% {}
 exp_dispatch(91) ->
-    ?cast_block(a_list("[]")); %% []
-%% $" == 34 string
+    a_block(); %% []
+%% $" == 34
 exp_dispatch(34) ->
     a_string();
 exp_dispatch($#) ->
-    case peek() of
-	$# -> read(), a_comment();
-	_ -> a_reader_macro()
-    end;
+    read(),
+    a_comment(); 
+%% $\% == 37
+exp_dispatch(37) ->
+    read(),
+    a_reader_macro(); 
 %% $\' == 39  quote
 exp_dispatch(39) ->
     read(),
@@ -392,12 +424,12 @@ exp_dispatch(C) ->
        true -> error("Parsing error: ")
     end.
 
-an_exp() -> skip_while(?spacen),
+an_exp() -> spacen(),
 	 case peek() of
 	     eof -> eof; 
 	     _ -> case exp_dispatch(peek()) of
 		      nil -> an_exp();
-		      R-> skip_while(?spacen),
+		      R-> spacen(),
 			  R
 		  end
 	 end.

@@ -40,7 +40,8 @@
       %%       {'var',{?MOD,'__sp_var'}},
 
       {'tuple',{?MOD,'__sp_tuple'}},
-      {'list',{?MOD,'__sp_list'}},
+      {'ls',{?MOD,'__sp_ls'}},
+      {'ls*',{?MOD,'__sp_ls*'}},
       {'cons',{?MOD,'__sp_cons'}},
       {'do',{?MOD,'__sp_do'}},
       {'let',{?MOD,'__sp_let'}},

@@ -87,7 +87,7 @@ error(Message) ->
     error(Message,[]).
 error(Message,Args) ->
     Reason=io_lib:format(Message,Args),
-    erlang:error({serl_error,Reason}).
+    throw({serl_error,Reason}).
 
 
 read(In) ->
@@ -238,19 +238,21 @@ do_transform(?ast_paren([Car|Body])=Exp,Env) ->
 	{special,F} ->
 	    try F(Exp,Env)
 	    catch
-		error:{serl_error,Reason} ->
+		{serl_error,Reason} ->
 			io:format("~s:~w: ~s\n",
-				  [curmod(),lineno(),Reason]), 
+				  [curmod(),lineno(),Reason]),
+		    %% raise the exception as error class so it's not caught again by previous transform calls.
 		    erlang:error({serl_error,Reason}) 
 	    end;
 	{macro,F} ->
 	    Exp2=
 		try F(Exp)
 		catch
-		    error:{serl_error,Reason} ->
+		    {serl_error,Reason} ->
 			io:format("~s:~w: ~s\n",
 				  [curmod(),lineno(),Reason]),
 			printer:p(Exp),
+			%% raise the exception as error class so it's not caught again by previous transform calls.
 			erlang:error({serl_error,lists:flatten(Reason)})
 		end,
 	    %% maintain tail recursiveness

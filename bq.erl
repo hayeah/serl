@@ -6,6 +6,7 @@
 	).
 
 -export([qq/1,qqp/1,
+	 simplify/1,
 	 completely_expand/1
  	]).
 
@@ -46,9 +47,9 @@ gen_code({quote,Q}) ->
     ?cast_quote(Q);
 gen_code({data,D}) ->
     D;
-gen_code({list,_}=L) ->
+gen_code({ls,_}=L) ->
     gen_glist(L);
-gen_code({'list*',_}=L) ->
+gen_code({'ls*',_,_}=L) ->
     gen_glist(L); 
 gen_code({block,GL}) -> 
     %% should provide macros block,paren,brace to build syntax objects.
@@ -61,12 +62,14 @@ gen_code({brace,GL}) ->
     ?cast_paren([?cast_atom('brace'),gen_glist(GL)]). 
 
 
-gen_glist({list,L}) ->
-    ?cast_paren([?cast_atom('list'),?cast_block([gen_code(I) || I <- L])]);
-gen_glist({'list*',L}) ->
-    ?cast_paren([?cast_atom('list*'),?cast_block([gen_code(I) || I <- L])]);
-gen_glist({append,L}) ->
-    ?cast_paren([?cast_atom('append'),?cast_block([gen_code(I) || I <- L])]).
+gen_glist({ls,L}) ->
+    ?cast_paren([?cast_atom('ls'),?cast_block([gen_code(I) || I <- L])]);
+gen_glist({'ls*',Conses,T}) ->
+    ?cast_paren([?cast_atom('ls*'),
+		 ?cast_block([gen_code(I) || I <- Conses]),
+		 gen_code(T)]);
+gen_glist({cat,L}) ->
+    ?cast_paren([?cast_atom('cat'),?cast_block([gen_code(I) || I <- L])]).
 
 
 expand(Exp) ->
@@ -82,7 +85,7 @@ expand(Exp) ->
 
 %% only a glist would introduce new appends
 glist(L) ->
-    {append,glist(L,[])}.
+    {cat,glist(L,[])}.
 
 glist([],Acc) -> lists:reverse(Acc);
 glist([H|T],Acc) ->
@@ -90,20 +93,20 @@ glist([H|T],Acc) ->
 
 glist_item(Exp) ->
     case Exp of
-	?ast_unquote(X) -> {list,[{data,X}]};
+	?ast_unquote(X) -> {ls,[{data,X}]};
 	?ast_sunquote(X) -> {data,X};
-	_ -> {list,[expand(Exp)]}
-%	[?ast_atom(bquote),X] -> {list,expand(Exp)}; %% what? 
+	_ -> {ls,[expand(Exp)]}
+%	[?ast_atom(bquote),X] -> {ls,expand(Exp)}; %% what? 
 	%_ -> {quote,Exp}
     end.
 
 simplify(Exp) ->
     case Exp of 
-	{list,L} -> {list,[simplify(O) || O <- L]};
+	{ls,L} -> {ls,[simplify(O) || O <- L]};
 	{block,L} -> {block,simplify(L)};
 	{paren,L} -> {paren,simplify(L)};
 	{brace,L} -> {brace,simplify(L)}; 
-	{append,Args} ->
+	{cat,Args} ->
 	    Args2=[simplify(A) || A <- Args],
 	    simplify_append(Args2); 
 	{quote,_} -> Exp;
@@ -123,19 +126,16 @@ simplify_append([],Result) ->
     Result; 
 simplify_append([Arg|RArgs],Result) ->
     case Arg of
-	{list,L} ->
+	{ls,L} ->
 	    T1=lists:all(fun (X) -> not splicing_frob(X) end,L),
 	    if T1 -> simplify_append(RArgs,attach_conses(L,Result));
 	       true -> simplify_append(RArgs,attach_append(L,Result))
 	    end;
-	{'list*',L}->
-	    T1=lists:all(fun (X) -> not splicing_frob(X) end,L),
-	    if T1 -> RL=lists:reverse(L),
-		     Last=hd(RL),
-		     Rest=lists:reverse(tl(RL)),
-		     Simplified=attach_conses(Rest,attach_append(Last,Result)),
+	{'ls*',Conses,T}->
+	    T1=lists:all(fun (X) -> not splicing_frob(X) end,[Conses|T]),
+	    if T1 -> Simplified=attach_conses(Conses,attach_append(T,Result)),
 		     simplify_append(RArgs,Simplified);
-	       true -> simplify_append(RArgs,attach_append(L,Result))
+	       true -> simplify_append(RArgs,attach_append([Conses|T],Result))
 	    end; 
 	_ -> simplify_append(RArgs,attach_append(Arg,Result))
     end.
@@ -147,28 +147,16 @@ attach_append(Item,Result) ->
 		       _ -> false
 		   end,
 	      if NotS -> Item;
-		 true -> {append,Item}
+		 true -> {cat,Item}
 	      end;
-	{append,Args} -> {append,[Item|Args]};
-	_ -> {append,[Item|Result]}
+	{cat,Args} -> {cat,[Item|Args]};
+	_ -> {cat,[Item|Result]}
     end.
 
 attach_conses(Items,Result) ->
     case Result of
-	[] -> {list,Items};
-	{list,R} -> {list,lists:append(Items,R)};
-	{'list*',R} -> {'list*',lists:append(Items,R)}; 
-	_ -> {'list*',Items++[Result]}
+	[] -> {ls,Items};
+	{ls,R} -> {ls,lists:append(Items,R)};
+	{'ls*',Conses,R} -> {'ls*',Items++Conses,R}; 
+	_ -> {'ls*',Items,Result}
     end.
-
-
-
-%% attach_conses(Items,Result) ->
-%%     case Result of
-%% 	[] -> {list,Items};
-%% 	_ ->
-%% 	    ResultIsList = ((element(1,Result)=list) or (element(1,Result)='list*')),
-%% 	    if ResultIsList -> list_to_tuple([element(1,Result),lists:append(Items,element(2,Result))]);
-%% 	       true -> {list*,Items++element(2,Result)}
-    
-
