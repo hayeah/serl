@@ -272,12 +272,6 @@ compile_for(expand,Forms,Env) ->
     Line,
     {env:assoc_append(Env,[exports,functions],Fs),?header_sec}.
 
-%%     RFs=map(fun (?ast_paren([?ast_atom(A)|Arities])) ->
-%% 		    [{A,Arity} || ?ast_integer(Arity) <- Arities]
-%% 	    end,
-%% 	    Fs),
-%%     {env:assoc_cons(Env,Fs),?header_sec}.
-
 %% %%  If F is an attribute -import(Mod,[Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,import,{Mod,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}}.
 %% (import mod a b (c alias-of-c))
 %% (import :all) %% not supported for verl
@@ -354,35 +348,49 @@ compile_for(expand,Forms,Env) ->
 %% %% Individual patterns are represented as follows: 
 %% %%  If P is an atomic literal L, then Rep(P) = Rep(L).
 
-
 patterns(Patterns,Env) ->
-    scompile:map_env0(fun pattern/2,Patterns,Env).
+    %% first pass generates the bindings
+    Env2=binds(Patterns,Env),
+    %% second pass generates the pattern ast
+    transform_each(Patterns,Env2).
 
-pattern(?ast_quote(_Q),_Env) ->
+pattern(P,Env) ->
+    transform(P,bind(P,Env)).
+    
+binds([],Env) ->
+    Env;
+binds([P|Ps],Env) ->
+    binds(Ps,bind(P,Env)).
+
+%% THINK: Do I care about external macro/form here?
+%% %% Maintaining hyigene should be straightforward (but hairy).
+%% it's probably ok...
+bind(?ast_quote(_Q),_Env) ->
     error("quote not supported in pattern");
-pattern(?ast_var3(L,_,'_'),Env) ->
-    {Env,?erl_var(L,'_')};
-pattern(?ast_var3(_L,M,V)=Var,Env) ->
+bind(?ast_var('_'),Env) -> Env;
+bind(?ast_float(_),Env) -> Env;
+bind(?ast_integer(_),Env) -> Env;
+%%bind(?ast_string(_),Env) -> Env;
+bind(?ast_atom(_),Env) -> Env;
+bind(?ast_var3(_L,M,V),Env) ->
     case lookup(Env,vars,{M,V}) of
 	%% the use occurence
-	{ok,_Alias} -> transform(Var,Env);
+	{ok,_Alias} -> Env;
 	%% the binding occurence
-	false -> transform(Var,scompile:lexical_extend(Env,vars,[{M,V}])) 
+	false -> scompile:lexical_extend(Env,vars,[{M,V}])
+    end; 
+bind(?ast_paren([?ast_atom(Car)|Es])=E,Env) ->
+    case Car of
+	ls -> [?ast_block(L)]=Es,
+	      binds(L,Env);
+	'ls*' -> [?ast_block(Conses),?ast_block(Tail)]=Es,
+		 binds(Tail,binds(Conses,Env));
+	_ -> {Env2,E2}=scompile:expand1(E,Env),
+	     bind(E2,Env2)
     end;
-pattern(?ast_block(Es)=List,Env) ->
-    %% first pass generates the bindings
-    {Env2,_}=patterns(Es,Env),
-    %% second pass generates the code
-    transform(List,Env2);
-pattern(?ast_brace(Es)=List,Env) ->
-    %% first pass generates the bindings
-    {Env2,_}=patterns(Es,Env),
-    %% second pass generates the code
-    transform(List,Env2); 
-pattern(P,Env) ->
-    error("Invalid pattern."),
-    {Env2,P2}=scompile:expand1(P,Env),
-    pattern(P2,Env2).
+bind(P,_) ->
+    error("Invalid pattern\n~.4p.",[P]).
+
 
 %% %% %%  If P is a variable pattern V, then Rep(P) = {var,LINE,A}, where A is an atom with a printname consisting of the same characters as V. 
 %% %% %%  If P is a universal pattern _, then Rep(P) = {var,LINE,'_'}.
@@ -467,22 +475,22 @@ pattern(P,Env) ->
 %%  If E is E_0(E_1, ..., E_k), then Rep(E) = {call,LINE,Rep(E_0),[Rep(E_1), ..., Rep(E_k)]}.
 ?defsp('__sp_call',[?ast_atom3(_L,M,F)|Es]=E) ->
     %% For hygiene, test to see if the symbol came from another module.
-    IsRemote=(M==curmod()), 
+    IsRemote=(M/=curmod()),
     if IsRemote ->
 	    transform(?cast_paren([?cast_atom('__call')|
 				   [?cast_brace([?cast_atom(M),?cast_atom(F)])|Es]]),
 		      Env);
        true ->
 	    case lookup(Env,functions,{M,F}) of 
-		{ok,{M2,F}} ->
+		{ok,{M2,Fn}} ->
 		    %% call to imported function
 		    transform(?cast_paren([?cast_atom('__call')|
-					   [?cast_brace([?cast_atom(M2),?cast_atom(F)])|Es]]),
+					   [?cast_brace([?cast_atom(M2),?cast_atom(Fn)])|Es]]),
 			      Env); 
-		{ok,F} ->
+		{ok,Fn} ->
 		    %% call to lexical or module function (defined)
 		    {Env2,REs}=transform_each(Es,Env),
-		    {Env2,{call,Line,?erl_atom(Line,F),REs}}; 
+		    {Env2,{call,Line,?erl_atom(Line,Fn),REs}}; 
 		_ -> %% call to module function (not yet defined)
 		    make_call(E,Env) 
 	    end

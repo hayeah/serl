@@ -32,7 +32,9 @@ new() ->
 
 %% an environment with initial import.
 new(ImportMod) ->
-    Env=import(new(),ImportMod),
+    Env=try import(new(),ImportMod)
+	catch no_imports -> []
+	end,
     assoc_put(Env,[lexical],[]).
 
 

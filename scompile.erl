@@ -2,7 +2,8 @@
 -include("ast.hrl").
 -include("state.hrl").
 
--export([curmod/0, lineno/0,
+-export([lineno/0,
+	 curmod/0,curmod/1, 
 	 read/1,read/2,
 	 expand1/1,expand1/2,expand/1,expand/2,
 	 eval/1,eval/2,eval/3,eval_erl/3,
@@ -29,8 +30,23 @@
 lineno() -> get(?lineno).
 lineno(N) -> put(?lineno,N).
 
+%% set/get the compiling module
 curmod() -> get(?curmod).
-curmod(M) -> put(?curmod,M).
+set_curmod(M) -> put(?curmod,M).
+
+
+%% check to see if a syntax object is contained within the current compiling module.
+%% also check if a module (given as erl atom) is the same as the compiling module.
+%% note that a serl atom 'module isn't necessarily contained within the module.
+%% the "compiling module" of the REPL is ?serl_toplevel (defined in state.hrl)
+curmod(Obj) ->
+    M=if is_tuple(Obj) -> Ast=Obj,element(3,Ast); %% object is a syntax object.
+	 is_atom(Obj) -> Obj
+      end,
+    case curmod() of
+	undefined -> ?serl_toplevel==M; 
+	CM when is_atom(CM),M==CM -> true
+    end.
 
 reset_gensym() ->
     put(?gensym,0),ok.
@@ -42,7 +58,7 @@ gensym(N) ->
 	    C when is_integer(C)-> put(?gensym,C+N)
 				   
 	end, 
-    [list_to_atom("$"++io_lib:print(I)) || I <- lists:seq(OldC,OldC+N-1)].
+    [list_to_atom("#"++io_lib:print(I)) || I <- lists:seq(OldC,OldC+N-1)].
     
 
 
@@ -64,7 +80,7 @@ set_state(S) when is_record(S,scompile_S) ->
     put(?state,S),
     put(?gensym,S#scompile_S.gensym_counter),
     lineno(S#scompile_S.lineno),
-    curmod(S#scompile_S.curmod).
+    set_curmod(S#scompile_S.curmod).
 set_state(Field,Val) ->
     set_state(setelement(scompile_S_pos(Field),get_state(),Val)).
    
@@ -164,15 +180,17 @@ eval_erl(ErlAst,Bindings,Env) ->
     {Val,erl_eval:bindings(NewBindings)}.
     
 local_funcall_handler(Name,Args,Env) ->
-    case env:lookup(Env,functions,Name) of
-	{value,{Mod,F}} -> apply(Mod,F,Args);
+    case lookup(Env,functions,{curmod(),Name}) of
+	{value,{Mod,F}} ->
+	    %%io:format("Applying ~s:~s/~p",[Mod,F,length(Args)]),
+	    apply(Mod,F,Args);
 	{value,F} -> apply(F,Args);
 	%% TODO should throw undef exception.
 	_ -> error("undefined function: ~p\n",[Name])
     end.
 
-remote_funcall_handler(F,Args) ->
-    F(Args).
+remote_funcall_handler({M,F},Args) ->
+    apply(M,F,Args).
 
 
 %% TODO maybe allow parameterization of symbol macros.
@@ -284,9 +302,11 @@ do_transform(?ast_paren([Car|Body])=Exp,Env) ->
 	    end;
 	_ -> case lookup_expander(Env,?cast_atom('__call')) of
 		 %% make sure to raise error, otherwise go into loop.
-		 false -> error("No expander for function call.");
-		 _ -> transform(?cast_paren([?cast_atom('__call'),Car|Body]),
-				Env) 
+		 {Type,_F} when Type==special;Type==macro ->
+		     R=transform(?cast_paren([?cast_atom('__call'),Car|Body]),
+				 Env),
+		     {Type,R};
+		 _ -> error("No expander for function call.")
 	     end
     end.
 
@@ -330,8 +350,8 @@ lookup_expander(Env,Car) ->
     end.
 
 lookup(Env,NSType,{M,_A}=Key) ->
-    CurMod=curmod(),
-    if M==CurMod -> local_lookup(Env,NSType,Key);
+    T=curmod(M),
+    if T -> local_lookup(Env,NSType,Key);
        true -> remote_lookup(Env,NSType,Key)
     end.
 

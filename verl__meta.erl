@@ -98,12 +98,10 @@
       {'lit',{?MOD,'__rm_lit'}}
      ]},
     {functions,
-     [
-      {'fmt',[{name,{io,format}},
-	      {arity,[1,2]}]}
+     [{'cat',{lists,append}},
+      {'format',{io,format}}
      ]}
    ]).
-
 
 
 %% these are the definitions of the module.

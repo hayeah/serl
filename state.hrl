@@ -4,9 +4,11 @@
 %% 	 lineno=1, 
 %% 	 curmod=serl
 %% 	}).
-	 
+
+-define(serl_toplevel,serl_eval).
+
 -record(scompile_S,
-	{curmod=serl_eval,
+	{curmod=?serl_toplevel,
 	 input,
 	 reader_lineno=1,
 

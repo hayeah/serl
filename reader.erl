@@ -225,7 +225,8 @@ block(Acc,Line) ->
 	      read(),
 	      Tail=an_exp(),
 	      case peek() of
-		  93 -> ?ast_paren2(Line,[?ast_atom3(Line,curmod(),'ls*'),
+		  93 -> read(),
+			?ast_paren2(Line,[?ast_atom3(Line,curmod(),'ls*'),
 					  ?ast_block2(Line,reverse(Acc)),
 					  ?ast_block2(Line,[Tail])]);
 		  _ -> error("Expecting literal list to close.")
