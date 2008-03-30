@@ -217,8 +217,7 @@ block(Acc,Line) ->
     case peek() of
 	%% $] 93
 	93-> read(),
-	     ?ast_paren2(Line,[?ast_atom3(Line,curmod(),'ls'),
-			       ?ast_block2(Line,reverse(Acc))]);
+	     ?ast_block2(Line,reverse(Acc));
 	$| -> if Acc==[] -> error("No head for literal list: [|...]");
 		 true -> ok
 	      end,

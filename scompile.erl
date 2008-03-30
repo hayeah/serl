@@ -45,7 +45,8 @@ curmod(Obj) ->
       end,
     case curmod() of
 	undefined -> ?serl_toplevel==M; 
-	CM when is_atom(CM),M==CM -> true
+	CM when is_atom(CM),M==CM -> true; 
+	_ -> false
     end.
 
 reset_gensym() ->
@@ -192,7 +193,7 @@ local_funcall_handler(Name,Args,Env) ->
 remote_funcall_handler({M,F},Args) ->
     apply(M,F,Args).
 
-
+		   
 %% TODO maybe allow parameterization of symbol macros.
 compile(Mod) ->
     compile(Mod,verl).

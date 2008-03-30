@@ -378,7 +378,9 @@ bind(?ast_var3(_L,M,V),Env) ->
 	{ok,_Alias} -> Env;
 	%% the binding occurence
 	false -> scompile:lexical_extend(Env,vars,[{M,V}])
-    end; 
+    end;
+bind(?ast_block(Es),Env) ->
+    binds(Es,Env);
 bind(?ast_paren([?ast_atom(Car)|Es])=E,Env) ->
     case Car of
 	ls -> [?ast_block(L)]=Es,
@@ -557,19 +559,21 @@ clause(Patterns,_Guard,Body,Line,Env) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Quotation
 
-?defsp('__sp_quote',?ast_quote(E)) ->
+?defsp('__sp_quote',[E]) ->
     %% the quotation forms might as well be macros.
     %% but it's easier to implement them as special forms (direct translation to erlang ast).
     {Env,erl_syntax:revert(erl_syntax:set_pos(erl_syntax:abstract(E),Line))}.
 
-?defsp('__sp_bquote',?ast_bquote(E)) ->
+?defsp('__sp_bquote',[E]) ->
     Line,
     transform(bq:completely_expand(E),Env).
 
 
 -define(defast_mac(Name,Type),
 	?defm(Name,[E]) ->
-	       mk_ast(Type,E,lineno(),curmod()); 
+	       mk_ast(Type,E,
+		      ?cast_integer(lineno()),
+		      ?cast_atom(curmod())); 
 	?defm(Name,[E,L,M]) ->
 	       mk_ast(Type,E,L,M)).
 
@@ -580,7 +584,7 @@ clause(Patterns,_Guard,Body,Line,Env) ->
 	       ?cast_block([?cast_paren([?cast_atom(Type),E,L,M]) || E <- Es])).
 
 mk_ast(Type,E,L,M) ->
-    ?cast_brace([?cast_atom(Type),L ,M ,E]).
+    ?cast_brace([?cast_atom(Type), L ,M ,E]).
 
 %% (atom: a) => 'a
 ?defast_mac('__mac_float','__float'). 
@@ -655,7 +659,22 @@ seval(In) ->
     scompile:eval(Ast,Env).
 seval(In,Bindings) ->
     {Env,Ast}=read(In),
-    scompile:eval(Ast,Env,Bindings). 
+    scompile:eval(Ast,Env,Bindings).
+
+
+sevaln(N,In) ->
+    sevaln(N,In,erl_eval:new_bindings()).
+sevaln(N,In,Bindings) ->
+    {Env,Ast}=read(In),
+    sevaln_(N,Ast,Env,Bindings).
+
+sevaln_(0,Ast,Env,Bindings) ->
+    {Env,Ast,Bindings};
+sevaln_(N,Ast,Env,Bindings) ->
+    {Env2,Ast2,Bs2}=scompile:eval(Ast,Env,Bindings),
+    sevaln_(N-1,Ast2,Env2,Bs2).
+    
+    
     
     
 %% a common idiom is a list of blocks seperated by ':' (foo a b c d: e f g h: i j k l)
@@ -665,6 +684,8 @@ seval(In,Bindings) ->
 %% no [] is allowed in the first list of items
 %% (foo [a b] c d: e f g) would fail, perhaps surprisingly.
 %%%% at least it surprised me.
+%%
+
 to_blocks(Es) ->
     {FirstBlock,Blocks}=
 	lists:splitwith(fun (E) ->

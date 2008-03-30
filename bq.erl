@@ -4,8 +4,10 @@
 -module(bq).
 -include("ast.hrl").
 
--import(scompile,[error/1,
-		  error/2]
+-import(scompile,
+	[curmod/0,lineno/0,
+	 error/1,error/2
+	]
 	).
 
 -export([q/1,qq/1,qqp/1,
@@ -27,12 +29,6 @@
 %%  t(form) => (list `form)  ## recurse on `form
 %%  t(,form) => (list form)
 %%  t(;form) => form  ## form evals to an erlang list
-
-curmod() ->
-    verl.
-
-lineno() ->
-    1.
 
 q(In) ->
     {_Env,?ast_bquote(X)}=scompile:read(In),
@@ -70,13 +66,14 @@ gen_code({paren,GL}) ->
 gen_code({brace,GL}) ->
     ?cast_paren([?cast_atom('brace'),gen_glist(GL)]). 
 
-
+gen_glist({data,D}) ->
+    D;
 gen_glist({ls,L}) ->
     ?cast_paren([?cast_atom('ls'),?cast_block([gen_code(I) || I <- L])]);
 gen_glist({'ls*',Conses,T}) ->
     ?cast_paren([?cast_atom('ls*'),
 		 ?cast_block([gen_code(I) || I <- Conses]),
-		 gen_code(T)]);
+		 ?cast_block([gen_code(T)])]);
 gen_glist({cat,L}) ->
     ?cast_paren([?cast_atom('cat'),?cast_block([gen_code(I) || I <- L])]).
 
