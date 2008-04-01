@@ -2,7 +2,7 @@
 -include("ast.hrl").
 -include("state.hrl").
 
--export([lineno/0,
+-export([lineno/0,lineno/1,
 	 curmod/0,curmod/1, 
 	 read/1,read/2,
 	 expand1/1,expand1/2,expand/1,expand/2,

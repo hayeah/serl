@@ -32,10 +32,9 @@
 
       {'=',{?MOD,'__sp_='}},
 
-      {'tuple',{?MOD,'__sp_tuple'}},
-      {'ls',{?MOD,'__sp_ls'}},
-      {'ls*',{?MOD,'__sp_ls*'}},
-      {'cons',{?MOD,'__sp_cons'}}, 
+      {'tuple',{?MOD,'__sp_tuple'}}, 
+      {'cons',{?MOD,'__sp_cons'}},
+      {'nil',{?MOD,'__sp_nil'}}, 
 
       {'op',{?MOD,'__sp_op'}},
 
@@ -74,7 +73,8 @@
 
      ]},
     {macros,
-     [
+     [{'ls',{?MOD,'__mac_ls'}},
+
       {'float',{?MOD,'__mac_float'}},
       {'integer',{?MOD,'__mac_integer'}},
       {'string',{?MOD,'__mac_string'}},
@@ -92,6 +92,7 @@
       {'blocks',{?MOD,'__mac_blocks'}},
       {'parens',{?MOD,'__mac_parens'}},
       {'braces',{?MOD,'__mac_braces'}}
+
      ]},
     {rmacros,
      [

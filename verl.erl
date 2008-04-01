@@ -192,11 +192,15 @@ put_meta_env(Env,MEnv) ->
 	{ok,_} -> error("Function already defined: ~p/~p", [FName,Arity]); 
 	_ -> ok
     end,
-    %% transforming the body should only affect the lexical environment. So we discard the returned environment.
-    Ast={function,Line,FName, Arity,
-	 [function_clause(C,Env) || C <- Clauses]},
-    Env2=env:assoc_put(Env,[definitions,functions,FName,Arity], Ast),
-    {Env2,?def_sec}.
+    {Env2,FunClauses}=scompile:map_env0(fun function_clause/2,Clauses,Env),
+    case env:assoc(Env2,[lexical_unbound,vars]) of 
+	{ok,UnboundVars} -> error("Unbound vars: ~w",[UnboundVars]);
+	_ -> ok
+    end,
+    Ast={function,Line,FName, Arity, FunClauses},
+    %% transforming the body should only affect the lexical environment. So we discard the returned environment. 
+    Env3=env:assoc_put(Env,[definitions,functions,FName,Arity], Ast),
+    {Env3,?def_sec}.
 
 %% (compile-for expand run: <form>*) 
 %%%% the forms must be toplevel forms for the same section
@@ -351,11 +355,12 @@ compile_for(expand,Forms,Env) ->
 patterns(Patterns,Env) ->
     %% first pass generates the bindings
     Env2=binds(Patterns,Env),
-    %% second pass generates the pattern ast
-    transform_each(Patterns,Env2).
+    %% second pass generates the pattern matching code
+    gen_pats(Patterns,Env2).
 
 pattern(P,Env) ->
-    transform(P,bind(P,Env)).
+    {Env2,[RP]}=gen_pats([P],bind(P,Env)),
+    {Env2,RP}.
     
 binds([],Env) ->
     Env;
@@ -365,8 +370,10 @@ binds([P|Ps],Env) ->
 %% THINK: Do I care about external macro/form here?
 %% %% Maintaining hyigene should be straightforward (but hairy).
 %% it's probably ok...
-bind(?ast_quote(_Q),_Env) ->
-    error("quote not supported in pattern");
+bind(?ast_quote(_E),Env) ->
+    Env;
+bind(?ast_bquote(E),Env) ->
+    bind(bq:completely_expand(E),Env);
 bind(?ast_var('_'),Env) -> Env;
 bind(?ast_float(_),Env) -> Env;
 bind(?ast_integer(_),Env) -> Env;
@@ -381,17 +388,83 @@ bind(?ast_var3(_L,M,V),Env) ->
     end;
 bind(?ast_block(Es),Env) ->
     binds(Es,Env);
+bind(?ast_brace(Es),Env) ->
+    binds(Es,Env);
 bind(?ast_paren([?ast_atom(Car)|Es])=E,Env) ->
     case Car of
-	ls -> [?ast_block(L)]=Es,
-	      binds(L,Env);
-	'ls*' -> [?ast_block(Conses),?ast_block(Tail)]=Es,
-		 binds(Tail,binds(Conses,Env));
+	cons -> [T,H]=Es,
+		bind(H,bind(T,Env));
+	tuple -> binds(Es,Env);
 	_ -> {Env2,E2}=scompile:expand1(E,Env),
 	     bind(E2,Env2)
     end;
 bind(P,_) ->
     error("Invalid pattern\n~.4p.",[P]).
+
+
+gen_pats(Es,Env) ->
+    {_,REs}=scompile:map_env0(fun gen_pat/2,Es,Env),
+    {Env,REs}. 
+
+%% walk the pattern so syntax objects match the "appearance" (ignoring line and module).
+gen_pat(?ast_quote(E),Env) ->
+    gen_pat_quote(E,Env);
+gen_pat(?ast_bquote(E),Env) ->
+    gen_pat(bq:completely_expand(E),Env);
+gen_pat(?ast_var(_)=E,Env) -> transform(E,Env);
+gen_pat(?ast_float(_)=E,Env) -> transform(E,Env);
+gen_pat(?ast_integer(_)=E,Env) -> transform(E,Env);
+%%gen_pat(?ast_string(_),Env) -> Env;
+gen_pat(?ast_atom(_)=E,Env) -> transform(E,Env); 
+gen_pat(?ast_block(Es),Env) ->
+    gen_pat(?cast_paren([?cast_atom(ls),?cast_block(Es)]),Env);
+gen_pat(?ast_brace(Es),Env) ->
+    gen_pat(?cast_paren([?cast_atom(tuple),?cast_block(Es)]),Env);
+gen_pat(?ast_paren([?ast_atom(Car)|Es])=E,Env) ->
+    case Car of 
+	cons -> [H,T]=Es,
+		{_,RH}=gen_pat(H,Env),
+		{_,RT}=gen_pat(T,Env),
+		{Env,{cons,lineno(),RH,RT}};
+	tuple ->
+	    [?ast_block(Elements)]=Es,
+	    {_,Rs}=gen_pats(Elements,Env),
+	    {Env,{tuple,lineno(),Rs}};
+	paren -> gen_pat_glist('__paren',Es,Env);
+	block -> gen_pat_glist('__block',Es,Env);
+	brace -> gen_pat_glist('__brace',Es,Env); 
+	_ -> {Env2,E2}=scompile:expand1(E,Env),
+	     gen_pat(E2,Env2)
+    end;
+gen_pat(P,Env) ->
+    {Env,P}.
+
+gen_pat_quote(E,Env) ->
+    Type=element(1,E),
+    Data=element(4,E),
+    case Type of
+	'__paren' -> gen_pat_quote_glist(paren,Data,Env);
+	'__brace' -> gen_pat_quote_glist(brace,Data,Env);
+	'__block' -> gen_pat_quote_glist(block,Data,Env);
+	'__float' -> transform(mk_ast_pat(Type,?cast_float(Data)),Env);
+	'__integer' -> transform(mk_ast_pat(Type,?cast_integer(Data)),Env);
+	'__string' -> transform(mk_ast_pat(Type,?cast_string(Data)),Env);
+	'__atom' -> transform(mk_ast_pat(Type,?cast_atom(Data)),Env);
+	'__var' -> transform(mk_ast_pat(Type,?cast_atom(Data)),Env)
+    end.
+
+gen_pat_quote_glist(Type,Es,Env) ->
+    gen_pat_glist(Type,
+		  [[?cast_quote(E) || E <- Es]],
+		  Env).
+
+
+gen_pat_glist(Type,[Es],Env) ->
+    gen_pat_glist(Type,
+		  [Es,?cast_var('_'), ?cast_var('_')],
+		  Env); 
+gen_pat_glist(Type,[Es,L,M],Env) ->
+    gen_pat(mk_ast(Type,Es,L,M), Env).
 
 
 %% %% %%  If P is a variable pattern V, then Rep(P) = {var,LINE,A}, where A is an atom with a printname consisting of the same characters as V. 
@@ -409,9 +482,12 @@ bind(P,_) ->
 %%HY: It's silly to call variables variables when they don't vary... I call them bindings.
 
 '__sp_var'(?ast_paren([?ast_atom3(Line,M,_),V]),Env) ->
-    case lookup(Env,vars,{M,V}) of
-	{ok,Alias} -> {Env,?erl_var(Line,Alias)}; 
-	false -> error("Variable not declared: ~s",[V])
+    case V of
+	'_' -> {Env,?erl_var(Line,'_')};
+	_ -> case lookup(Env,vars,{M,V}) of
+		 {ok,Alias} -> {Env,?erl_var(Line,Alias)}; 
+		 false -> {env:assoc_cons(Env,[lexical_unbound,vars],V),{error,{unbound_var,Line,M,V}}}
+	     end
     end.
 
 
@@ -424,24 +500,23 @@ bind(P,_) ->
 
 %% %%  If E is [], then Rep(E) = {nil,LINE}.
 
-?defsp('__sp_ls*',[?ast_block(Items),?ast_block([Tail])]) ->
-    transform('mk_list*'(Items,Tail,Line),Env).
+?defsp('__sp_nil',[]) ->
+    {Env,{nil,Line}}.
 
-?defsp('__sp_ls',[]) ->
-    {Env,{nil,Line}}; 
-?defsp('__sp_ls',[?ast_block(Items)]) ->
-    Line,
-    transform('mk_list*'(Items,?cast_paren([?cast_atom(ls)]),
-			Line),
-	      Env).
+?defm('__mac_ls',[]) ->
+    ?cast_paren([?cast_atom(nil)]); 
+?defm('__mac_ls',[?ast_block(Conses)]) ->
+    'mk_list*'(Conses,?cast_paren([?cast_atom(ls)]));
+?defm('__mac_ls',[?ast_block(Conses),?ast_block(Tail)]) ->
+    'mk_list*'(Conses,Tail). 
 
-'mk_list*'(Items,Tail,_Line) ->
+'mk_list*'(Conses,Tail) ->
     lists:foldr(
       fun (H,T) ->
 	      ?cast_paren([?cast_atom(cons),H,T])
       end,
       Tail,
-      Items).
+      Conses).
 
 %% %%  If E is a cons skeleton [E_h | E_t], then Rep(E) = {cons,LINE,Rep(E_h),Rep(E_t)}.
 
@@ -551,9 +626,9 @@ case_clause(?ast_paren3(L,_,[Pattern|GuardedBody]),Env) ->
 clause(Patterns,_Guard,Body,Line,Env) ->
     %% A <guard> is a list of <guard-test>
     {Env2,Ps}=patterns(Patterns,Env),
-    {_,Es}=transform_each(Body,Env2), 
+    {Env3,Es}=transform_each(Body,Env2), 
     %{clause,lineno(), Ps, guard(Guard), Es}
-    {clause,Line, Ps, [], Es}.
+    {Env3,{clause,Line, Ps, [], Es}}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -579,12 +654,21 @@ clause(Patterns,_Guard,Body,Line,Env) ->
 
 -define(defasts_mac(Name,Type),
 	?defm(Name,[?ast_block(Es)]) ->
+	       %% `[;(gen-ls (E Es): (Type E))]
 	       ?cast_block([?cast_paren([?cast_atom(Type),E]) || E <- Es]);
 	?defm(Name,[?ast_block(Es),?ast_block([L,M])]) ->
 	       ?cast_block([?cast_paren([?cast_atom(Type),E,L,M]) || E <- Es])).
 
 mk_ast(Type,E,L,M) ->
     ?cast_brace([?cast_atom(Type), L ,M ,E]).
+
+mk_ast_pat(Type) ->
+    mk_ast_pat(Type,?cast_var('_')). 
+mk_ast_pat(Type,E) ->
+    ?cast_brace([?cast_atom(Type),
+		 ?cast_var('_'),
+		 ?cast_var('_'),
+		 E]).
 
 %% (atom: a) => 'a
 ?defast_mac('__mac_float','__float'). 
@@ -606,7 +690,6 @@ mk_ast(Type,E,L,M) ->
 ?defasts_mac('__mac_parens','__paren'). 
 ?defasts_mac('__mac_braces','__brace').
 ?defasts_mac('__mac_blocks','__block').
-
 
     
 

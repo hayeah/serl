@@ -5,7 +5,7 @@
 -include("ast.hrl").
 
 -import(scompile,
-	[curmod/0,lineno/0,
+	[curmod/0,lineno/0,lineno/1,
 	 error/1,error/2
 	]
 	).
@@ -31,9 +31,9 @@
 %%  t(;form) => form  ## form evals to an erlang list
 
 q(In) ->
-    {_Env,?ast_bquote(X)}=scompile:read(In),
+    {_Env,?ast_bquote(X)}=scompile:read(In), 
     simplify(expand(X)).
-    
+
 qq(In) ->
     {_Env,?ast_bquote(X)}=scompile:read(In),
     completely_expand(X).
@@ -71,7 +71,7 @@ gen_glist({data,D}) ->
 gen_glist({ls,L}) ->
     ?cast_paren([?cast_atom('ls'),?cast_block([gen_code(I) || I <- L])]);
 gen_glist({'ls*',Conses,T}) ->
-    ?cast_paren([?cast_atom('ls*'),
+    ?cast_paren([?cast_atom('ls'),
 		 ?cast_block([gen_code(I) || I <- Conses]),
 		 ?cast_block([gen_code(T)])]);
 gen_glist({cat,L}) ->

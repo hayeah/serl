@@ -225,7 +225,7 @@ block(Acc,Line) ->
 	      Tail=an_exp(),
 	      case peek() of
 		  93 -> read(),
-			?ast_paren2(Line,[?ast_atom3(Line,curmod(),'ls*'),
+			?ast_paren2(Line,[?ast_atom3(Line,curmod(),'ls'),
 					  ?ast_block2(Line,reverse(Acc)),
 					  ?ast_block2(Line,[Tail])]);
 		  _ -> error("Expecting literal list to close.")
@@ -395,21 +395,25 @@ exp_dispatch(37) ->
 %% $\' == 39  quote
 exp_dispatch(39) ->
     read(),
+    L=lineno(),
     E=an_exp(),
-    ?cast_quote(E);
+    ?ast_quote3(L,curmod(),E);
 %% $` backquote
 exp_dispatch($`) ->
     read(),
+    L=lineno(),
     E=an_exp(),
-    ?cast_bquote(E);
+    ?ast_bquote3(L,curmod(),E);
 exp_dispatch($,) ->
     read(),
+    L=lineno(),
     E=an_exp(),
-    ?cast_unquote(E);
+    ?ast_unquote3(L,curmod(),E);
 exp_dispatch($;) ->
     read(),
+    L=lineno(),
     E=an_exp(),
-    ?cast_sunquote(E); 
+    ?ast_sunquote3(L,curmod(),E); 
 exp_dispatch(C) ->
     Digit=is_digit(C) or (C==$-),
     Symbol=is_atom_first_char(C),
