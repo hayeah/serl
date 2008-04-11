@@ -6,7 +6,7 @@
 -export([set_port/1,
 	 get_port/0,
 	 lineno/0,
-	 lineno/1,
+	 set_lineno/1,
 	 
 	 residue/0, 
 	 peek/0,
@@ -23,25 +23,23 @@
 	]).
 -import(lists,[member/2]).
 
-
--define(line_count,{?MODULE,'lineno'}).
-
 error(Message) ->
     io:fwrite("Stream error, remaining:\n~p~n~n",[residue()]),
     throw({stream_error,Message}).
-    
+
+-define(line_count,{?MODULE,'lineno'}).
+
 lineno() -> get(?line_count).
 
-lineno(L) -> put(?line_count,L).
+set_lineno(L) -> put(?line_count,L).
 
 peek() ->
     peek_port(get_port()).
 read() ->
-    C=read_port(get_port()),
-    if C==$\n -> put(?line_count,lineno()+1);
-       true -> nil
-    end,
-    C.
+    case read_port(get_port()) of
+	$\n -> set_lineno(lineno()+1), $\n;
+	C -> C
+    end. 
 
 residue() ->
     residue_port(get_port()).

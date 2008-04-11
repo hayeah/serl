@@ -1,16 +1,16 @@
 -module(scompile).
 -include("ast.hrl").
--include("state.hrl").
 
--export([lineno/0,lineno/1,
-	 curmod/0,curmod/1, 
+-export([lineno/0,
+	 curmod/0,
+	 gensym/1, reset_gensym/0, %% for debug purposes
+	 
 	 read/1,read/2,
 	 expand1/1,expand1/2,expand/1,expand/2,
 	 eval/1,eval/2,eval/3,eval_erl/3,
 	 compile/1,compile/2,
 	 transform1/2, transform/2, transform_each/2, map_env0/3,
 	 
-	 gensym/1,reset_gensym/0,
 	 lexical_shadow/3,lexical_extend/3,
 	 get_def/3,new_def/4,
 	 lookup/3,toplevel_lookup/3,
@@ -20,85 +20,10 @@
 -import(env,[assoc/2,
 	     assoc_put/3,assoc_cons/3,assoc_append/3]).
 
-
-%% global process vars
--define(lineno,{?MODULE,'lineno'}).
--define(curmod,{?MODULE,'curmod'}).
--define(gensym,{?MODULE,'gensym_counter'}).
--define(state,{?MODULE,'state'}).
-
-lineno() -> get(?lineno).
-lineno(N) -> put(?lineno,N).
-
-%% set/get the compiling module
-curmod() -> get(?curmod).
-set_curmod(M) -> put(?curmod,M).
-
-
-%% check to see if a syntax object is contained within the current compiling module.
-%% also check if a module (given as erl atom) is the same as the compiling module.
-%% note that a serl atom 'module isn't necessarily contained within the module.
-%% the "compiling module" of the REPL is ?serl_toplevel (defined in state.hrl)
-curmod(Obj) ->
-    M=if is_tuple(Obj) -> Ast=Obj,element(3,Ast); %% object is a syntax object.
-	 is_atom(Obj) -> Obj
-      end,
-    case curmod() of
-	undefined -> ?serl_toplevel==M; 
-	CM when is_atom(CM),M==CM -> true; 
-	_ -> false
-    end.
-
-reset_gensym() ->
-    put(?gensym,0),ok.
-
-gensym(N) ->
-    OldC=
-	case get(?gensym) of
-	    undefined -> put(?gensym,N),0;
-	    C when is_integer(C)-> put(?gensym,C+N)
-				   
-	end, 
-    [list_to_atom("#"++io_lib:print(I)) || I <- lists:seq(OldC,OldC+N-1)].
-    
-
-
-%% erlang record sucks! Why can't the compiler work a little harder?
-%% Now I am doomed to adhoc inefficiency.
-scompile_S_pos(Field) ->
-    case Field of
-	lineno -> #scompile_S.lineno;
-	curmod -> #scompile_S.curmod;
-	input -> #scompile_S.input;
-	reader_lineno -> #scompile_S.reader_lineno;
-	gensym_counter -> #scompile_S.gensym_counter
-%	namespaces -> #scompile_S.namespaces;
-%	namespace_safety -> #scompile_S.namespace_safety 
-    end.
-
-%% all state information is encapsulated in the functions set_state and get_state.
-set_state(S) when is_record(S,scompile_S) ->
-    put(?state,S),
-    put(?gensym,S#scompile_S.gensym_counter),
-    lineno(S#scompile_S.lineno),
-    set_curmod(S#scompile_S.curmod).
-set_state(Field,Val) ->
-    set_state(setelement(scompile_S_pos(Field),get_state(),Val)).
-   
-get_state() ->
-    S=get(?state),
-    S#scompile_S{lineno=lineno(),
-		 curmod=curmod(),
-		 gensym_counter=get(?gensym)
-		}.
-get_state(Field) ->
-    element(scompile_S_pos(Field),get_state()).
-
-
 warn(Message) ->
     warn(Message,[]).
 warn(Message,Args) ->
-   io:format(Message,Args).
+    io:format(Message,Args).
 
 error(Message) ->
     error(Message,[]).
@@ -106,22 +31,58 @@ error(Message,Args) ->
     Reason=io_lib:format(Message,Args),
     throw({serl_error,Reason}).
 
+-define(serl_toplevel,serl_eval).
+
+-record(state,
+	{curmod=?serl_toplevel,
+	 lineno=1,
+	 gensym_counter=0
+	}).
+
+%% process dictionary keys to store the state variables
+-define(lineno,{?MODULE,'lineno'}).
+-define(curmod,{?MODULE,'curmod'}).
+-define(gensym,{?MODULE,'gensym_counter'}).
+
+
+init_state(S) when is_record(S,state) ->
+    put(?lineno,S#state.lineno),
+    put(?curmod,S#state.curmod),
+    put(?gensym,S#state.gensym_counter).
+
+%% not sure if get_state is ever useful
+%% get_state() ->
+%%     #state{lineno=lineno(),curmod=curmod(),gensym_counter=gensym_counter()}.
+
+
+%% state accessors
+
+lineno() -> get(?lineno).
+set_lineno(L) -> put(?lineno,L). 
+
+curmod() -> get(?curmod). 
+%% check to see if a syntax object is contained within the current compiling module.
+curmod(Ast) when is_tuple(Ast)->
+    AstMod=element(3,Ast),
+    curmod()==AstMod. 
+
+reset_gensym() -> put(?gensym,0).
+gensym_counter() -> get(?gensym).
+
+gensym(N) ->
+    GC=gensym_counter(),
+    put(?gensym,GC+N), 
+    [list_to_atom("#"++io_lib:print(I)) || I <- lists:seq(GC,GC+N-1)].
+
 
 read(In) ->
-    read(In,verl).
-read(In,TLM) ->
-    new_process(fun read_/1,[env:new(TLM)],
-		#scompile_S{input=In}). 
+    read(In,env:new(verl)).
+read(In,Env) -> 
+    new_process(fun read_/2,[In,Env]). 
 
-read_(Env) ->
-    {S,Env2,Ast}=reader:exp(Env,get_state()),
-    set_state(S),
-    {Env2,Ast}.
-
-%% expands(In) ->
-%%     expands(In,verl).
-%% expands(In,TLM) ->
-%%     expand(read(In,TLM),TLM). 
+read_(In,Env) -> 
+    {Env2,In2,_Line,Ast}=reader:exp(In,Env,lineno()),
+    {Env2,In2,Ast}.
 
 expand1(Ast) ->
     expand1(Ast,env:new(verl)).
@@ -143,27 +104,18 @@ expand_(Ast,Env) ->
 
 
 
-%% evals(In) ->
-%%     evals(In,verl).
-%% evals(In,TopLevelMod) ->
-%%     evals(In,TopLevelMod,erl_eval:new_bindings()).
-%% evals(In,TLM,Bindings) ->
-%%     Ast=read(In,TLM),
-%%     eval(Ast,TLM,Bindings).
-
 eval(Ast) ->
     %% by default eval with verl as the initial import.
     eval(Ast,env:new(verl)).
 eval(Ast,Env) ->
     eval(Ast,Env,[]).
 eval(Ast,Env,Bindings) ->
-    new_process(fun eval_/3,
-		[Ast,Env,Bindings]).
+    new_process(fun eval_/3,[Ast,Env,Bindings]).
 
 eval_(Ast,Env,Bindings) ->
     {Env2,ErlAst}=transform(Ast,Env),
     {Val,NewBindings}=eval_erl(ErlAst,Bindings,Env2),
-    {Env2,Val,NewBindings}.
+    {Env2,Val,NewBindings}. 
     
 eval_erl(ErlAst,Bindings,Env) ->
     {value,Val,NewBindings}=erl_eval:expr(
@@ -193,24 +145,21 @@ local_funcall_handler(Name,Args,Env) ->
 remote_funcall_handler({M,F},Args) ->
     apply(M,F,Args).
 
-		   
-%% TODO maybe allow parameterization of symbol macros.
+
 compile(Mod) ->
-    compile(Mod,verl).
-compile(Mod,TLM) when is_atom(Mod) ->
+    compile(Mod,env:new(verl)).
+compile(Mod,Env) when is_atom(Mod) ->
     %% TODO modify streamer to parse binary.
     In=case file:read_file(atom_to_list(Mod)++".serl") of
 	{ok,Bin} -> binary_to_list(Bin);
-	_ -> error("Cannot source moduel ~p\n",[Mod])
+	_ -> error("Cannot source module ~p\n",[Mod])
     end,
-    new_process(fun compile_/1,
-		[env:new(TLM)],
-		#scompile_S{curmod=Mod,input=In}).
+    new_process(fun compile_/2,[Env,In],#state{curmod=Mod}).
 
 %% transforms expressions for side effect on the environment.
-compile_(Env) ->
+compile_(Env,In) -> 
     {Env2,0}=transform(?cast_paren([?cast_atom('__bof')]),Env),
-    compile_loop(Env2,0).
+    compile_loop(Env2,In,0).
 
 %% I want a way to restrict toplevel forms...
 %% one easy way is for toplevel forms to return false as the transformed ast!
@@ -219,30 +168,29 @@ compile_(Env) ->
 %% haha. This is so kludgey, but works well.
 %%%% so if the returned N2 >= N1, then proceed.
 %%%% toplevels that returns the atom infinity can occur anywhere.
-compile_loop(Env,Count) -> 
-    {Env2,Ast}=read_(Env), 
+compile_loop(Env,In,Section) -> 
+    {Env2,In2,ReaderLine,Ast}=read_(Env,In), 
     case Ast of
 	eof ->
 	    %% at end of file, transforms the pseudo special form (__eof)
 	    %% what happens is language dependent.
 	    %% maybe compile to erlang, maybe compile to javascript, whatever.
 	    transform(?cast_paren([?cast_atom('__eof')]),Env2);
-	_ -> {Env3,N}=transform(Ast,Env2),
-	     if not(is_integer(N)) -> error("Not toplevel form: ~p\n",[N]);
-		N<Count -> error("Toplevel form out of sequence: ~p\n",[N]);
+	_ -> {Env3,Section2}=transform(Ast,Env2),
+	     if not(is_integer(Section2)) -> error("Not toplevel form: ~p\n",[Section2]);
+		Section2<Section -> error("Toplevel form out of sequence: ~p\n",[Section2]);
 		true -> ok
 	     end,
-	     compile_loop(Env3,N)
+	     set_lineno(ReaderLine), %% after transform, set lineno to where the reader left off.
+	     compile_loop(Env3,In2,Section2)
     end.
 
-
-     
 new_process(Fun,Args) ->
-    new_process(Fun,Args,#scompile_S{}).
-new_process(Fun,Args,S) ->
+    new_process(Fun,Args,#state{}).
+new_process(Fun,Args,State) ->
     Return=self(),
     Sync=spawn_link(
-	   fun () -> set_state(S),
+	   fun () -> init_state(State),
 		     R=apply(Fun,Args),
 		     Return ! {self(),R}
 	   end),
@@ -255,7 +203,7 @@ new_process(Fun,Args,S) ->
 
 transform1(?ast_paren3(L,_M,_)=Exp,Env) ->
     %% source tracking
-    lineno(L),
+    set_lineno(L),
     case do_transform(Exp,Env) of
 	{special,Result} -> Result;
 	{macro,Result} -> Result
@@ -263,12 +211,12 @@ transform1(?ast_paren3(L,_M,_)=Exp,Env) ->
 transform1(Exp,Env) when is_tuple(Exp) ->
     [Car,L,M|Es]=tuple_to_list(Exp),
     %% source tracking
-    lineno(L), 
+    set_lineno(L), 
     transform1(?cast_paren([?ast_atom3(L,M,Car)|Es]),Env).
 
 transform(?ast_paren3(L,_M,_)=Exp,Env) ->
     %% source tracking
-    lineno(L),
+    set_lineno(L),
     case do_transform(Exp,Env) of
 	{special,{_Env2,_Result}=Result} -> Result;
 	{macro,{_,Exp2}} -> transform(Exp2,Env)
@@ -276,7 +224,7 @@ transform(?ast_paren3(L,_M,_)=Exp,Env) ->
 transform(Exp,Env) when is_tuple(Exp) ->
     [Car,L,M,E]=tuple_to_list(Exp),
     %% source tracking
-    lineno(L), 
+    set_lineno(L), 
     transform(?cast_paren([?ast_atom3(L,M,Car),E]),Env).
 
 %% do one expansion
@@ -304,6 +252,7 @@ do_transform(?ast_paren([Car|Body])=Exp,Env) ->
 	_ -> case lookup_expander(Env,?cast_atom('__call')) of
 		 %% make sure to raise error, otherwise go into loop.
 		 {Type,_F} when Type==special;Type==macro ->
+		     io:format("Calling ~p\n",[Car]),
 		     R=transform(?cast_paren([?cast_atom('__call'),Car|Body]),
 				 Env),
 		     {Type,R};
@@ -350,8 +299,9 @@ lookup_expander(Env,Car) ->
 	     end
     end.
 
-lookup(Env,NSType,{M,_A}=Key) ->
+lookup(Env,NSType,{M,A}=Key) ->
     T=curmod(M),
+    io:format("M: ~p==~p A: ~p T: ~p\n",[M,curmod(),A,T]),
     if T -> local_lookup(Env,NSType,Key);
        true -> remote_lookup(Env,NSType,Key)
     end.
@@ -371,7 +321,7 @@ local_lookup(Env,NSType,{M,A}) ->
 remote_lookup(Env,NSType,{M,A}) ->
     case lexical_lookup(Env,NSType,{M,A}) of
 	%% TODO cache toplevels
-	false -> toplevel_lookup(env:new(M),NSType,A);
+	false -> toplevel_lookup(env:toplevel_of(M),NSType,A);
 	Val -> Val
     end.
 

@@ -3,12 +3,11 @@
 
 -module(reader).
 
--export([exp/1,
-	 exp/2
+-export([
+	 exp/3
 	]).
 
 -include("ast.hrl").
--include("state.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 
@@ -26,8 +25,7 @@
 	?reserved_chars).
 
 -import(lists,[reverse/1,member/2]).
--import(streamer,[lineno/1,
-		  lineno/0,
+-import(streamer,[lineno/0,
 		  residue/0,
 		  peek/0,
 		  read/0,
@@ -39,6 +37,8 @@
 		  read_until/1
 		 ]).
 
+-import(scompile,[curmod/0]).
+
 %% bdefnrstv#\"
 -define(string_escapes,
 	[{$b,$\b},{$d,$\d},{$e,$\e},
@@ -46,56 +46,44 @@
 	 {$s,$\s},{$t,$\t},{$v,$\v},
 	 {$#,$\#},{$\\,$\\},{$\",$\"}]).
 
-
-%% TODO think of a better way for streamer to keep state.
--define(state,{?MODULE,'state'}).
-
-get_state() ->
-    S=get(?state),
-    S#scompile_S{reader_lineno=lineno(),input=streamer:get_port()}.
-
-set_state(S) when is_record(S,scompile_S) ->
-    put(?state,S),
-    lineno(S#scompile_S.reader_lineno),
-    streamer:set_port(S#scompile_S.input). 
-
-curmod() ->
-    S=get_state(),
-    S#scompile_S.curmod.
-
 -define(env,{?MODULE,'env'}).
-
-%% curenv() is used only for reader macro lookup.
-curenv() ->
-    get(?env). 
-curenv(Env) ->
-    put(?env,Env).    
-
-exp(In) -> 
-    exp(env:new(serl),#scompile_S{input=In}).
-    
-exp(Env,S) ->
-    set_state(S),
-    curenv(Env),
-    Ast=an_exp(),
-    S2=get_state(), %% sequentially!
-    {S2,curenv(),Ast}. 
 
 error(Message) ->
     error(Message,[]).
 error(Message,Args) ->
-    io:fwrite(Message++"\n\tWith remaining input:\n~p\n\n",Args++[residue()]),
-    throw({read_error,Message}).
+    scompile:error(Message++"\n\tWith remaining input:\n~p\n\n",Args++[residue()]).
+
+get_state() ->
+    {curenv(), streamer:get_port(), lineno()}.
+
+set_state(Env,In,Line) ->
+    streamer:set_port(In),
+    streamer:set_lineno(Line),
+    put(?env,Env). 
+
+%% curenv() is used only for reader macro lookup.
+%% in the future may be used to lookup readertable.
+curenv() -> get(?env).
+set_curenv(Env) -> put(?env,Env). 
+    
+
+exp(In,Env,LineNo) ->
+    set_state(Env,In,LineNo), 
+    Ast=an_exp(),
+    {Env2,In2,LineNo2}=get_state(),
+    {Env2,In2,LineNo2,Ast}. 
 
 %% serl lexer/parser
 
 is_digit(C) -> ($0 =< C) and (C =< $9).
-is_upper(C) -> ($A =< C) and (C =< $Z).
-is_alpha(C) -> (($a =< C) and (C =< $z)) or is_upper(C).
-is_alpha_num(C) -> is_digit(C)  or is_alpha(C).
+is_upper(C) -> ($A =< C) and (C =< $Z). 
 is_atom_char(C) -> not (lists:member(C,?delimiters)).
 is_atom_first_char(C) -> not (is_digit(C) or is_delimiter(C)).
+is_var_first_char(C) -> is_upper(C) or (C == $_).
 is_delimiter(C) -> lists:member(C,?delimiters).
+
+%% is_alpha(C) -> (($a =< C) and (C =< $z)) or is_upper(C).
+%% is_alpha_num(C) -> is_digit(C)  or is_alpha(C).
 
 spacen() ->
     skip_while(?spacen),
@@ -115,7 +103,7 @@ a_symbol(Prefix) ->
     Name=Prefix++Token,
     case Name of
 	[] -> error("Expecting a symbol name.");
-	[H|_] -> VarP=is_upper(H),
+	[H|_] -> VarP=is_var_first_char(H),
 		 if VarP -> ?cast_var(list_to_atom(Name));
 		    true -> ?cast_atom(list_to_atom(Name))
 		 end
@@ -283,9 +271,10 @@ string_escape() ->
 	{value,{_,EC}} -> EC; 
 	_ -> error(io_lib:format("Escape char not supported: ~p",[R]))
     end.
-string_interpolate() ->
-    char("{"), E=an_exp(), char("}"),
-    E.
+
+%% string_interpolate() ->
+%%     char("{"), E=an_exp(), char("}"),
+%%     E.
 
 
 a_reader_macro() ->
@@ -300,7 +289,7 @@ a_reader_macro() ->
 	{ok,F} ->
 	    {Args,Here}=reader_macro_args([]),
 	    {Env2,Ast}=F(Args,Here,Env),
-	    curenv(Env2),
+	    set_curenv(Env2),
 	    Ast;
 	_ -> error("Undefined reader macro: \n~p\n",[Name])
     end.

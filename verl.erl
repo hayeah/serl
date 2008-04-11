@@ -128,20 +128,40 @@ put_meta_env(Env,MEnv) ->
     %% macro is compiled using the meta-environment
     [GSym]=scompile:gensym(1), 
     {ok,MEnv}=get_meta_env(Env),
-    %% the ast to be evaled when macro is used.
-    %% (case $V (A: 'foo) ([A B]: 'bar))
-    {_,Ast}=transform(
-	      ?cast_paren(
-		 [?cast_atom('case'),?cast_paren([?cast_atom('eval-binding'),
-						  ?cast_var(GSym)])
-		  |Clauses]),
-	      MEnv),
+    %% (paren [_|$V]) == (paren (ls: _ :$V))
+    PatternAst=
+	?cast_paren([?cast_atom(paren),
+		     ?cast_paren([?cast_atom(ls),
+				  ?cast_block([?cast_var('_')]),
+				  ?cast_block([?cast_var(GSym)])])]), 
+    printer:p(PatternAst),
+    io:format("defm Curmod: ~p\n",[curmod()]),
+    io:format("Bindings: ~p\n",
+	      [[scompile:lookup(MEnv,macros,{curmod(),paren}),
+		scompile:lookup(MEnv,macros,{curmod(),ls})]]),
+    io:format("PatternAst: ~p\n",
+	      [transform(PatternAst,MEnv)]),
+    io:format("After Bind: ~p\n",
+	      [bind(PatternAst,MEnv)]), 
+    %% the form to be evaled when macro is used.
+    %% `(begin (= (paren [_|$V]) (eval-binding $V)) (case $V ...))
+    CaseAst=
+	?cast_paren(
+	   [?cast_atom('begin'),
+	    ?cast_paren([?cast_atom('='),PatternAst,?cast_paren([?cast_atom('eval-binding'), ?cast_var(GSym)])]),
+	    ?cast_paren(
+	       [?cast_atom('case'),?cast_var(GSym)
+		|Clauses])
+	   ]),
+    printer:p(CaseAst),
+    {_,CaseErlAst}=transform(CaseAst, MEnv),
+    io:format("After Case\n"),
     %% the ast to be compiled in the meta-module
-    %% %% (def $mac$<macro-name>: (($V): (case $V (A: 'foo) ([A B]: 'bar))) )
+    %% %% (def $mac$<macro-name>: ((paren [_|$V]): (case $V (A: 'foo) ([A B]: 'bar))) )
     MacName=list_to_atom("$mac$"++atom_to_list(Name)),
     FnAst={function,Line, MacName, 1,
 	   function_clause(
-	     ?cast_paren([?cast_paren([?cast_var(GSym)]),
+	     ?cast_paren([PatternAst,
 			  ?cast_block(
 			     [?cast_paren(
 				 [?cast_atom('case'),?cast_var(GSym)
@@ -154,7 +174,7 @@ put_meta_env(Env,MEnv) ->
     %% functions defined after the macro are not visible.
     %% %% I think this is sensible... 
     FnVal=fun (MacData) ->
-		  {_,Val,_}=erl_eval:expr(Ast,[{GSym,MacData}],MEnv),
+		  {_,Val,_}=erl_eval:expr(CaseErlAst,[{GSym,MacData}],MEnv),
 		  Val
 	  end, 
     %% augument environment with the new macro 
@@ -395,7 +415,11 @@ bind(?ast_paren([?ast_atom(Car)|Es])=E,Env) ->
 	cons -> [T,H]=Es,
 		bind(H,bind(T,Env));
 	tuple -> binds(Es,Env);
-	_ -> {Env2,E2}=scompile:expand1(E,Env),
+	%% It might be convenient to have a scompile:macroexpand, that stops when we reached special forms.
+	%% this is useful for DSLs (as pattern) that wants to hook onto the macro expansion mechanism, but only allows a few defined special forms.
+	_ -> %% WRONG! Needs to use the current compiler state.
+	    %% this is too kludgey. Think of a better way to do it.
+	    {Env2,E2}=scompile:expand1_(E,Env), 
 	     bind(E2,Env2)
     end;
 bind(P,_) ->
@@ -507,7 +531,7 @@ gen_pat_glist(Type,[Es,L,M],Env) ->
     ?cast_paren([?cast_atom(nil)]); 
 ?defm('__mac_ls',[?ast_block(Conses)]) ->
     'mk_list*'(Conses,?cast_paren([?cast_atom(ls)]));
-?defm('__mac_ls',[?ast_block(Conses),?ast_block(Tail)]) ->
+?defm('__mac_ls',[?ast_block(Conses),?ast_block([Tail])]) ->
     'mk_list*'(Conses,Tail). 
 
 'mk_list*'(Conses,Tail) ->
@@ -712,7 +736,10 @@ erl_parse_e(In) ->
 	    end
     end.
 
-read(In) -> scompile:read(In,?MODULE).
+
+read(In) ->
+    {Env,_,Ast}=scompile:read(In,env:new(?MODULE)),
+    {Env,Ast}.
 
 sread(In) ->
     {_,Ast}=read(In),
@@ -726,6 +753,12 @@ sexpand1(In) ->
 sexpand(In) ->
     {Env,Ast}=read(In),
     scompile:expand(Ast,Env).
+
+sexpand(In,Env) ->
+    {_,Ast}=read(In),
+    scompile:expand(Ast,Env).
+
+
 
 psexpand1(In) ->
     {Env,Ast}=read(In),
@@ -757,7 +790,15 @@ sevaln_(N,Ast,Env,Bindings) ->
     {Env2,Ast2,Bs2}=scompile:eval(Ast,Env,Bindings),
     sevaln_(N-1,Ast2,Env2,Bs2).
     
-    
+
+test() ->
+    PatternAst=
+	?cast_paren([?cast_atom(paren),
+		     ?cast_paren([?cast_atom(ls),
+				  ?cast_block([?cast_var('_')]),
+				  ?cast_block([?cast_var(fooo)])])]),
+    io:format("PatternAst: ~p\n", [PatternAst]),
+    pattern(PatternAst,env:toplevel_of(mverl)). 
     
     
 %% a common idiom is a list of blocks seperated by ':' (foo a b c d: e f g h: i j k l)
