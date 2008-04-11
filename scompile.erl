@@ -2,13 +2,14 @@
 -include("ast.hrl").
 
 -export([lineno/0,
-	 curmod/0,
+	 curmod/0,curmod/1,
 	 gensym/1, reset_gensym/0, %% for debug purposes
 	 
-	 read/1,read/2,
-	 expand1/1,expand1/2,expand/1,expand/2,
-	 eval/1,eval/2,eval/3,eval_erl/3,
-	 compile/1,compile/2,
+	 read/2,read_/2,
+	 expand1/2,expand1_/2,
+	 expand/2,expand_/2,
+	 eval/3,eval_/3,eval_erl/3,
+	 compile/2,
 	 transform1/2, transform/2, transform_each/2, map_env0/3,
 	 
 	 lexical_shadow/3,lexical_extend/3,
@@ -60,6 +61,7 @@ init_state(S) when is_record(S,state) ->
 lineno() -> get(?lineno).
 set_lineno(L) -> put(?lineno,L). 
 
+is_curmod(Mod) when is_atom(Mod) -> Mod==curmod().
 curmod() -> get(?curmod). 
 %% check to see if a syntax object is contained within the current compiling module.
 curmod(Ast) when is_tuple(Ast)->
@@ -75,25 +77,18 @@ gensym(N) ->
     [list_to_atom("#"++io_lib:print(I)) || I <- lists:seq(GC,GC+N-1)].
 
 
-read(In) ->
-    read(In,env:new(verl)).
 read(In,Env) -> 
     new_process(fun read_/2,[In,Env]). 
 
 read_(In,Env) -> 
-    {Env2,In2,_Line,Ast}=reader:exp(In,Env,lineno()),
-    {Env2,In2,Ast}.
+    reader:exp(In,Env,lineno()) %% {Env2,In2,Line,Ast}
+    .
 
-expand1(Ast) ->
-    expand1(Ast,env:new(verl)).
 expand1(Ast,Env) ->
     new_process(fun expand1_/2,
 		[Ast,Env]). 
 expand1_(Ast,Env) ->
     transform1(Ast,Env).
-
-expand(Ast) ->
-    expand(Ast,env:new(verl)).
 
 expand(Ast,Env) ->
     new_process(fun expand_/2,
@@ -103,12 +98,6 @@ expand_(Ast,Env) ->
     transform(Ast,Env).
 
 
-
-eval(Ast) ->
-    %% by default eval with verl as the initial import.
-    eval(Ast,env:new(verl)).
-eval(Ast,Env) ->
-    eval(Ast,Env,[]).
 eval(Ast,Env,Bindings) ->
     new_process(fun eval_/3,[Ast,Env,Bindings]).
 
@@ -146,20 +135,18 @@ remote_funcall_handler({M,F},Args) ->
     apply(M,F,Args).
 
 
-compile(Mod) ->
-    compile(Mod,env:new(verl)).
 compile(Mod,Env) when is_atom(Mod) ->
     %% TODO modify streamer to parse binary.
     In=case file:read_file(atom_to_list(Mod)++".serl") of
 	{ok,Bin} -> binary_to_list(Bin);
 	_ -> error("Cannot source module ~p\n",[Mod])
     end,
-    new_process(fun compile_/2,[Env,In],#state{curmod=Mod}).
+    new_process(fun compile_/2,[In,Env],#state{curmod=Mod}).
 
 %% transforms expressions for side effect on the environment.
-compile_(Env,In) -> 
+compile_(In,Env) -> 
     {Env2,0}=transform(?cast_paren([?cast_atom('__bof')]),Env),
-    compile_loop(Env2,In,0).
+    compile_loop(In,Env2,0).
 
 %% I want a way to restrict toplevel forms...
 %% one easy way is for toplevel forms to return false as the transformed ast!
@@ -168,8 +155,8 @@ compile_(Env,In) ->
 %% haha. This is so kludgey, but works well.
 %%%% so if the returned N2 >= N1, then proceed.
 %%%% toplevels that returns the atom infinity can occur anywhere.
-compile_loop(Env,In,Section) -> 
-    {Env2,In2,ReaderLine,Ast}=read_(Env,In), 
+compile_loop(In,Env,Section) -> 
+    {Env2,In2,ReaderLine,Ast}=read_(In,Env), 
     case Ast of
 	eof ->
 	    %% at end of file, transforms the pseudo special form (__eof)
@@ -182,7 +169,7 @@ compile_loop(Env,In,Section) ->
 		true -> ok
 	     end,
 	     set_lineno(ReaderLine), %% after transform, set lineno to where the reader left off.
-	     compile_loop(Env3,In2,Section2)
+	     compile_loop(In2,Env3,Section2)
     end.
 
 new_process(Fun,Args) ->
@@ -300,8 +287,8 @@ lookup_expander(Env,Car) ->
     end.
 
 lookup(Env,NSType,{M,A}=Key) ->
-    T=curmod(M),
-    io:format("M: ~p==~p A: ~p T: ~p\n",[M,curmod(),A,T]),
+    T=is_curmod(M),
+    %%io:format("M: ~p==~p A: ~p T: ~p\n",[M,curmod(),A,T]),
     if T -> local_lookup(Env,NSType,Key);
        true -> remote_lookup(Env,NSType,Key)
     end.
@@ -403,8 +390,6 @@ lookup_imports(Env,NSType,Key) ->
 	_ -> false
     end.
 
-%% it's annoying. A lot of these recursion helpers would be better
-%% expressed as lists:foreach and a return
 lookup_imports_([],_,_) -> false;
 lookup_imports_([{_Mod,NSs}|Imports],NSType,Key) ->
     case assoc(NSs,[NSType,Key]) of

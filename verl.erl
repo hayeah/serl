@@ -114,6 +114,7 @@ put_meta_env(Env,MEnv) ->
 %%  )
 
 %% macros are interpreted when used within the compiling module.
+%%%% yuk, extremely hairy.
 ?defsp('__sp_defm',Es) ->
     [?ast_block(Header),?ast_block(Clauses)]=to_blocks(Es), 
     {Name,Doc}=
@@ -134,15 +135,6 @@ put_meta_env(Env,MEnv) ->
 		     ?cast_paren([?cast_atom(ls),
 				  ?cast_block([?cast_var('_')]),
 				  ?cast_block([?cast_var(GSym)])])]), 
-    printer:p(PatternAst),
-    io:format("defm Curmod: ~p\n",[curmod()]),
-    io:format("Bindings: ~p\n",
-	      [[scompile:lookup(MEnv,macros,{curmod(),paren}),
-		scompile:lookup(MEnv,macros,{curmod(),ls})]]),
-    io:format("PatternAst: ~p\n",
-	      [transform(PatternAst,MEnv)]),
-    io:format("After Bind: ~p\n",
-	      [bind(PatternAst,MEnv)]), 
     %% the form to be evaled when macro is used.
     %% `(begin (= (paren [_|$V]) (eval-binding $V)) (case $V ...))
     CaseAst=
@@ -152,21 +144,21 @@ put_meta_env(Env,MEnv) ->
 	    ?cast_paren(
 	       [?cast_atom('case'),?cast_var(GSym)
 		|Clauses])
-	   ]),
-    printer:p(CaseAst),
+	   ]), 
     {_,CaseErlAst}=transform(CaseAst, MEnv),
-    io:format("After Case\n"),
-    %% the ast to be compiled in the meta-module
-    %% %% (def $mac$<macro-name>: ((paren [_|$V]): (case $V (A: 'foo) ([A B]: 'bar))) )
+    
+    %% the ast to be compiled for the meta-module
+    %% %% (def $mac$<macro-name>: (((paren [_|$V])): (case $V (A: 'foo) ([A B]: 'bar))) )
     MacName=list_to_atom("$mac$"++atom_to_list(Name)),
-    FnAst={function,Line, MacName, 1,
-	   function_clause(
-	     ?cast_paren([PatternAst,
-			  ?cast_block(
-			     [?cast_paren(
-				 [?cast_atom('case'),?cast_var(GSym)
-				  |Clauses])])]),
-	     MEnv)}, 
+    {_,FnClauseErlAst}=
+	function_clause(
+	  ?cast_paren([?cast_paren([PatternAst]),
+		       ?cast_block(
+			  [?cast_paren(
+			      [?cast_atom('case'),?cast_var(GSym)
+			       |Clauses])])]),
+	  MEnv),
+    FnErlAst={function,Line, MacName, 1, FnClauseErlAst}, 
     %% the macro function interprets the erl-ast of the macro definition
     %% the macro function closes over the current  meta-environment.
     %% the macro is not visible to its own definition.
@@ -179,7 +171,7 @@ put_meta_env(Env,MEnv) ->
 	  end, 
     %% augument environment with the new macro 
     Env2=scompile:new_def(Env,macros,Name,FnVal),
-    Env3=scompile:new_def(Env2,macros_info,Name,[{ast,FnAst},{doc,Doc}]),
+    Env3=scompile:new_def(Env2,macros_info,Name,[{ast,FnErlAst},{doc,Doc}]),
     %% do the same for MEnv, so macro is usable for macro definitions that come later.
     MEnv2=scompile:new_def(MEnv,macros,Name,FnVal),
     Env4=put_meta_env(Env3,MEnv2),
@@ -457,7 +449,7 @@ gen_pat(?ast_paren([?ast_atom(Car)|Es])=E,Env) ->
 	paren -> gen_pat_glist('__paren',Es,Env);
 	block -> gen_pat_glist('__block',Es,Env);
 	brace -> gen_pat_glist('__brace',Es,Env); 
-	_ -> {Env2,E2}=scompile:expand1(E,Env),
+	_ -> {Env2,E2}=scompile:expand1_(E,Env),
 	     gen_pat(E2,Env2)
     end;
 gen_pat(P,Env) ->
@@ -559,7 +551,7 @@ gen_pat_glist(Type,[Es,L,M],Env) ->
     {Env2,
      {'case',Line,
       RE0,
-      [case_clause(C,Env2)|| C <- Clauses ]}}.
+      [begin {_,RC}=case_clause(C,Env2), RC end || C <- Clauses ]}}.
 
 %% If E is begin B end, where B is a body, then Rep(E) = {block,LINE,Rep(B)}.
 ?defsp('__sp_begin',Es) -> 
@@ -738,7 +730,7 @@ erl_parse_e(In) ->
 
 
 read(In) ->
-    {Env,_,Ast}=scompile:read(In,env:new(?MODULE)),
+    {Env,_,_,Ast}=scompile:read(In,env:new(?MODULE)),
     {Env,Ast}.
 
 sread(In) ->
@@ -771,8 +763,7 @@ psexpand(In) ->
     printer:p(R).
 
 seval(In) ->
-    {Env,Ast}=read(In),
-    scompile:eval(Ast,Env).
+    seval(In,erl_eval:new_bindings()). 
 seval(In,Bindings) ->
     {Env,Ast}=read(In),
     scompile:eval(Ast,Env,Bindings).
@@ -789,6 +780,10 @@ sevaln_(0,Ast,Env,Bindings) ->
 sevaln_(N,Ast,Env,Bindings) ->
     {Env2,Ast2,Bs2}=scompile:eval(Ast,Env,Bindings),
     sevaln_(N-1,Ast2,Env2,Bs2).
+    
+
+compile(Mod) ->
+    scompile:compile(Mod,env:new(?MODULE)).
     
 
 test() ->
