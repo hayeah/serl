@@ -188,63 +188,46 @@ new_process(Fun,Args,State) ->
 	    error("Compiler Timeout")
     end. 
 
-transform1(?ast_paren3(L,_M,_)=Exp,Env) ->
-    %% source tracking
-    set_lineno(L),
+transform1(?ast_paren(_)=Exp,Env) ->
     case do_transform(Exp,Env) of
 	{special,Result} -> Result;
 	{macro,Result} -> Result
     end;
 transform1(Exp,Env) when is_tuple(Exp) ->
     [Car,L,M|Es]=tuple_to_list(Exp),
-    %% source tracking
-    set_lineno(L), 
     transform1(?cast_paren([?ast_atom3(L,M,Car)|Es]),Env).
 
-transform(?ast_paren3(L,_M,_)=Exp,Env) ->
-    %% source tracking
-    set_lineno(L),
+transform(?ast_paren(_)=Exp,Env) ->
     case do_transform(Exp,Env) of
 	{special,{_Env2,_Result}=Result} -> Result;
 	{macro,{_,Exp2}} -> transform(Exp2,Env)
     end;
 transform(Exp,Env) when is_tuple(Exp) ->
     [Car,L,M,E]=tuple_to_list(Exp),
-    %% source tracking
-    set_lineno(L), 
     transform(?cast_paren([?ast_atom3(L,M,Car),E]),Env).
 
 %% do one expansion
-do_transform(?ast_paren([Car|Body])=Exp,Env) ->
-    case lookup_expander(Env,Car) of
-	{special,F} ->
-	    try {special,F(Exp,Env)}
-	    catch
-		{serl_error,Reason} ->
-			io:format("~s:~w: ~s\n",
-				  [curmod(),lineno(),Reason]),
-		    %% raise the exception as error class so it's not caught again by previous transform calls.
-		    erlang:error({serl_error,Reason}) 
-	    end;
-	{macro,F} ->
-	    try {macro,{Env,F(Exp)}}
-	    catch
-		{serl_error,Reason} ->
-		    io:format("~s:~w: ~s\n",
-			      [curmod(),lineno(),Reason]),
-		    printer:p(Exp),
-		    %% raise the exception as error class so it's not caught again by previous transform calls.
-		    erlang:error({serl_error,lists:flatten(Reason)})
-	    end;
-	_ -> case lookup_expander(Env,?cast_atom('__call')) of
-		 %% make sure to raise error, otherwise go into loop.
-		 {Type,_F} when Type==special;Type==macro ->
-		     io:format("Calling ~p\n",[Car]),
-		     R=transform(?cast_paren([?cast_atom('__call'),Car|Body]),
-				 Env),
-		     {Type,R};
-		 _ -> error("No expander for function call.")
-	     end
+%% not tail-recursive. I'd rather have a stack for backtrace.
+do_transform(?ast_paren3(L,M,[Car|Body])=Exp,Env) ->
+    %% line tracking
+    set_lineno(L),
+    try case lookup_expander(Env,Car) of
+	    {special,F} -> {special,F(Exp,Env)};
+	    {macro,F} -> {macro,{Env,F(Exp)}} ;
+	    _ -> case lookup_expander(Env,?cast_atom('__call')) of
+		     %% make sure to raise error, otherwise go into loop.
+		     {Type,_F} when Type==special;Type==macro ->
+			 R=transform(?cast_paren([?cast_atom('__call'),Car|Body]),
+				     Env),
+			 {Type,R};
+		     _ -> error("No expander for function call.")
+		 end
+	end
+    catch
+	error:{serl_error,Reason,Trace} ->
+	    erlang:error({serl_error,Reason,[{L,M,Car}|Trace]});
+	error:Reason ->
+	    erlang:error({serl_error,Reason,[]})
     end.
 
 
@@ -286,9 +269,8 @@ lookup_expander(Env,Car) ->
 	     end
     end.
 
-lookup(Env,NSType,{M,A}=Key) ->
+lookup(Env,NSType,{M,_F}=Key) ->
     T=is_curmod(M),
-    %%io:format("M: ~p==~p A: ~p T: ~p\n",[M,curmod(),A,T]),
     if T -> local_lookup(Env,NSType,Key);
        true -> remote_lookup(Env,NSType,Key)
     end.

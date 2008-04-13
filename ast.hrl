@@ -4,6 +4,15 @@
 
 %% An ast is a 4-tuple: {Type,Line,Module,Payload}
 
+%% Erlang macro is half-baked. It doesn't even have stringnifying for tokens!
+
+%% -record(ast_float,{line,
+%% 		   mod,
+%% 		   visible, %% if the ast appears in source
+%% 		   payload}).
+
+
+
 -define(ast_float3(L,M,E),{'__float',L,M,E}). 
 -define(ast_integer3(L,M,E),{'__integer',L,M,E}). 
 -define(ast_string3(L,M,E),{'__string',L,M,E}).

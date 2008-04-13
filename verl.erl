@@ -116,7 +116,17 @@ put_meta_env(Env,MEnv) ->
 %% macros are interpreted when used within the compiling module.
 %%%% yuk, extremely hairy.
 ?defsp('__sp_defm',Es) ->
-    [?ast_block(Header),?ast_block(Clauses)]=to_blocks(Es), 
+    [?ast_block(Header),?ast_block(TmpClauses)]=to_blocks(Es),
+    %% massage the defm clauses
+    %% ((A B): ...)   ## => ([A B]: ...)
+    %% (A: ...)   ## => (A: ...)
+    Clauses=
+	[case C of
+	     ?ast_paren([?ast_paren(Args)|Body]) ->
+		 ?cast_paren([?cast_block(Args)|Body]);
+	     _ -> C
+	 end
+	 || C <- TmpClauses],
     {Name,Doc}=
 	case Header of
 	    [?ast_atom(A)] -> {A,""};
