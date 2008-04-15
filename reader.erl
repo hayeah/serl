@@ -11,16 +11,18 @@
 -include_lib("eunit/include/eunit.hrl").
 
 
-
+%% symbol chars: [a-zA-Z0-9_+_*/\]
 -define(spacen,"\t\s\n").
 -define(space,"\t\s").
 -define(nesting_chars,".~:").
 -define(quoting_chars,";,'`").
--define(reserved_chars,"!@#$%^&\\|?").
+-define(module_separator,$\\).
+-define(reserved_chars,"!@#$%^&|?").
 -define(delimiters,
 	"(){}[]\""++
 	?nesting_chars++
 	?quoting_chars++
+	[?module_separator]++
 	?spacen++
 	?reserved_chars).
 
@@ -77,9 +79,11 @@ exp(In,Env,LineNo) ->
 
 is_digit(C) -> ($0 =< C) and (C =< $9).
 is_upper(C) -> ($A =< C) and (C =< $Z). 
-is_atom_char(C) -> not (lists:member(C,?delimiters)).
-is_atom_first_char(C) -> not (is_digit(C) or is_delimiter(C)).
-is_var_first_char(C) -> is_upper(C) or (C == $_).
+
+is_symbol_charn(C) ->
+    not is_delimiter(C).
+is_symbol_char1(C) ->
+    not (is_digit(C) or is_delimiter(C)).
 is_delimiter(C) -> lists:member(C,?delimiters).
 
 %% is_alpha(C) -> (($a =< C) and (C =< $z)) or is_upper(C).
@@ -92,21 +96,46 @@ spacen() ->
 	_ -> nil
     end.
 
-
-%% digit() -> char_if(is_digit). 
-%% alpha() -> char_if(is_alpha).
-
 a_symbol() ->
     a_symbol("").
 a_symbol(Prefix) ->
-    Token=token_of(fun is_atom_char/1),
+    Token=token_of(fun is_symbol_charn/1),
     Name=Prefix++Token,
-    case Name of
-	[] -> error("Expecting a symbol name.");
-	[H|_] -> VarP=is_var_first_char(H),
-		 if VarP -> ?cast_var(list_to_atom(Name));
-		    true -> ?cast_atom(list_to_atom(Name))
-		 end
+    UniVarP=(hd(Name)==$_), 
+    spacen(),
+    AfterSymbolC=peek(),
+    {M,A}=
+	if AfterSymbolC==?module_separator and UniVarP ->
+		error("module of a symbol cannot be the universal pattern.");
+	   AfterSymbolC==?module_separator ->
+		read(),
+		Atom=token_of(fun is_symbol_charn/1),
+		{Name, Atom};
+	   true -> {atom_to_list(curmod()),Name}
+	end, 
+    AfterAllC=peek(),
+    if AfterAllC==?module_separator ->
+	    error("Only one module specifier allowed.");
+       true -> ok
+    end,
+    %% var:  module must be an atom
+    %% atom: module can be a var or an atom, cannot be a universal pattern
+    %% %% if module is a var, transfrom to a tuple:  Mod\a -> {Mod a}
+    MVarP=is_upper(hd(M)),
+    MUniVarP=(hd(M)==$_),
+    MAtomP=not (MVarP or MUniVarP),
+    AVarP=is_upper(hd(A)),
+    AUniVarP=(hd(A)==$_) ,
+    AAtomP=not (AVarP or AUniVarP), 
+    if (AVarP or AUniVarP) ->
+	    if MAtomP -> ?ast_var3(lineno(),list_to_atom(M),list_to_atom(A));
+	       true -> error("Home module of a var must be an atom")
+	    end;
+       AAtomP ->
+	    if MVarP -> ?cast_brace([?cast_var(M),?cast_atom(A)]);
+	       MAtomP -> ?ast_atom3(lineno(),list_to_atom(M),list_to_atom(A));
+	       true -> error("Home module of an atom must be a var or an atom.")
+	    end
     end.
 
 
@@ -300,7 +329,7 @@ reader_macro_args(Acc) ->
     %% ${ == 123
     IsArg=(C==123),
     IsOpen=lists:member(C,"(["),
-    IsLong=(not IsOpen) and is_atom_first_char(C),
+    IsLong=(not IsOpen) and is_symbol_char1(C),
     if C==eof -> error("while parsing reader macro");
        IsArg -> read(), Arg=an_exp(), char("}"),
 		reader_macro_args([Arg|Acc]);
@@ -405,7 +434,7 @@ exp_dispatch($;) ->
     ?ast_sunquote3(L,curmod(),E); 
 exp_dispatch(C) ->
     Digit=is_digit(C) or (C==$-),
-    Symbol=is_atom_first_char(C),
+    Symbol=is_symbol_char1(C),
     if %% If the first peeked char is $-, there is an overlap between Symbol and Digit, peek one more.
        Digit,Symbol -> read(),
 		       C2=peek(),

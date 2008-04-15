@@ -63,7 +63,7 @@ emit(Env) ->
 		 [Ast || {_Name,Ast} <- Defuns]
 	 end,
     Forms=[Module]++Exports++Funs,
-    %%compile_forms(atom_to_list(curmod())++".beam",Forms),
+    compile_forms(atom_to_list(curmod())++".beam",Forms),
     {Env,Forms}.
 
 compile_forms(FileName,Forms) ->
@@ -206,7 +206,6 @@ put_meta_env(Env,MEnv) ->
     %% transforming the body should only affect the lexical environment. So we discard the returned environment. 
     NewEnv=env:assoc_put(Env,[definitions,functions,Name],
 			 {function,Line, Name, Arity, [FunClause]}),
-    io:format("~p\n",[NewEnv]), 
     {NewEnv,?def_sec}.
 
 %% (compile-for expand run: <form>*) 
@@ -726,7 +725,7 @@ erl_parse_e(In) ->
 
 
 read(In) ->
-    {Env,_,_,Ast}=scompile:read(In,env:new(?MODULE)),
+    {Env,_,_,Ast}=scompile:read(In,env:toplevel_of(verl2)),
     {Env,Ast}.
 
 sread(In) ->
