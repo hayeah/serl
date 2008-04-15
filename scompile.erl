@@ -29,8 +29,8 @@ warn(Message,Args) ->
 error(Message) ->
     error(Message,[]).
 error(Message,Args) ->
-    Reason=io_lib:format(Message,Args),
-    throw({serl_error,Reason}).
+    Reason=lists:flatten(io_lib:format(Message,Args)),
+    erlang:error({serl_error,Reason}).
 
 -define(serl_toplevel,serl_eval).
 
@@ -136,15 +136,15 @@ remote_funcall_handler({M,F},Args) ->
 
 
 compile(Mod,Env) when is_atom(Mod) ->
+    new_process(fun compile_/2,[Mod,Env],#state{curmod=Mod}).
+
+%% transforms expressions for side effect on the environment.
+compile_(Mod,Env) ->
     %% TODO modify streamer to parse binary.
     In=case file:read_file(atom_to_list(Mod)++".serl") of
 	{ok,Bin} -> binary_to_list(Bin);
-	_ -> error("Cannot source module ~p\n",[Mod])
+	_ -> error("Cannot find source module ~p\n",[Mod])
     end,
-    new_process(fun compile_/2,[In,Env],#state{curmod=Mod}).
-
-%% transforms expressions for side effect on the environment.
-compile_(In,Env) -> 
     {Env2,0}=transform(?cast_paren([?cast_atom('__bof')]),Env),
     compile_loop(In,Env2,0).
 
@@ -175,18 +175,36 @@ compile_loop(In,Env,Section) ->
 new_process(Fun,Args) ->
     new_process(Fun,Args,#state{}).
 new_process(Fun,Args,State) ->
+    %%process_flag(trap_exit, true),
     Return=self(),
     Sync=spawn_link(
-	   fun () -> init_state(State),
+	   fun () -> init_state(State), 
 		     R=apply(Fun,Args),
 		     Return ! {self(),R}
 	   end),
+    wait_result(Sync).
+
+%% wait_exit(Sync) ->
+%%     receive
+%% 	{'EXIT',Sync,normal} -> wait_result(Sync);
+%% 	{'EXIT',Sync,{{serl_error,Reason,Trace},_}} ->
+%% 	    io:format("Error: ~p\n~p\n",[Reason,Trace]),
+%% 	    {error,Reason};
+%% 	{'EXIT',Sync,Reason} ->
+%% 	    io:format("Error: ~p\n",[Reason]),
+%% 	    erlang:error(Reason) 
+%%     after 120000 ->
+%% 	    %% time out after 2 minutes
+%% 	    erlang:error(timeout)
+%%     end.
+
+wait_result(Sync) ->
     receive
-	{Sync,R} -> R 
+	{Sync,Result} -> Result
     after 120000 ->
 	    %% time out after 2 minutes
-	    error("Compiler Timeout")
-    end. 
+	    erlang:error(timeout)
+    end.
 
 transform1(?ast_paren(_)=Exp,Env) ->
     case do_transform(Exp,Env) of
@@ -208,7 +226,7 @@ transform(Exp,Env) when is_tuple(Exp) ->
 
 %% do one expansion
 %% not tail-recursive. I'd rather have a stack for backtrace.
-do_transform(?ast_paren3(L,M,[Car|Body])=Exp,Env) ->
+do_transform(?ast_paren3(L,_M,[Car|Body])=Exp,Env) ->
     %% line tracking
     set_lineno(L),
     try case lookup_expander(Env,Car) of
@@ -225,9 +243,10 @@ do_transform(?ast_paren3(L,M,[Car|Body])=Exp,Env) ->
 	end
     catch
 	error:{serl_error,Reason,Trace} ->
-	    erlang:error({serl_error,Reason,[{L,M,Car}|Trace]});
+	    erlang:error({serl_error,Reason,[Car|Trace]});
 	error:Reason ->
-	    erlang:error({serl_error,Reason,[]})
+	    erlang:error({serl_error,Reason,
+			  [Car,erlang:get_stacktrace()]})
     end.
 
 

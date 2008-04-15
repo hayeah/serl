@@ -58,11 +58,11 @@
 emit(Env) ->
     Module=gen_module(Env),
     Exports=gen_exports(Env),
-    Defs=case env:assoc(Env,[definitions,functions]) of
+    Funs=case env:assoc(Env,[definitions,functions]) of
 	     {ok,Defuns} ->
-		 [Def || {_FName,FDef} <- Defuns, {_Arity,Def} <- FDef]
-	 end, 
-    Forms=[Module]++Exports++Defs,
+		 [Ast || {_Name,Ast} <- Defuns]
+	 end,
+    Forms=[Module]++Exports++Funs,
     %%compile_forms(atom_to_list(curmod())++".beam",Forms),
     {Env,Forms}.
 
@@ -84,14 +84,15 @@ gen_module(Env) ->
 gen_exports(Env) ->
     Exports=
 	case env:assoc(Env,[exports,functions]) of
-	    {ok,Names} ->
-		[{Name,L,Arity} ||
-		    ?ast_atom3(L,_Mod,Name) <- Names,
-		    {Arity,_Ast} <- begin {ok,Defs}=scompile:get_def(Env,functions,Name),Defs end]; 
+	    {ok,ExportNames} ->
+		[case scompile:get_def(Env,functions,Name) of
+		     {ok,{function,_L,_Name,Arity,_}} ->
+			 {Name,Line,Arity}
+		 end
+		 ||?ast_atom3(Line,_Mod,Name) <- ExportNames]; 
 	    _ -> []
 	end, 
-    %% just let the erlang compiler check if exported functions are defined.
-    [{attribute,L,export,[{F,Arity}]} || {F,L,Arity} <- Exports].
+    [{attribute,Line,export,[{Name,Arity}]} || {Name,Line,Arity} <- Exports].
 
 %% emit_meta(Env) -> 
 %% %%     Bs=[{F,[{Arity,{curmod(),F}} || Arity <- Arities]}
@@ -187,42 +188,26 @@ put_meta_env(Env,MEnv) ->
     Env4=put_meta_env(Env3,MEnv2),
     {Env4,?def_sec}.
 
-%% (def foo
-%%  "a function foo": 
-%%   ((a b c) when guards: a b c)
-%%   ((c d e): a b c) 
-%%   )
 
-?defsp('__sp_def',Es) ->
-    %% {FName,Arity,_Doc,Ast}=parse_def(Es,Env),
-    [?ast_block(Header),?ast_block(Clauses)]=to_blocks(Es),
-    %% get the parameter list of the first functional clause.
-    Arities=[length(Params) || ?ast_paren([?ast_paren(Params)|_]) <- Clauses],
-    %% check arities are the same for all clauses
-    T=lists:all(fun (Arity) -> Arity==hd(Arities) end,
-		Arities),
-    if T -> ok;
-       true -> error("Different arities for function clauses.")
-    end,
-    Arity=hd(Arities),
-    {?ast_atom(FName),_Doc}=
-	case Header of
-	    [A] -> {A,""};
-	    [A,?ast_string(S)] -> {A,S}
-	end, 
-    case env:assoc(Env,[definitions,functions,FName,Arity]) of
-	{ok,_} -> error("Function already defined: ~p/~p", [FName,Arity]); 
+%% (def name (A1 A2 ...): E1 E2 ...)
+
+?defsp('__sp_def',[?ast_atom(Name),?ast_paren(Args),?ast_block(Es)]) ->
+    Arity=length(Args),
+    %%Doc=??
+    case env:assoc(Env,[definitions,functions,Name]) of
+	{ok,_} -> error("Function already defined: ~p", [Name]); 
 	_ -> ok
     end,
-    {Env2,FunClauses}=scompile:map_env0(fun function_clause/2,Clauses,Env),
+    {Env2,FunClause}=clause(Args,[],Es,Line,Env),
     case env:assoc(Env2,[lexical_unbound,vars]) of 
 	{ok,UnboundVars} -> error("Unbound vars: ~w",[UnboundVars]);
 	_ -> ok
     end,
-    Ast={function,Line,FName, Arity, FunClauses},
     %% transforming the body should only affect the lexical environment. So we discard the returned environment. 
-    Env3=env:assoc_put(Env,[definitions,functions,FName,Arity], Ast),
-    {Env3,?def_sec}.
+    NewEnv=env:assoc_put(Env,[definitions,functions,Name],
+			 {function,Line, Name, Arity, [FunClause]}),
+    io:format("~p\n",[NewEnv]), 
+    {NewEnv,?def_sec}.
 
 %% (compile-for expand run: <form>*) 
 %%%% the forms must be toplevel forms for the same section
@@ -634,6 +619,7 @@ function_clause(?ast_paren3(L,_,Clause),Env) ->
 	[?ast_paren(Patterns),?ast_atom('when'),GuardTests] ->
 	    clause(Patterns,GuardTests,Forms,L,Env)
     end.
+
 
 
 %% <case-clause> := (<pattern>: <exp>+) | (<pattern> when <guard>: <exp>+)

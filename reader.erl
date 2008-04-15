@@ -51,7 +51,7 @@
 error(Message) ->
     error(Message,[]).
 error(Message,Args) ->
-    scompile:error(Message++"\n\tWith remaining input:\n~p\n\n",Args++[residue()]).
+    scompile:error(Message++"\nRemaining Input:\n~p\n\n",Args++[residue()]).
 
 get_state() ->
     {curenv(), streamer:get_port(), lineno()}.
@@ -360,7 +360,7 @@ here_short(Close) when is_integer(Close) ->
     reverse(Str2).
     
 a_comment() ->
-    skip_until("\n"),
+    skip_until([$\n,eof]),
     nil.
 
 %% $( == 40,  but it messes up indentation
