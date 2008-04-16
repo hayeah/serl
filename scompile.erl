@@ -245,7 +245,7 @@ transform1(?ast_paren(_)=Exp,Env) ->
     end;
 transform1(Exp,Env) when is_tuple(Exp) ->
     [Car,L,M|Es]=tuple_to_list(Exp),
-    transform1(?cast_paren([?ast_atom3(L,M,Car)|Es]),Env).
+    transform1(?ast_paren2(L,[?ast_atom3(L,M,Car)|Es]),Env).
 
 transform(?ast_paren(_)=Exp,Env) ->
     case do_transform(Exp,Env) of
@@ -254,13 +254,17 @@ transform(?ast_paren(_)=Exp,Env) ->
     end;
 transform(Exp,Env) when is_tuple(Exp) ->
     [Car,L,M,E]=tuple_to_list(Exp),
-    transform(?cast_paren([?ast_atom3(L,M,Car),E]),Env).
+    transform(?ast_paren2(L,[?ast_atom3(L,M,Car),E]),Env).
 
 %% do one expansion
 %% not tail-recursive. I'd rather have a stack for backtrace.
 do_transform(?ast_paren3(L,_M,[Car|Body])=Exp,Env) ->
+    io:format("T: ~p ~p\n",[L,Car]),
     %% line tracking
-    set_lineno(L),
+    %% %% lineno() always give the line of the closest open paren visible in source.
+    if L > 0 -> set_lineno(L);
+       true -> ok %% non-source syntax objects have lineno==0.
+    end, 
     try case lookup_expander(Env,Car) of
 	    {special,F} -> {special,F(Exp,Env)};
 	    {macro,F} -> {macro,{Env,F(Exp)}} ;

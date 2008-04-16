@@ -20,7 +20,7 @@
 
 %% -define(defsp(Name,Args),Name(Args,Env)).
 
--define(defsp(Name,Args),Name(?ast_paren3(Line,_Mod,[_|Args]),Env)).
+-define(defsp(Name,Args),Name(?ast_paren3(_,_Mod,[_|Args]),Env)).
 -define(defm(Name,Args),Name(?ast_paren3(_,_Mod,[_|Args]))).
 
 %% -define(atomic_literals,[integer,float,string,atom]).
@@ -34,25 +34,24 @@
 
 %% Translate [e0 e1 ...] to a list if not handled by some other macro
 ?defsp('__sp_block',[Es]) ->
-    Line,
     transform(?cast_paren([?cast_atom(ls),?cast_block(Es)]),Env).
 
 %% Translate {e0 e1 ...} to a tuple if not handled by some other macro
-?defsp('__sp_brace',[Es]) ->
-    Line,
+?defsp('__sp_brace',[Es]) -> 
     transform(?cast_paren([?cast_atom(tuple),?cast_block(Es)]),Env).
 
 %% (eval-binding <var>) gets the value in eval-bindings named by <var>
 %% %% this is strictly a value expression.
 %% %% (eval-binding <var>) simply compiles to <var>, bypassing binding check.
 ?defsp('__sp_eval-binding',[?ast_atom(V)]) ->
+    Line=lineno(),
     {Env,?erl_var(Line,V)};
 ?defsp('__sp_eval-binding',[?ast_var(V)]) ->
+    Line=lineno(),
     {Env,?erl_var(Line,V)}.
 
 
 ?defsp('__sp_eof',[]) ->
-    Line,
     emit(Env). 
 
 emit(Env) ->
@@ -115,7 +114,6 @@ gen_exports(Env) ->
 
 
 ?defsp('__sp_bof',[]) ->
-    Line,
     {put_meta_env(Env,env:toplevel_of(mverl)),0}.
 
 get_meta_env(Env) ->
@@ -131,6 +129,7 @@ put_meta_env(Env,MEnv) ->
 %% macros are interpreted when used within the compiling module.
 %%%% yuk, extremely hairy.
 ?defsp('__sp_defm',Es) ->
+    Line=lineno(),
     [?ast_block(Header),?ast_block(TmpClauses)]=to_blocks(Es),
     %% massage the defm clauses
     %% ((A B): ...)   ## => ([A B]: ...)
@@ -206,6 +205,7 @@ put_meta_env(Env,MEnv) ->
 %% (def name (A1 A2 ...): E1 E2 ...)
 
 ?defsp('__sp_def',[?ast_atom(Name),?ast_paren(Args),?ast_block(Es)]) ->
+    Line=lineno(),
     Arity=length(Args),
     %%Doc=??
     case env:assoc(Env,[definitions,functions,Name]) of
@@ -226,7 +226,6 @@ put_meta_env(Env,MEnv) ->
 %%%% the forms must be toplevel forms for the same section
 
 ?defsp('__sp_compile_for',Es) ->
-    Line,
     [?ast_block(As),?ast_block(Forms)] = to_blocks(Es),
     Times=ordset:from_list([A || ?ast_atom(A) <- As]),
     %% if compiling for both expand and run times, expand-time forms are compiled first.
@@ -282,6 +281,7 @@ compile_for(expand,Forms,Env) ->
 %%  If F is an attribute -module(Mod), then Rep(F) = {attribute,LINE,module,Mod}.
 
 ?defsp('__sp_module',[?ast_atom(Mod)]) ->
+    Line=lineno(),
     CM=curmod(),
     if CM==Mod -> ok;
        true -> error("Module name mismatch: ~p",[Mod])
@@ -293,7 +293,6 @@ compile_for(expand,Forms,Env) ->
 %% %%  If F is an attribute -export([Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,export,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}.
 %% (export a b)
 ?defsp('__sp_export',Fs) ->
-    Line,
     {env:assoc_append(Env,[exports,functions],Fs),?header_sec}.
 
 %% %%  If F is an attribute -import(Mod,[Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,import,{Mod,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}}.
@@ -308,7 +307,6 @@ compile_for(expand,Forms,Env) ->
 
 %% (import mod a b c)
 ?defsp('__sp_import',[?ast_atom(Mod)|Fs]) ->
-    Line,
     Imports=ordsets:from_list([A || ?ast_atom(A) <- Fs]),
     %% check for conflicts
     lists:foreach(
@@ -346,6 +344,7 @@ compile_for(expand,Forms,Env) ->
 %% %%  If L is an integer or character literal, then Rep(L) = {integer,LINE,L}.
 
 ?defsp('__sp_integer',[I]) ->
+    Line=lineno(),
     {Env,?erl_integer(Line,I)}.
 
 %% %%  If L is a float literal, then Rep(L) = {float,LINE,L}. 
@@ -354,10 +353,12 @@ compile_for(expand,Forms,Env) ->
 
 %%  If L is a string literal consisting of the characters C_1, ..., C_k, then Rep(L) = {string,LINE,[C_1, ..., C_k]}.
 ?defsp('__sp_string',[S]) ->
+    Line=lineno(),
     {Env,?erl_string(Line,S)}.
 
 %%  If L is an atom literal, then Rep(L) = {atom,LINE,L}. 
 ?defsp('__sp_atom',[A]) ->
+    Line=lineno(),
     {Env,?erl_atom(Line,A)}.
 
 %% %% Note that negative integer and float literals do not occur as such; they are parsed as an application of the unary negation operator.
@@ -501,6 +502,7 @@ gen_pat_glist(Type,[Es,L,M],Env) ->
 
 %%  If E is P = E_0, then Rep(E) = {match,LINE,Rep(P),Rep(E_0)}.
 ?defsp('__sp_=',[P,E]) ->
+    Line=lineno(),
     %% erlang spec 6.10 pg74
     {Env1,RE} = transform(E,Env),
     %% '=' never declares bindings
@@ -508,7 +510,7 @@ gen_pat_glist(Type,[Es,L,M],Env) ->
     {Env2,{match,Line,RP,RE}}.
 
 ?defsp('__sp_let',Es) ->
-    Line,
+    Line=lineno(),
     [?ast_block(Bindings),?ast_block(Body)]=to_blocks(Es), 
     {Patterns,Assignments}=let_bindings(Bindings,[],[]),
     Env2=binds(Patterns,scompile:lexical_shadow(Env,vars,[])), %% create new scope
@@ -552,6 +554,7 @@ let_bindings([B|Bindings],Patterns,Assignments) ->
 %% %%  If E is a tuple skeleton {E_1, ..., E_k}, then Rep(E) = {tuple,LINE,[Rep(E_1), ..., Rep(E_k)]}.
 
 ?defsp('__sp_tuple',[?ast_block(Es)]) ->
+    Line=lineno(),
     %% doesn't respect "eval in some order". See transform_each in scompile.erl
     {Env2,Rs}=transform_each(Es,Env),
     {Env2,{tuple,Line,Rs}}.
@@ -559,6 +562,7 @@ let_bindings([B|Bindings],Patterns,Assignments) ->
 %% %%  If E is [], then Rep(E) = {nil,LINE}.
 
 ?defsp('__sp_nil',[]) ->
+    Line=lineno(),
     {Env,{nil,Line}}.
 
 ?defm('__mac_ls',[]) ->
@@ -579,6 +583,7 @@ let_bindings([B|Bindings],Patterns,Assignments) ->
 %% %%  If E is a cons skeleton [E_h | E_t], then Rep(E) = {cons,LINE,Rep(E_h),Rep(E_t)}.
 
 ?defsp('__sp_cons',[Eh,Et]) ->
+    Line=lineno(),
     {Env1,REh}=transform(Eh,Env),
     {Env2,REt}=transform(Et,Env1),
     {Env2,{cons,Line,REh,REt}}.
@@ -588,6 +593,7 @@ let_bindings([B|Bindings],Patterns,Assignments) ->
 %% <case-expr> := (case <exp> <case-clause>+)
 %% <case-clause> := (<pattern>: <form>+) | (<pattern> when <guard>: <form>+)
 ?defsp('__sp_case',[E|Clauses]) ->
+    Line=lineno(),
     %% this doesn't respect erlang semantics where the bindings in case clauses are visible outside.
     {Env2,RE0}=transform(E,Env),
     {Env2,
@@ -596,12 +602,14 @@ let_bindings([B|Bindings],Patterns,Assignments) ->
       [begin {_,RC}=case_clause(C,Env2), RC end || C <- Clauses ]}}.
 
 %% If E is begin B end, where B is a body, then Rep(E) = {block,LINE,Rep(B)}.
-?defsp('__sp_begin',Es) -> 
+?defsp('__sp_begin',Es) ->
+    Line=lineno(),
     {Env2,REs}=transform_each(Es,Env),
     {Env2,{block,Line,REs}}.
 
 %%  If E is E_m:E_0(E_1, ..., E_k), then Rep(E) = {call,LINE,{remote,LINE,Rep(E_m),Rep(E_0)},[Rep(E_1), ..., Rep(E_k)]}. 
 ?defsp('__sp_call',[?ast_brace([M,F])|Es]) ->
+    Line=lineno(),
     {Env2,RM}=transform(M,Env),
     {Env3,RF}=transform(F,Env2),
     {Env4,REs}=transform_each(Es,Env3),
@@ -609,6 +617,7 @@ let_bindings([B|Bindings],Patterns,Assignments) ->
 
 %%  If E is E_0(E_1, ..., E_k), then Rep(E) = {call,LINE,Rep(E_0),[Rep(E_1), ..., Rep(E_k)]}.
 ?defsp('__sp_call',[?ast_atom3(_L,M,F)|Es]=E) ->
+    Line=lineno(),
     %% For hygiene, test to see if the symbol came from another module.
     IsRemote=(M/=curmod()),
     if IsRemote ->
@@ -631,7 +640,6 @@ let_bindings([B|Bindings],Patterns,Assignments) ->
 	    end
     end;
 ?defsp('__sp_call',E) ->
-    Line,
     make_call(E,Env).
 
 make_call([E0|Es],Env) ->
@@ -694,19 +702,19 @@ clause(Patterns,_Guard,Body,Line,Env) ->
 %% Quotation
 
 ?defsp('__sp_quote',[E]) ->
+    Line=lineno(),
     %% the quotation forms might as well be macros.
     %% but it's easier to implement them as special forms (direct translation to erlang ast).
     {Env,erl_syntax:revert(erl_syntax:set_pos(erl_syntax:abstract(E),Line))}.
 
 ?defsp('__sp_bquote',[E]) ->
-    Line,
     transform(bq:completely_expand(E),Env).
 
 
 -define(defast_mac(Name,Type),
 	?defm(Name,[E]) ->
 	       mk_ast(Type,E,
-		      ?cast_integer(lineno()),
+		      ?cast_integer(0), %% generated syntax object has no line.
 		      ?cast_atom(curmod())); 
 	?defm(Name,[E,L,M]) ->
 	       mk_ast(Type,E,L,M)).

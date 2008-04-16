@@ -31,11 +31,11 @@
 %%  t(;form) => form  ## form evals to an erlang list
 
 q(In) ->
-    {_Env,?ast_bquote(X)}=scompile:read(In), 
+    {_Env,?ast_bquote(X)}=verl:read(In), 
     simplify(expand(X)).
 
 qq(In) ->
-    {_Env,?ast_bquote(X)}=scompile:read(In),
+    {_Env,?ast_bquote(X)}=verl:read(In),
     completely_expand(X).
 
 qqp(In) ->
@@ -45,6 +45,12 @@ completely_expand(Ast) ->
     gen_code(simplify(expand(Ast))).
 
 % list,list*,quote,data,append,block,paren,brace
+
+-define(bq_glist(Type,GL),
+	?ast_paren2(
+	   0,
+	   [?cast_atom(Type),gen_glist(GL)])
+       ).
 
 gen_code({quote,Q}) ->
     ?cast_quote(Q);
@@ -56,26 +62,29 @@ gen_code({'ls*',_,_}=L) ->
     gen_glist(L);
 gen_code({cat,_}=L) ->
     gen_glist(L); 
-gen_code({block,GL}) -> 
-    %% should provide macros block,paren,brace to build syntax objects.
-    %% (block a) => [a]
-    %% (block a ;X) => [a|X]
-    ?cast_paren([?cast_atom('block'),gen_glist(GL)]);
+gen_code({block,GL}) ->
+    ?bq_glist(block,GL);
 gen_code({paren,GL}) ->
-    ?cast_paren([?cast_atom('paren'),gen_glist(GL)]);
+    ?bq_glist(paren,GL);
 gen_code({brace,GL}) ->
-    ?cast_paren([?cast_atom('brace'),gen_glist(GL)]). 
+    ?bq_glist(brace,GL).
 
 gen_glist({data,D}) ->
     D;
 gen_glist({ls,L}) ->
-    ?cast_paren([?cast_atom('ls'),?cast_block([gen_code(I) || I <- L])]);
+    ?ast_paren2(
+       0,
+       [?cast_atom('ls'),?cast_block([gen_code(I) || I <- L])]);
 gen_glist({'ls*',Conses,T}) ->
-    ?cast_paren([?cast_atom('ls'),
-		 ?cast_block([gen_code(I) || I <- Conses]),
-		 ?cast_block([gen_code(T)])]);
+    ?ast_paren2(
+       0,
+       [?cast_atom('ls'),
+	?cast_block([gen_code(I) || I <- Conses]),
+	?cast_block([gen_code(T)])]);
 gen_glist({cat,L}) ->
-    ?cast_paren([?cast_atom('cat'),?cast_block([gen_code(I) || I <- L])]).
+    ?ast_paren2(
+       0,
+       [?cast_atom('cat'),?cast_block([gen_code(I) || I <- L])]).
 
 
 expand(Exp) ->
