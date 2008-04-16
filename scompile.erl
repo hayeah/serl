@@ -4,12 +4,13 @@
 -export([lineno/0,
 	 curmod/0,curmod/1,
 	 gensym/1, reset_gensym/0, %% for debug purposes
+	 options/1,options/2,
 	 
 	 read/2,read_/2,
 	 expand1/2,expand1_/2,
 	 expand/2,expand_/2,
 	 eval/3,eval_/3,eval_erl/3,
-	 compile/2,
+	 compile/2,compile/3,
 	 transform1/2, transform/2, transform_each/2, map_env0/3,
 	 
 	 lexical_shadow/3,lexical_extend/3,
@@ -45,7 +46,9 @@ error(Message,Args) ->
 -define(curmod,{?MODULE,'curmod'}).
 -define(gensym,{?MODULE,'gensym_counter'}).
 
-
+init_state() ->
+    %% reset compiler state.
+    init_state(#state{}).
 init_state(S) when is_record(S,state) ->
     put(?lineno,S#state.lineno),
     put(?curmod,S#state.curmod),
@@ -136,7 +139,22 @@ remote_funcall_handler({M,F},Args) ->
 
 
 compile(Mod,Env) when is_atom(Mod) ->
-    new_process(fun compile_/2,[Mod,Env],#state{curmod=Mod}).
+    compile(Mod,Env,[]).
+
+compile(Mod,Env,Options) when is_atom(Mod) ->
+    Env2=env:assoc_put(Env,[compiler_options],Options),
+    new_process(fun compile_/2,[Mod,Env2],
+		#state{curmod=Mod}).
+options(Env) ->
+    {ok,Opts}=env:assoc(Env,[compiler_options]),
+    Opts.
+
+options(Env,Key) ->
+    {ok,Opts}=env:assoc(Env,[compiler_options]),
+    case lists:keysearch(Key,1,Opts) of
+	{_,Val} -> Val;
+	_ -> lists:member(Key,Opts)
+    end.
 
 %% transforms expressions for side effect on the environment.
 compile_(Mod,Env) ->
@@ -162,7 +180,8 @@ compile_loop(In,Env,Section) ->
 	    %% at end of file, transforms the pseudo special form (__eof)
 	    %% what happens is language dependent.
 	    %% maybe compile to erlang, maybe compile to javascript, whatever.
-	    transform(?cast_paren([?cast_atom('__eof')]),Env2);
+	    {_,Result}=transform(?cast_paren([?cast_atom('__eof')]),Env2),
+	    Result;
 	_ -> {Env3,Section2}=transform(Ast,Env2),
 	     if not(is_integer(Section2)) -> error("Not toplevel form: ~p\n",[Section2]);
 		Section2<Section -> error("Toplevel form out of sequence: ~p\n",[Section2]);
@@ -174,15 +193,28 @@ compile_loop(In,Env,Section) ->
 
 new_process(Fun,Args) ->
     new_process(Fun,Args,#state{}).
+
 new_process(Fun,Args,State) ->
+    init_state(State),
     %%process_flag(trap_exit, true),
-    Return=self(),
-    Sync=spawn_link(
-	   fun () -> init_state(State), 
-		     R=apply(Fun,Args),
-		     Return ! {self(),R}
-	   end),
-    wait_result(Sync).
+    try apply(Fun,Args) of
+	R -> R
+    after
+	%% reset compiler state.
+	init_state()
+    end. 
+
+
+%% new_process(Fun,Args,State) ->
+%%     %%process_flag(trap_exit, true),
+%%     Return=self(),
+%%     Sync=spawn_link(
+%% 	   fun () -> init_state(State), 
+%% 		     R=apply(Fun,Args),
+%% 		     Return ! {self(),R}
+%% 	   end),
+%%     wait_result(Sync).
+
 
 %% wait_exit(Sync) ->
 %%     receive
@@ -198,13 +230,13 @@ new_process(Fun,Args,State) ->
 %% 	    erlang:error(timeout)
 %%     end.
 
-wait_result(Sync) ->
-    receive
-	{Sync,Result} -> Result
-    after 120000 ->
-	    %% time out after 2 minutes
-	    erlang:error(timeout)
-    end.
+%% wait_result(Sync) ->
+%%     receive
+%% 	{Sync,Result} -> Result
+%%     after 120000 ->
+%% 	    %% time out after 2 minutes
+%% 	    erlang:error(timeout)
+%%     end.
 
 transform1(?ast_paren(_)=Exp,Env) ->
     case do_transform(Exp,Env) of
@@ -326,8 +358,11 @@ toplevel_lookup(Env,NSType,A) ->
 lexical_shadow(Env,NSType,Bindings) ->
     %% Bindings is a list of {M,A}
     %% M and A are atoms
-    Bs=lists:zip(Bindings,
-		 gensym(length(Bindings))),
+    Bs=case Bindings of
+	   [] -> [];
+	   _ ->lists:zip(Bindings,
+			 gensym(length(Bindings)))
+       end,
     assoc_cons(Env,[lexical,NSType],Bs).
 
 lexical_extend(Env,NSType,NewKeys) ->

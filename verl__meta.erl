@@ -68,7 +68,8 @@
       {'if',{?MOD,'__sp_if'}},
       {'case',{?MOD,'__sp_case'}},
       {'try',{?MOD,'__sp_try'}},
-
+      
+      {'do',{?MOD,'__sp_begin'}},
       {'begin',{?MOD,'__sp_begin'}}
 
      ]},

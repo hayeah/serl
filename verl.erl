@@ -63,17 +63,30 @@ emit(Env) ->
 		 [Ast || {_Name,Ast} <- Defuns]
 	 end,
     Forms=[Module]++Exports++Funs,
-    compile_forms(atom_to_list(curmod())++".beam",Forms),
-    {Env,Forms}.
+    case scompile:options(Env,erl_ast) of
+	true -> {Env,Forms};
+	_ -> {Env,compile_forms(curmod(),Forms,Env)}
+    end.
 
-compile_forms(FileName,Forms) ->
-    Bin=case compile:forms(Forms) of
-	    {ok,_Mod,B} -> B;
-	    {ok,_,B,_Warnings} -> B;
-	    {error,Errors,Warnings} -> error("Compile Error: \n~p\n~p\n",[Errors,Warnings]);
-	    error -> error("Compile Error.")
-	end,
-    file:write_file(FileName,Bin).
+compile_forms(Mod,Forms,Env) ->
+    %% Validation=
+%% 	(scompile:options(Env,strong_validation) or
+%% 	 scompile:options(Env,basic_validation)),
+    case compile:forms(Forms,scompile:options(Env)) of
+	{ok,_,Bin} ->
+	    write_beam(Mod,Bin),
+	    {ok,Mod};
+	{ok,_,Bin,Warnings} ->
+	    write_beam(Mod,Bin),
+	    {ok,Mod,Warnings};
+	Error -> Error 
+    end.
+
+write_beam(Mod,Bin) ->
+    BeamFileName=atom_to_list(Mod)++".beam",
+    file:write_file(BeamFileName,Bin). 
+    
+    
 
 gen_module(Env) ->
     case assoc(Env,[module]) of
@@ -87,7 +100,8 @@ gen_exports(Env) ->
 	    {ok,ExportNames} ->
 		[case scompile:get_def(Env,functions,Name) of
 		     {ok,{function,_L,_Name,Arity,_}} ->
-			 {Name,Line,Arity}
+			 {Name,Line,Arity}; 
+		     _ -> error("Exported function not defined: ~s",[Name])
 		 end
 		 ||?ast_atom3(Line,_Mod,Name) <- ExportNames]; 
 	    _ -> []
@@ -385,13 +399,17 @@ bind(?ast_float(_),Env) -> Env;
 bind(?ast_integer(_),Env) -> Env;
 %%bind(?ast_string(_),Env) -> Env;
 bind(?ast_atom(_),Env) -> Env;
+
+%% bind(?ast_var3(_L,M,V),Env) ->
+%%     case lookup(Env,vars,{M,V}) of
+%% 	%% the use occurence
+%% 	{ok,_Alias} -> Env;
+%% 	%% the binding occurence
+%% 	false -> scompile:lexical_extend(Env,vars,[{M,V}])
+%%     end;
+
 bind(?ast_var3(_L,M,V),Env) ->
-    case lookup(Env,vars,{M,V}) of
-	%% the use occurence
-	{ok,_Alias} -> Env;
-	%% the binding occurence
-	false -> scompile:lexical_extend(Env,vars,[{M,V}])
-    end;
+    scompile:lexical_extend(Env,vars,[{M,V}]); 
 bind(?ast_block(Es),Env) ->
     binds(Es,Env);
 bind(?ast_brace(Es),Env) ->
@@ -485,8 +503,38 @@ gen_pat_glist(Type,[Es,L,M],Env) ->
 ?defsp('__sp_=',[P,E]) ->
     %% erlang spec 6.10 pg74
     {Env1,RE} = transform(E,Env),
-    {Env2,RP} = pattern(P,Env1),
+    %% '=' never declares bindings
+    {Env2,RP} = gen_pat(P,Env1),
     {Env2,{match,Line,RP,RE}}.
+
+?defsp('__sp_let',Es) ->
+    Line,
+    [?ast_block(Bindings),?ast_block(Body)]=to_blocks(Es), 
+    {Patterns,Assignments}=let_bindings(Bindings,[],[]),
+    Env2=binds(Patterns,scompile:lexical_shadow(Env,vars,[])), %% create new scope
+    RAssignments=
+	[begin
+	     L=element(2,P), 
+	     {_,RP}=gen_pat(P,Env2), %% use new bindings
+	     {_,RV}=transform(V,Env),  %% value evaluated in original scope
+	     {match,L,RP,RV}
+	 end
+	 || {P,V} <- Assignments],
+    {_,RBody}=transform_each(Body,Env2), %% body in new scope
+    {Env,{block,Line,RAssignments++RBody}}. 
+
+let_bindings([],Patterns,Assignments) ->
+    {lists:reverse(Patterns),lists:reverse(Assignments)};
+let_bindings([B|Bindings],Patterns,Assignments) ->
+    case B of
+	?ast_paren([Pattern,Value]) ->
+	    let_bindings(Bindings,[Pattern|Patterns],
+			 [{Pattern,Value}|Assignments]);
+	?ast_var(_)=Pattern ->
+	    let_bindings(Bindings,[Pattern|Patterns],Assignments); 
+	_ -> error("Invalid binding form: ~p",[B])
+    end.
+
 
 %%  If E is a variable V, then Rep(E) = {var,LINE,A}, where A is an atom with a printname consisting of the same characters as V.
 %%HY: It's silly to call variables variables when they don't vary... I call them bindings.
@@ -496,7 +544,7 @@ gen_pat_glist(Type,[Es,L,M],Env) ->
 	'_' -> {Env,?erl_var(Line,'_')};
 	_ -> case lookup(Env,vars,{M,V}) of
 		 {ok,Alias} -> {Env,?erl_var(Line,Alias)}; 
-		 false -> {env:assoc_cons(Env,[lexical_unbound,vars],V),{error,{unbound_var,Line,M,V}}}
+		 false -> {env:assoc_cons(Env,[lexical_unbound,vars],V),{unbound_var,Line,M,V}}
 	     end
     end.
 
@@ -778,8 +826,14 @@ sevaln_(N,Ast,Env,Bindings) ->
     
 
 compile(Mod) ->
-    scompile:compile(Mod,env:new(?MODULE)).
-    
+    compile(Mod,[erl_ast]).
+compile(Mod,Options) ->
+    scompile:compile(Mod,env:new(?MODULE),Options).
+
+c(Mod) ->
+    compile(Mod,[]),
+    code:purge(Mod),
+    code:load_file(Mod).
 
 test() ->
     PatternAst=
