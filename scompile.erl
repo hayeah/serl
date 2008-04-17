@@ -259,7 +259,7 @@ transform(Exp,Env) when is_tuple(Exp) ->
 %% do one expansion
 %% not tail-recursive. I'd rather have a stack for backtrace.
 do_transform(?ast_paren3(L,_M,[Car|Body])=Exp,Env) ->
-    io:format("T: ~p ~p\n",[L,Car]),
+    %%io:format("T: ~p ~p\n",[L,Car]),
     %% line tracking
     %% %% lineno() always give the line of the closest open paren visible in source.
     if L > 0 -> set_lineno(L);

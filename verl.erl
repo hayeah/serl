@@ -415,6 +415,8 @@ bind(?ast_block(Es),Env) ->
     binds(Es,Env);
 bind(?ast_brace(Es),Env) ->
     binds(Es,Env);
+bind({nil,_},Env) ->
+    Env;
 bind(?ast_paren([?ast_atom(Car)|Es])=E,Env) ->
     case Car of
 	cons -> [T,H]=Es,

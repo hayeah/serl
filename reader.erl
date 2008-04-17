@@ -180,50 +180,79 @@ a_list_rec(CloseParen,Acc) ->
 
 a_paren() ->
     char("("), 
-    paren([],lineno()).
+    paren(lineno()).
 
-%% (a b . if :c d e ) => (if :c d e (a b))
-%% (a b . if :c d e ) => (if [c d e] (a b))
-%%%% my original implementation does the second way.
-%%%% Let me think about which way is better.
-%%%% The second is more syntatically consistent.
+paren(Line) ->
+    %% generate the instructions for the nesting reduction machine 
+    Insts=paren_segments([],[],Line),
+    %% run the instructions
+    paren_renest(Insts,Line).
 
-paren(Acc,Line) ->
-    spacen(),
-    case peek() of
-	%% $) == 41
-	41 -> read(), ?ast_paren2(Line,reverse(Acc));
-	$: -> read(), paren_block([],Acc,lineno(),Line);
-	%% $. == 46
-	46 -> read(), paren_nest(Acc,Line);
-	%% $~ == 126
-	%% 126 -> read(), paren_splice(Acc); 
-	eof -> error("Unexpected eof while reading paren.");
-	_ -> paren([an_exp()|Acc],Line)
+%% (a . b ~ c . d) =>
+%% (b (a) ~ c . d)
+%% (c (b (a)) . d)
+%% (d (c (b (a))))
+
+%% (a b . c d ~ e f . g h) =>
+%% (c d (a b) ~ e f . g h)
+%% (e (c d (a b)) f . g h)
+%% (g h (e (c d (a b)) f))
+
+%% the instructions are: nest_tail, nest_head, close
+%% the machine is like a RPN reduction of ~ and .
+paren_renest([Items,{close}],Line) ->
+    ?ast_paren2(Line,Items);
+paren_renest([Items1,Op,Items2|Insts],Line) ->
+    %% Line is the lineno of the previous nesting operator.
+    %% %% For the first instruction, it is the lineno of paren-open.
+    %% NestLine is the lineno where the nesting operator appeared.
+    case Op of
+	{nest_tail,NestLine} ->
+	    if Items2==[] ->
+		    error("No elements for nesting operator \".\"");
+	       true -> ok
+	    end,
+	    paren_renest(
+	      [Items2++[?ast_paren2(Line,Items1)]
+	       |Insts],
+	      NestLine);
+	{nest_head,NestLine} ->
+	    if Items2==[] ->
+		    error("No elements for nesting operator \"~\"");
+	       true -> ok
+	    end,
+	    [H|T]=Items2,
+	    paren_renest(
+	      [[H,?ast_paren2(Line,Items1)|T]
+	       |Insts],
+	      NestLine)
     end.
 
-paren_nest(Acc,ContainerLine) ->
-    LineofNest=lineno(),
-    Nest=paren([],LineofNest),
-    ?ast_paren2(LineofNest,
-		Nest++[?ast_paren2(ContainerLine,reverse(Acc))]). 
-    
-paren_block(Block,Acc,Line,ContainerLine) ->
-    %% Line is the start of :
-    %% ContainerLine is the opening ( or . where : is contained within.
-    spacen(),
+paren_segments(Acc,Inst,Line) ->
+    %% the nest operators are ~ .
+    %% ":" collects a list of elements as a single block (until ":~.)").
+    %% %% ":" is transparent to the nesting operators.
     case peek() of
-	41 -> read(),?ast_paren2(ContainerLine,
-				 reverse([?ast_block2(Line,reverse(Block))|Acc]));
-	$: -> read(),paren_block([],
-				 [?ast_block2(Line,reverse(Block))|Acc],
-				 lineno(),ContainerLine);
-	46 -> read(),
-	      paren_nest(reverse([?ast_block2(Line,reverse(Block))|Acc]),
-			 ContainerLine);
+	$\) -> read(), reverse([{close},reverse(Acc)|Inst]);
+	$\. -> read(), paren_segments([],[{nest_tail,lineno()},reverse(Acc)|Inst],Line);
+	$\~ -> read(), paren_segments([],[{nest_head,lineno()},reverse(Acc)|Inst],Line);
+       	$\: -> read(), paren_segments(paren_block([],Acc,Line),Inst,Line); 
 	eof -> error("Unexpected eof while reading paren.");
-	_ -> paren_block([an_exp()|Block],Acc,Line,ContainerLine)
+	_ -> paren_segments([an_exp()|Acc],Inst,Line)
     end.
+
+paren_block(BlkAcc,SegAcc,Line) ->
+    case peek() of 
+	$: -> read(),
+	      paren_block([],
+			  [?ast_block2(Line,reverse(BlkAcc))|SegAcc],
+			  lineno());
+	C when C==$\.;C==$\~;C==$\) ->
+	    [?ast_block2(Line,reverse(BlkAcc))|SegAcc]; 
+	eof -> error("Unexpected eof while reading paren.");
+	_ -> paren_block([an_exp()|BlkAcc],SegAcc,Line)
+    end. 
+
 
 a_block() ->
     char("["),
