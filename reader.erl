@@ -102,7 +102,6 @@ a_symbol(Prefix) ->
     Token=token_of(fun is_symbol_charn/1),
     Name=Prefix++Token,
     UniVarP=(hd(Name)==$_), 
-    spacen(),
     AfterSymbolC=peek(),
     {M,A}=
 	if AfterSymbolC==?module_separator and UniVarP ->
