@@ -51,10 +51,50 @@
     {Env,?erl_var(Line,V)}.
 
 
-?defsp('__sp_eof',[]) ->
-    emit(Env). 
+?defsp('__sp_bof',[]) ->
+    {put_meta_env(Env,env:toplevel_of(mverl)),0}.
 
-emit(Env) ->
+get_meta_env(Env) ->
+    env:assoc(Env,[compile_env]).
+put_meta_env(Env,MEnv) ->
+    env:assoc_put(Env,[compile_env],MEnv).
+
+?defsp('__sp_eof',[]) ->
+    {Env,emit(Env)}. 
+
+%% verl's compiler options
+-record(opt,
+	{bin, %% if true, do not output .beam
+	 dry,
+	 ast, %% the erlang ast
+	 def, %% pick out the definitions of defs
+	 env, %% the final compile environment
+	 meta, %% produce the meta module
+	 %% not supported yet:
+	 return
+	 %% unknown options handled by erlang compiler.
+	 }).
+
+set_opts(Options) ->
+    #opt{bin=lookup_opt(Options,bin),
+	 dry=lookup_opt(Options,dry),
+	 ast=lookup_opt(Options,ast),
+	 def=lookup_opt(Options,def),
+	 env=lookup_opt(Options,env),
+	 meta=lookup_opt(Options,meta)
+	}.
+
+lookup_opt(Opts,Key) ->
+    case lists:keysearch(Key,1,Opts) of
+	{_,{_Key,Val}} -> Val;
+	_ -> case lists:member(Key,Opts) of
+		 true -> true; 
+		 _ -> undefined
+	     end
+    end.
+
+
+emit(Env) -> 
     Module=gen_module(Env),
     Exports=gen_exports(Env),
     Funs=case env:assoc(Env,[definitions,functions]) of
@@ -62,23 +102,38 @@ emit(Env) ->
 		 [Ast || {_Name,Ast} <- Defuns]
 	 end,
     Forms=[Module]++Exports++Funs,
-    case scompile:options(Env,erl_ast) of
-	true -> {Env,Forms};
-	_ -> {Env,compile_forms(curmod(),Forms,Env)}
+    Options=scompile:options(Env),
+    CO=set_opts(Options),
+    Emits
+	=[emit_bin(curmod(),Forms,Options,CO),
+	  emit_ast(Forms,CO#opt.ast),
+	  emit_def(Env,CO#opt.def),
+	  emit_env(Env,CO#opt.env),
+	  emit_meta(Env,CO#opt.meta,CO#opt.bin)],
+    lists:filter(fun (Emit) -> not (Emit=={}) end,
+		 Emits). 
+
+emit_bin(Mod,Forms,ErlangCompilerOptions,CO) ->
+    {Status,Bin,Warnings,Errors}=
+	compile_forms(Forms,ErlangCompilerOptions),
+    case Status of
+	error -> {error,Errors,Warnings};
+	ok -> if CO#opt.bin==true -> {bin,Bin,Warnings};
+		 CO#opt.dry==true -> {dry,Warnings,Errors};
+		 true -> write_beam(Mod,Bin),
+		      {beam,Mod}
+	      end 
     end.
 
-compile_forms(Mod,Forms,Env) ->
-    %% Validation=
-%% 	(scompile:options(Env,strong_validation) or
-%% 	 scompile:options(Env,basic_validation)),
-    case compile:forms(Forms,scompile:options(Env)) of
+compile_forms(Forms,Options) ->
+    case compile:forms(Forms,Options) of
 	{ok,_,Bin} ->
-	    write_beam(Mod,Bin),
-	    {ok,Mod};
+	    {ok,Bin,[],[]};
 	{ok,_,Bin,Warnings} ->
-	    write_beam(Mod,Bin),
-	    {ok,Mod,Warnings};
-	Error -> Error 
+	    {ok,Bin,Warnings,[]};
+	{error,Errors,Warnings} ->
+	    {error,[],Warnings,Errors};
+	error -> {error,[],[],[]}
     end.
 
 write_beam(Mod,Bin) ->
@@ -86,6 +141,46 @@ write_beam(Mod,Bin) ->
     file:write_file(BeamFileName,Bin). 
     
     
+emit_ast(Forms,Flag) ->
+    case Flag of
+	true -> {ast,Forms};
+	undefined -> {}
+    end.
+
+emit_env(Env,Flag) ->
+    case Flag of
+	true -> {env,Env};
+	undefined -> {}
+    end.
+
+emit_def(Env,Defs) ->
+    case Defs of
+	undefined ->
+	    {};
+	Fs when is_list(Fs) ->
+	    [case scompile:get_def(Env,functions,F) of
+		  false -> ok;
+		  {ok,Ast} -> io:format("Function: ~p ::\n~s\n",[F,erl_pp:form(Ast)])
+	     end
+	     || F <- Fs, is_atom(F)],
+	    {};
+	F when is_atom(F) ->
+	    emit_def(Env,[F])
+	
+    end.
+
+emit_meta(_Env,Flag,_BinOnly) ->
+    case Flag of
+	true ->
+	    {meta,meta_module}; 
+	undefined -> {}
+    end.
+
+%% emit_meta(Env) -> 
+%% %%     Bs=[{F,[{Arity,{curmod(),F}} || Arity <- Arities]}
+%% %% 	|| {F,Arities} <- Keys]
+%%     foo.
+
 
 gen_module(Env) ->
     case assoc(Env,[module]) of
@@ -107,19 +202,6 @@ gen_exports(Env) ->
 	end, 
     [{attribute,Line,export,[{Name,Arity}]} || {Name,Line,Arity} <- Exports].
 
-%% emit_meta(Env) -> 
-%% %%     Bs=[{F,[{Arity,{curmod(),F}} || Arity <- Arities]}
-%% %% 	|| {F,Arities} <- Keys]
-%%     foo.
-
-
-?defsp('__sp_bof',[]) ->
-    {put_meta_env(Env,env:toplevel_of(mverl)),0}.
-
-get_meta_env(Env) ->
-    env:assoc(Env,[compile_env]).
-put_meta_env(Env,MEnv) ->
-    env:assoc_put(Env,[compile_env],MEnv).
 
 %% (defm foo "a macro":
 %%  (A: 'foo)
@@ -539,6 +621,10 @@ let_bindings([B|Bindings],Patterns,Assignments) ->
 	_ -> error("Invalid binding form: ~p",[B])
     end.
 
+?defm('__mac_>>',[V,P|Es]) ->
+    ?cast_paren([?cast_atom('let'),
+		 ?cast_paren([P,V]),
+		 ?cast_block(Es)]).
 
 %%  If E is a variable V, then Rep(E) = {var,LINE,A}, where A is an atom with a printname consisting of the same characters as V.
 %%HY: It's silly to call variables variables when they don't vary... I call them bindings.
@@ -596,12 +682,9 @@ let_bindings([B|Bindings],Patterns,Assignments) ->
 %% <case-clause> := (<pattern>: <form>+) | (<pattern> when <guard>: <form>+)
 ?defsp('__sp_case',[E|Clauses]) ->
     Line=lineno(),
-    %% this doesn't respect erlang semantics where the bindings in case clauses are visible outside.
-    {Env2,RE0}=transform(E,Env),
-    {Env2,
-     {'case',Line,
-      RE0,
-      [begin {_,RC}=case_clause(C,Env2), RC end || C <- Clauses ]}}.
+    {_,RE}=transform(E,Env),
+    {Env2,RCs}=scompile:map_env0(fun case_clause/2,Clauses,Env),
+    {Env2, {'case',Line, RE, RCs}}.
 
 %% If E is begin B end, where B is a body, then Rep(E) = {block,LINE,Rep(B)}.
 ?defsp('__sp_begin',Es) ->
@@ -633,10 +716,10 @@ let_bindings([B|Bindings],Patterns,Assignments) ->
 		    transform(?cast_paren([?cast_atom('__call')|
 					   [?cast_brace([?cast_atom(M2),?cast_atom(Fn)])|Es]]),
 			      Env); 
-		{ok,Fn} ->
+		{ok,_Fn} ->
 		    %% call to lexical or module function (defined)
 		    {Env2,REs}=transform_each(Es,Env),
-		    {Env2,{call,Line,?erl_atom(Line,Fn),REs}}; 
+		    {Env2,{call,Line,?erl_atom(Line,F),REs}}; 
 		_ -> %% call to module function (not yet defined)
 		    make_call(E,Env) 
 	    end
@@ -651,6 +734,11 @@ make_call([E0|Es],Env) ->
     {Env3,{call,L,RE0,REs}}.
 
 
+?defsp('__sp_fn',[?ast_paren(Ps),?ast_block(Es)]) ->
+    L=lineno(),
+    {Env,{'fun',L,
+	  {'clauses', [begin {_,RC}=clause(Ps,[],Es,L,Env), RC end]}}}.
+
 %% 4.5 Clauses
 
 %% erlang's guarded clauses take guard-sequences
@@ -664,50 +752,40 @@ make_call([E0|Es],Env) ->
 %% There are function clauses, if clauses, case clauses and catch clauses. 
 %% A clause C is one of the following alternatives:
 
-function_clause(?ast_paren3(L,_,Clause),Env) ->
-    [?ast_block(Match),?ast_block(Forms)]=to_blocks(Clause),
-    case Match of
-	%%  If C is a function clause ( Ps ) -> B where Ps is a pattern sequence and B is a body, then Rep(C) = {clause,LINE,Rep(Ps),[],Rep(B)}.
-	%% ((<pattern>*): <form>+)
-	[?ast_paren(Patterns)] ->
-	    clause(Patterns,[],Forms,L,Env);
-	%%  If C is a function clause ( Ps ) when Gs -> B where Ps is a pattern sequence, Gs is a guard sequence and B is a body, then Rep(C) = {clause,LINE,Rep(Ps),Rep(Gs),Rep(B)}.
-	%% ((<pattern>*) when <guard-test>+: <form>+)
-	[?ast_paren(Patterns),?ast_atom('when'),GuardTests] ->
-	    clause(Patterns,GuardTests,Forms,L,Env)
-    end.
+function_clause(?ast_paren3(L,_,[?ast_paren(Ps),?ast_block(Es)]),Env) ->
+    clause(Ps,[],Es,L,Env).
 
+case_clause(?ast_paren3(L,_,[P,?ast_block(Es)]),Env) ->
+    clause([P],[],Es,L,Env). 
 
-
-%% <case-clause> := (<pattern>: <exp>+) | (<pattern> when <guard>: <exp>+)
-case_clause(?ast_paren3(L,_,[Pattern|GuardedBody]),Env) ->
-    case GuardedBody of
-	%% If C is a case clause P -> B where P is a pattern and B is a body, then Rep(C) = {clause,LINE,[Rep(P)],[],Rep(B)}.
-	%% (<pattern>: <exp>+)
-	[?ast_block(Forms)] ->
-	    clause([Pattern],[],Forms,L,Env);
-	%% If C is a case clause P when Gs -> B where P is a pattern, Gs is a guard sequence and B is a body, then Rep(C) = {clause,LINE,[Rep(P)],Rep(Gs),Rep(B)}.
-	%% (<pattern> when <guard>: <exp>+)
-	[?ast_atom('when'),Guard,?ast_block(Forms)] ->
-	    clause([Pattern],Guard,Forms,L,Env)
-    end.
-
-clause(Patterns,_Guard,Body,Line,Env) ->
+clause(Ps,G,Es,Line,Env) ->
     %% A <guard> is a list of <guard-test>
-    {Env2,Ps}=patterns(Patterns,Env),
-    {Env3,Es}=transform_each(Body,Env2), 
-    %{clause,lineno(), Ps, guard(Guard), Es}
-    {Env3,{clause,Line, Ps, [], Es}}.
+    {Env2,RPs}=patterns(Ps,scompile:lexical_shadow(Env,vars,[])),
+    {Env3,REs}=transform_each(Es,Env2), 
+    GuardSequence=
+	case G of
+	    [] -> [];
+	    _ -> [[guard(G,Env2)]]
+	end,
+    {Env3,{clause,Line, RPs, GuardSequence, REs}}.
 
+%% 4.6 Guards
+
+guard(E,Env) ->
+    %% fingers crossed that they are valid Guards.
+    {_,ErlAst}=transform(E,Env),
+    Valid=erl_lint:is_guard_test(ErlAst),
+    io:format("Guard: ~p\nValid: ~p",[E,Valid]),
+    if Valid -> ErlAst;
+       true -> error("Invalid guard: ~p",[E])
+    end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Quotation
 
 ?defsp('__sp_quote',[E]) ->
-    Line=lineno(),
-    %% the quotation forms might as well be macros.
-    %% but it's easier to implement them as special forms (direct translation to erlang ast).
-    {Env,erl_syntax:revert(erl_syntax:set_pos(erl_syntax:abstract(E),Line))}.
+    %% TODO syntax objects built by quote should have 0 as the lineno.
+    {Env,erl_syntax:revert(erl_syntax:set_pos(erl_syntax:abstract(E),lineno()))}.
 
 ?defsp('__sp_bquote',[E]) ->
     transform(bq:completely_expand(E),Env).
@@ -764,96 +842,7 @@ mk_ast_pat(Type,E) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Utility Functions
-
-erl_parse_f(In) ->
-    case erl_scan:string(In) of
-	{ok,Tks,_} ->
-	    case erl_parse:parse_form(Tks) of
-		{ok,R} -> R
-	    end
-    end.
-
-erl_parse_e(In) ->
-    case erl_scan:string(In) of
-	{ok,Tks,_} ->
-	    case erl_parse:parse_exprs(Tks) of
-		{ok,[R]} -> R
-	    end
-    end.
-
-
-read(In) ->
-    {Env,_,_,Ast}=scompile:read(In,env:toplevel_of(verl2)),
-    {Env,Ast}.
-
-sread(In) ->
-    {_,Ast}=read(In),
-    printer:p(Ast),
-    Ast.
-
-sexpand1(In) ->
-    {Env,Ast}=read(In),
-    scompile:expand1(Ast,Env).
-
-sexpand(In) ->
-    {Env,Ast}=read(In),
-    scompile:expand(Ast,Env).
-
-sexpand(In,Env) ->
-    {_,Ast}=read(In),
-    scompile:expand(Ast,Env).
-
-
-
-psexpand1(In) ->
-    {Env,Ast}=read(In),
-    {_,R}=scompile:expand1(Ast,Env),
-    printer:p(R).
-
-psexpand(In) ->
-    {Env,Ast}=read(In),
-    {_,R}=scompile:expand(Ast,Env),
-    printer:p(R).
-
-seval(In) ->
-    seval(In,erl_eval:new_bindings()). 
-seval(In,Bindings) ->
-    {Env,Ast}=read(In),
-    scompile:eval(Ast,Env,Bindings).
-
-
-sevaln(N,In) ->
-    sevaln(N,In,erl_eval:new_bindings()).
-sevaln(N,In,Bindings) ->
-    {Env,Ast}=read(In),
-    sevaln_(N,Ast,Env,Bindings).
-
-sevaln_(0,Ast,Env,Bindings) ->
-    {Env,Ast,Bindings};
-sevaln_(N,Ast,Env,Bindings) ->
-    {Env2,Ast2,Bs2}=scompile:eval(Ast,Env,Bindings),
-    sevaln_(N-1,Ast2,Env2,Bs2).
-    
-
-compile(Mod) ->
-    compile(Mod,[erl_ast]).
-compile(Mod,Options) ->
-    scompile:compile(Mod,env:new(?MODULE),Options).
-
-c(Mod) ->
-    compile(Mod,[]),
-    code:purge(Mod),
-    code:load_file(Mod).
-
-test() ->
-    PatternAst=
-	?cast_paren([?cast_atom(paren),
-		     ?cast_paren([?cast_atom(ls),
-				  ?cast_block([?cast_var('_')]),
-				  ?cast_block([?cast_var(fooo)])])]),
-    io:format("PatternAst: ~p\n", [PatternAst]),
-    pattern(PatternAst,env:toplevel_of(mverl)). 
-    
+  
     
 %% a common idiom is a list of blocks seperated by ':' (foo a b c d: e f g h: i j k l)
 %% this functions return a list of blocks.

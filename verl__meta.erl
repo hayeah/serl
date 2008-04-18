@@ -21,7 +21,7 @@
       %% extensions
       {'defm',{?MOD,'__sp_defm'}},
       {'eval-binding',{?MOD,'__sp_eval-binding'}},
-      {'let',{?MOD,'__sp_let'}},
+      {'let',{?MOD,'__sp_let'}}, 
       
       %% 4.1
       {'module',{?MOD,'__sp_module'}},
@@ -30,7 +30,7 @@
       {'record',{?MOD,'__sp_record'}},
       {'def',{?MOD,'__sp_def'}}, 
 
-      {'=',{?MOD,'__sp_='}},
+%%       {'=',{?MOD,'__sp_='}},
 
       {'tuple',{?MOD,'__sp_tuple'}}, 
       {'cons',{?MOD,'__sp_cons'}},
@@ -68,13 +68,15 @@
       {'if',{?MOD,'__sp_if'}},
       {'case',{?MOD,'__sp_case'}},
       {'try',{?MOD,'__sp_try'}},
-      
+
+      {'fn',{?MOD,'__sp_fn'}},
       {'do',{?MOD,'__sp_begin'}},
       {'begin',{?MOD,'__sp_begin'}}
 
      ]},
     {macros,
      [{'ls',{?MOD,'__mac_ls'}},
+      {'>>',{?MOD,'__mac_>>'}},
 
       {'float',{?MOD,'__mac_float'}},
       {'integer',{?MOD,'__mac_integer'}},

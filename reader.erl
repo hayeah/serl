@@ -127,7 +127,10 @@ a_symbol(Prefix) ->
     AUniVarP=(hd(A)==$_) ,
     AAtomP=not (AVarP or AUniVarP), 
     if (AVarP or AUniVarP) ->
-	    if MAtomP -> ?ast_var3(lineno(),list_to_atom(M),list_to_atom(A));
+	    if MAtomP ->
+		    if AUniVarP -> ?ast_var3(lineno(),list_to_atom(M),'_');
+		       AVarP -> ?ast_var3(lineno(),list_to_atom(M),list_to_atom(A))
+		    end;
 	       true -> error("Home module of a var must be an atom")
 	    end;
        AAtomP ->

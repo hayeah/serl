@@ -4,14 +4,17 @@
 -export([lineno/0,
 	 curmod/0,curmod/1,
 	 gensym/1, reset_gensym/0, %% for debug purposes
-	 options/1,options/2,
+	 options/1,
 	 
 	 read/2,read_/2,
+	 mexpand/2,mexpand_/2,
 	 expand1/2,expand1_/2,
 	 expand/2,expand_/2,
 	 eval/3,eval_/3,eval_erl/3,
 	 compile/2,compile/3,
-	 transform1/2, transform/2, transform_each/2, map_env0/3,
+	 transform1/2, transform/2, transform_each/2, 
+	 macroexpand/2,
+	 map_env0/3,
 	 
 	 lexical_shadow/3,lexical_extend/3,
 	 get_def/3,new_def/4,
@@ -87,6 +90,13 @@ read_(In,Env) ->
     reader:exp(In,Env,lineno()) %% {Env2,In2,Line,Ast}
     .
 
+mexpand(Ast,Env) ->
+    new_process(fun mexpand_/2,
+		[Ast,Env]).
+    
+mexpand_(Ast,Env) ->
+    macroexpand(Ast,Env).
+
 expand1(Ast,Env) ->
     new_process(fun expand1_/2,
 		[Ast,Env]). 
@@ -145,16 +155,10 @@ compile(Mod,Env,Options) when is_atom(Mod) ->
     Env2=env:assoc_put(Env,[compiler_options],Options),
     new_process(fun compile_/2,[Mod,Env2],
 		#state{curmod=Mod}).
+
 options(Env) ->
     {ok,Opts}=env:assoc(Env,[compiler_options]),
     Opts.
-
-options(Env,Key) ->
-    {ok,Opts}=env:assoc(Env,[compiler_options]),
-    case lists:keysearch(Key,1,Opts) of
-	{_,Val} -> Val;
-	_ -> lists:member(Key,Opts)
-    end.
 
 %% transforms expressions for side effect on the environment.
 compile_(Mod,Env) ->
@@ -237,6 +241,21 @@ new_process(Fun,Args,State) ->
 %% 	    %% time out after 2 minutes
 %% 	    erlang:error(timeout)
 %%     end.
+
+macroexpand(?ast_paren([Car|_])=Exp,Env) when is_tuple(Exp) ->
+    try case lookup_expander(Env,Car) of
+	{macro,F} -> macroexpand(F(Exp),Env);
+	_ -> Exp
+	end
+    catch
+	error:{serl_error,Reason,Trace} ->
+	    erlang:error({serl_error,Reason,[Car|Trace]});
+	error:Reason ->
+	    erlang:error({serl_error,Reason,
+			  [Car,erlang:get_stacktrace()]})
+    end; 
+macroexpand(Exp,_Env) when is_tuple(Exp) ->
+    Exp.
 
 transform1(?ast_paren(_)=Exp,Env) ->
     case do_transform(Exp,Env) of

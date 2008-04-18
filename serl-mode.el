@@ -2,16 +2,16 @@
   "\\S *")
 
 (defconst serl-atom-char1
-  "-a-z*/+"
+  "-a-z*/+<>="
   "The first char of an atom.")
 
 (defconst serl-atom-char+
   (concat serl-atom-char1 "A-Z0-9_")
   "The other chars of an atom")
 
-(defconst serl-symbol-char-re
-  (concat "\\(" serl-alnum "\\|[-_+*/])")
-  "symbol constituient except first char.")
+;; (defconst serl-symbol-char-re
+;;   (concat "\\(" serl-alnum "\\|[-_+*/<>])")
+;;   "symbol constituient except first char.")
 
 (defconst serl-atom-re
   (concat "[" serl-atom-char1 "]"
@@ -35,13 +35,16 @@
 
 (defun serl-syntax-table () 
   (with-syntax-table (make-syntax-table)
+    ;; symbol consituent
     (modify-syntax-entry ?\- "_")
     (modify-syntax-entry ?\_ "_")
+    (modify-syntax-entry ?\\ "_")
+    (modify-syntax-entry ?\> "_")
+    (modify-syntax-entry ?\< "_")
     ;; comment
     (modify-syntax-entry ?# "<")
     (modify-syntax-entry ?\n ">")
-    ;; punctuation
-    (modify-syntax-entry ?\\ ".")
+    ;; punctuation 
     (modify-syntax-entry ?\: ".")
     (modify-syntax-entry ?\~ ".")
     (modify-syntax-entry ?\. ".")
@@ -94,14 +97,15 @@
 	 (cons (concat "\\b" serl-var-re "\\b")
 	       'font-lock-variable-name-face)
 	 ;;(cons "[:~.{}]" 'font-lock-variable-name-face)
-	 '("[{}]" . 'serl-brace)
+	 '("[{}]" . 'font-lock-type-face)
 	 '("[:~.\\]" . font-lock-variable-name-face)
 	 ))
   ) 
 
-(defface serl-brace
-    '((t :height 1.1))
-  "Face for {}")
+;; ;;(unintern 'serl-brace)
+;; (defface serl-brace
+;;     '((t :weight extra-bold))
+;;   "Face for {}")
 
 
 (defun serl-mode ()
@@ -131,5 +135,5 @@
   (run-mode-hooks 'serl-mode-hook)
   )
 
-
+(provide 'serl-mode)
 ;; font-lock-maximum-decoration

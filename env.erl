@@ -118,7 +118,7 @@ exports_of(Mod,NSType,Keys) ->
 		all -> {ok,{NSType,NS}};
 		_ -> Bs=[case keysearch(Key,1,NS) of
 			     {value,B} -> B;
-			     _ -> error("No definition for ~p in namespace ~p in module ~p", [Key,NSType,Mod])
+			     _ -> error("undef: ~p\\~p in namespace: ~p", [Mod,Key,NSType])
 			 end
 			 || Key <- Keys],
 		     {ok,{NSType,Bs}}
