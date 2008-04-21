@@ -1,0 +1,176 @@
+## make sure I can change the AST representation whenver I feel like it.
+
+(module serl)
+
+(import scompile
+	error
+	lineno
+	transform
+	transform_each
+	map_env0
+	)
+
+(import lists
+	reverse)
+
+## verl's meta-module doesn't support import.
+### this is a special case
+## (import verl clause)
+
+#(importm verl ...)
+
+# (def get-meta-env:
+#   ((Env): env\assoc(Env [compile_env])))
+# (def put-meta-env:
+#   ((Env MEnv): env\assoc_put(Env [compile_env] MEnv)))
+
+(import lists
+	map)
+
+(export sp-block
+	sp-brace
+	sp-fn
+	sp-case
+	sp-if
+	)
+
+(export
+#  sp-+
+#  sp--
+#  sp-*
+#  sp-/
+ sp-==
+#  sp-<
+ sp->
+ )
+
+
+
+(export mac->>)
+
+## (export "sp-.*")
+## (export "mac-.*")
+
+(def sp-block (`(,_Car ;[Es]) Env):
+  (transform `(ls: ;Es) Env))
+
+(def sp-brace (`(,_Car ;[Es]) Env): 
+  (transform `(tuple: ;Es) Env))
+
+# If E is if Ic_1 ; ... ; Ic_k end, where each Ic_i is an if clause then Rep(E) = {'if',LINE,[Rep(Ic_1), ..., Rep(Ic_k)]}.
+(def sp-if (`(if ;Body) Env):
+  (let (Line (lineno)):
+    {Env {if Line (if-clauses Body [] Line Env)}}))
+
+(def if-clauses (Tests Acc Line Env):
+  (case Tests
+    ([Guard Exp|Tests]:
+     (if-clauses Tests
+		 [(verl\clause [] Guard [Exp] (ast-line Guard) Env
+			       ~>> {_ RC} RC)
+		  |Acc]
+		 Line Env))
+    ([Exp]:
+     (reverse [(verl\clause [] 'true [Exp] (ast-line Exp) Env
+			    ~>> {_ RC} RC)
+	       |Acc]))
+    ([]: (reverse Acc))))
+
+# ## If E is case E_0 of Cc_1 ; ... ; Cc_k end, where E_0 is an expression and each Cc_i is a case clause then Rep(E) = {'case',LINE,Rep(E_0),[Rep(Cc_1), ..., Rep(Cc_k)]}.
+
+(def sp-case (`(case ,E ;Cs) Env):
+  (let (Line (lineno))
+    ({_ RE} (transform E Env))
+    ({Env RCs} (map_env0 (fn (C): (case-clause C Env ~>> {_ RC} RC))
+			 Cs
+			 Env)):
+    {Env {case Line RE RCs}}))
+
+# (def case-clause ((paren [P,(block Es)] L _Mod) Env):
+#      ## ugh! Yuk. I need accessors to access the data of asts.
+#      ## TODO I would prefer (paren [P|Es]: L _Mod). 
+#      (clause [P] [] Es L Env))
+
+(def case-clause (`(,P: ;Es) Env):
+  (verl\clause [P] [] Es (ast-line P) Env))
+
+# (def case-clause (`(,P: ;Es) Env):
+#      (let (L (ast-line Es)):
+#        (clause [P] [] Es L Env)))
+
+# (def clause (Ps Gs Es L Env):
+#      (let ({Env RPs} (verl\patterns Ps Env)):
+#        {Env {clause L RPs
+# 		    ## an erlang clause takes a guard sequence
+# 		    ## a guard sequence is a list of guard tests
+# 		    ## (we support only one guard sequence)
+# 		    (verl\guards Gs Env ~>> {_ RGs} RGs)
+# 		    (transform_each Es Env ~>> {_ REs} REs)}}
+#        ))
+
+## 4.6
+
+# (def guards (GuardTests Env):
+#      (transform_each GuardTests Env))
+
+## If E is fun Fc_1 ; ... ; Fc_k end where each Fc_i is a function clause then Rep(E) = {'fun',LINE,{clauses,[Rep(Fc_1), ..., Rep(Fc_k)]}}.
+
+(def sp-fn (`(fn (;Args): ;Es) Env):
+  (let (Env (scompile\lexical_shadow Env vars [])):
+    {Env {fun (lineno)
+	      {clauses (verl\clause Args [] Es (lineno) Env
+				    ~>> {_ Clause} [Clause])}}}))
+
+(def mac->> (`(>> ,Val ,Pattern ;Es)):
+  `(let (,Pattern ,Val): ;Es))
+
+# (def sp-fn (`(fn (;Args): ;Es) Env):
+#      {Env {fun (lineno)
+# 	       {clauses (verl\clause Args [] Es (lineno) Env ~at 2)}}})
+
+# If E is E_1 Op E_2, where Op is a binary operator, then Rep(E) = {op,LINE,Op,Rep(E_1),Rep(E_2)}.
+
+(def ast-line (Ast): (erlang\element 2 Ast))
+
+(def op-ast (Op E1 E2 Env):
+  {Env {op (ast-line E1)
+	   Op
+	   (transform E1 Env ~>> {_ RE1} RE1)
+	   (transform E2 Env ~>> {_ RE2} RE2)}})
+
+(def sp-> (`(> ,E1 ,E2) Env):
+  (op-ast > E1 E2 Env))
+
+(def sp-== (`(== ,E1 ,E2) Env):
+  (op-ast == E1 E2 Env))
+
+# (def sp-let (`(let ;Body) Env):
+#      (let* (Line (lineno))
+#        ([(block Bindings) (block Body)] (to_blocks Body))
+#        ({Patterns Assignments} (let-bindings Bindings [] []))
+#        (Env (verl\binds (scompile\lexical_shadow Env vars [])))
+#        (Assignments
+# 	(lists\map
+# 	       (fn ({P V}):
+# 		   {match (element 2 P)
+# 			  (gen_pat P Env2 ~>> {_ RP} RP)
+# 			  (transform V Env ~>> {_ RV} RV)})
+# 	       Assignments)):
+#        {Env {block Line (cat Assignments
+# 			     (transform_each Body Env2 ~>> {_ Body} Body))}}
+#        ))
+
+
+# (def let-bindings (Bindings Patterns Assignments):
+#      (case Bindings
+#        ([]: (lists\reverse Patterns) (lists\reverse Assignments))
+#        ([B|Bs]:
+# 	(case B
+# 	  (`(,Pattern Value):
+# 	   (let-bindings Bs [Pattern|Patterns]
+# 			 [{Pattern Value}|Assignments]))
+# 	  ((= (var _) Pattern):
+# 	   (let-bindings Bs [Pattern|Patterns]
+# 			 Assignments))
+# 	  (_ : (error "Invalid binding form: ~p" [B]))))))
+

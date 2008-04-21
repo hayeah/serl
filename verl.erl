@@ -58,13 +58,6 @@
     %{0,put_meta_env(Env,env:import(serlenv(0),mverl))},
     {0,Env}.
 
-serlenv(0) ->
-    env:new(verl);
-serlenv(1) ->
-    env:import(serlenv(0),serl); 
-serlenv(2) ->
-    env:import(serlenv(1),serl_new).
-
 get_meta_env(Env) ->
     env:assoc(Env,[compile_env]).
 put_meta_env(Env,MEnv) ->
@@ -154,8 +147,8 @@ emit_bin(Forms,CO) ->
 	compile_forms(Forms,CO#opt.options),
     case Status of
 	error -> {error,Errors,Warnings};
-	ok -> if CO#opt.bin==true -> {bin,Mod,Bin,Warnings};
-		 CO#opt.dry==true -> {dry,Warnings,Errors};
+	ok -> if CO#opt.bin==true -> {bin,[Mod,Bin,Warnings]};
+		 CO#opt.dry==true -> {dry,[Warnings,Errors]};
 		 true -> write_beam(Mod,Bin),
 		      {beam,Mod}
 	      end 
@@ -163,6 +156,7 @@ emit_bin(Forms,CO) ->
 
 compile_forms(Forms,Options) ->
     case compile:forms(Forms,Options) of
+	{ok,_Mod} -> {ok,[],[],[]};
 	{ok,_,Bin} ->
 	    {ok,Bin,[],[]};
 	{ok,_,Bin,Warnings} ->
@@ -172,9 +166,11 @@ compile_forms(Forms,Options) ->
 	error -> {error,[],[],[]}
     end.
 
-write_beam(Mod,Bin) ->
+write_beam(Mod,Bin) when is_binary(Bin) ->
     BeamFileName=atom_to_list(Mod)++".beam",
-    file:write_file(BeamFileName,Bin). 
+    file:write_file(BeamFileName,Bin);
+write_beam(_,_) ->
+    error("Beam is empty.").
     
     
 emit_ast(Forms,CO) ->
