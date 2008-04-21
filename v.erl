@@ -1,64 +1,57 @@
 -module(v).
 
 -compile(export_all).
+-import(verl,[serlenv/1]).
 
-serlenv(0) ->
-    env:new(verl);
-serlenv(1) ->
-    env:import(serlenv(0),serl); 
-serlenv(2) ->
-    env:import(serlenv(1),serl_new).
-
-
-sread(In) ->
-    {Env,_,_,Ast}=scompile:read(In,serlenv(0)),
-    {Env,Ast}.
 
 read(In) ->
-    {_,Ast}=sread(In),
+    read(In,0).
+
+read(In,N) ->
+    {_,_,Ast}=scompile:read(In,serlenv(N)),
     Ast.
 
 mexpand(In) ->
-    {Env,Ast}=sread(In),
-    scompile:mexpand(Ast,Env).
-
-expand1(In) ->
-    {Env,Ast}=sread(In),
-    scompile:expand1(Ast,Env).
+    mexpand(In,0).
+mexpand(In,N) ->
+    scompile:mexpand(read(In,N),serlenv(N)).
 
 expand(In) ->
-    {Env,Ast}=sread(In),
-    scompile:expand(Ast,Env).
+    expand(In,0).
+expand(In,N) ->
+    scompile:expand(read(In,N),serlenv(N)). 
 
+%% pexpand1(In) ->
+%%     {Env,Ast}=sread(In),
+%%     {_,R}=scompile:expand1(Ast,Env),
+%%     printer:p(R).
 
-pexpand1(In) ->
-    {Env,Ast}=sread(In),
-    {_,R}=scompile:expand1(Ast,Env),
-    printer:p(R).
+%% pexpand(In) ->
+%%     {Env,Ast}=sread(In),
+%%     {_,R}=scompile:expand(Ast,Env),
+%%     printer:p(R).
 
-pexpand(In) ->
-    {Env,Ast}=sread(In),
-    {_,R}=scompile:expand(Ast,Env),
-    printer:p(R).
 
 eval(In) ->
-    eval(In,erl_eval:new_bindings()). 
+    eval(In,[],0).
 eval(In,Bindings) ->
-    {Env,Ast}=sread(In),
-    scompile:eval(Ast,Env,Bindings).
+    eval(In,Bindings,0).
+eval(In,Bindings,N) ->
+    evaln(1,In,Bindings,N).
 
+evaln(Times,In) ->
+    evaln(Times,In,[],0).
+evaln(Times,In,Bindings) ->
+    evaln(Times,In,Bindings,0).
+evaln(Times,In,Bindings,N) ->
+    Ast=read(In,N),
+    evaln_(Times,Ast,serlenv(N),Bindings).
 
-evaln(N,In) ->
-    evaln(N,In,erl_eval:new_bindings()).
-evaln(N,In,Bindings) ->
-    {Env,Ast}=sread(In),
-    evaln_(N,Ast,Env,Bindings).
-
-evaln_(0,Ast,Env,Bindings) ->
-    {Env,Ast,Bindings};
+evaln_(0,Ast,_Env,Bindings) ->
+    {Ast,Bindings};
 evaln_(N,Ast,Env,Bindings) ->
-    {Env2,Ast2,Bs2}=scompile:eval(Ast,Env,Bindings),
-    evaln_(N-1,Ast2,Env2,Bs2).
+    {Ast2,Bs2}=scompile:eval(Ast,Env,Bindings),
+    evaln_(N-1,Ast2,Env,Bs2).
     
 
 compile(Mod) ->

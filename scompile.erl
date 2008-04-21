@@ -4,7 +4,7 @@
 -export([lineno/0,
 	 curmod/0,curmod/1,
 	 gensym/1, reset_gensym/0, %% for debug purposes
-	 options/1,
+	 options/0,set_options/1,
 	 
 	 read/2,read_/2,
 	 mexpand/2,mexpand_/2,
@@ -41,13 +41,15 @@ error(Message,Args) ->
 -record(state,
 	{curmod=?serl_toplevel,
 	 lineno=1,
-	 gensym_counter=0
+	 gensym_counter=0,
+	 options=[]
 	}).
 
 %% process dictionary keys to store the state variables
 -define(lineno,{?MODULE,'lineno'}).
 -define(curmod,{?MODULE,'curmod'}).
 -define(gensym,{?MODULE,'gensym_counter'}).
+-define(options,{?MODULE,'options'}).
 
 init_state() ->
     %% reset compiler state.
@@ -55,7 +57,8 @@ init_state() ->
 init_state(S) when is_record(S,state) ->
     put(?lineno,S#state.lineno),
     put(?curmod,S#state.curmod),
-    put(?gensym,S#state.gensym_counter).
+    put(?gensym,S#state.gensym_counter),
+    put(?options,S#state.options).
 
 %% not sure if get_state is ever useful
 %% get_state() ->
@@ -81,6 +84,13 @@ gensym(N) ->
     GC=gensym_counter(),
     put(?gensym,GC+N), 
     [list_to_atom("#"++io_lib:print(I)) || I <- lists:seq(GC,GC+N-1)].
+
+options() ->
+    get(?options).
+    
+set_options(Opts) ->
+    put(?options,Opts).
+
 
 
 read(In,Env) -> 
@@ -115,9 +125,8 @@ eval(Ast,Env,Bindings) ->
     new_process(fun eval_/3,[Ast,Env,Bindings]).
 
 eval_(Ast,Env,Bindings) ->
-    {Env2,ErlAst}=transform(Ast,Env),
-    {Val,NewBindings}=eval_erl(ErlAst,Bindings,Env2),
-    {Env2,Val,NewBindings}. 
+    ErlAst=transform(Ast,Env),
+    eval_erl(ErlAst,Bindings,Env). 
     
 eval_erl(ErlAst,Bindings,Env) ->
     {value,Val,NewBindings}=erl_eval:expr(
@@ -152,13 +161,8 @@ compile(Mod,Env) when is_atom(Mod) ->
     compile(Mod,Env,[]).
 
 compile(Mod,Env,Options) when is_atom(Mod) ->
-    Env2=env:assoc_put(Env,[compiler_options],Options),
-    new_process(fun compile_/2,[Mod,Env2],
-		#state{curmod=Mod}).
-
-options(Env) ->
-    {ok,Opts}=env:assoc(Env,[compiler_options]),
-    Opts.
+    new_process(fun compile_/2,[Mod,Env],
+		#state{curmod=Mod,options=Options}).
 
 %% transforms expressions for side effect on the environment.
 compile_(Mod,Env) ->
@@ -167,8 +171,15 @@ compile_(Mod,Env) ->
 	{ok,Bin} -> binary_to_list(Bin);
 	_ -> error("Cannot find source module ~p\n",[Mod])
     end,
-    {Env2,0}=transform(?cast_paren([?cast_atom('__bof')]),Env),
-    compile_loop(In,Env2,0).
+    try {0,Env2}=transform(?cast_paren([?cast_atom('__bof')]),Env),
+	compile_loop(In,Env2,0)
+    catch error:Reason ->
+	    transform(?cast_paren([?cast_atom('__eof'),{error,Reason}]),Env),
+	    erlang:error(Reason);
+	throw:Reason ->
+	    transform(?cast_paren([?cast_atom('__eof'),{throw,Reason}]),Env),
+	    throw(Reason)
+    end.
 
 %% I want a way to restrict toplevel forms...
 %% one easy way is for toplevel forms to return false as the transformed ast!
@@ -178,21 +189,21 @@ compile_(Mod,Env) ->
 %%%% so if the returned N2 >= N1, then proceed.
 %%%% toplevels that returns the atom infinity can occur anywhere.
 compile_loop(In,Env,Section) -> 
-    {Env2,In2,ReaderLine,Ast}=read_(In,Env), 
+    {In2,ReaderLine,Ast}=read_(In,Env), 
     case Ast of
 	eof ->
 	    %% at end of file, transforms the pseudo special form (__eof)
 	    %% what happens is language dependent.
 	    %% maybe compile to erlang, maybe compile to javascript, whatever.
-	    {_,Result}=transform(?cast_paren([?cast_atom('__eof')]),Env2),
-	    Result;
-	_ -> {Env3,Section2}=transform(Ast,Env2),
+	    transform(?cast_paren([?cast_atom('__eof'),normal]),Env);
+	_ -> %% toplevel forms return a tuple of section-number and environment.
+	    {Section2,Env2}=transform(Ast,Env),
 	     if not(is_integer(Section2)) -> error("Not toplevel form: ~p\n",[Section2]);
 		Section2<Section -> error("Toplevel form out of sequence: ~p\n",[Section2]);
 		true -> ok
 	     end,
 	     set_lineno(ReaderLine), %% after transform, set lineno to where the reader left off.
-	     compile_loop(In2,Env3,Section2)
+	     compile_loop(In2,Env2,Section2)
     end.
 
 new_process(Fun,Args) ->
@@ -268,8 +279,8 @@ transform1(Exp,Env) when is_tuple(Exp) ->
 
 transform(?ast_paren(_)=Exp,Env) ->
     case do_transform(Exp,Env) of
-	{special,{_Env2,_Result}=Result} -> Result;
-	{macro,{_,Exp2}} -> transform(Exp2,Env)
+	{special,Result} -> Result;
+	{macro,Result} -> transform(Result,Env)
     end;
 transform(Exp,Env) when is_tuple(Exp) ->
     [Car,L,M,E]=tuple_to_list(Exp),
@@ -286,7 +297,7 @@ do_transform(?ast_paren3(L,_M,[Car|Body])=Exp,Env) ->
     end, 
     try case lookup_expander(Env,Car) of
 	    {special,F} -> {special,F(Exp,Env)};
-	    {macro,F} -> {macro,{Env,F(Exp)}} ;
+	    {macro,F} -> {macro,F(Exp)} ;
 	    _ -> case lookup_expander(Env,?cast_atom('__call')) of
 		     %% make sure to raise error, otherwise go into loop.
 		     {Type,_F} when Type==special;Type==macro ->
@@ -310,7 +321,7 @@ do_transform(?ast_paren3(L,_M,[Car|Body])=Exp,Env) ->
 %%%% this doesn't catch error like:  X=1+X.
 %%%% but the erlang compiler would catch it, so let's not worry about it.
 transform_each(Es,Env) ->
-    map_env0(fun transform/2, Es,Env).
+    [transform(E,Env) || E <- Es].
 
 %% apply transformation function over expressions, start with Env.
 map_env0(F,Es,Env) ->
@@ -336,9 +347,15 @@ lookup_expander(Env,Car) ->
 	    {curmod(),A}
     end,
     case lookup(Env,macros,Key) of
-	{ok,F} -> {macro,F};
+	{ok,Def} ->
+	    if is_function(Def) -> {macro,Def};
+	       is_tuple(Def) -> {macro,{element(1,Def),element(2,Def)}}
+	    end;
 	_ -> case lookup(Env,specials,Key) of
-		 {ok,F} -> {special,F}; 
+		 {ok,Def} ->
+		     if is_function(Def) -> {special,Def};
+			is_tuple(Def) -> {special,{element(1,Def),element(2,Def)}}
+		     end; 
 		 _ -> false
 	     end
     end.

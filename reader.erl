@@ -72,8 +72,8 @@ set_curenv(Env) -> put(?env,Env).
 exp(In,Env,LineNo) ->
     set_state(Env,In,LineNo), 
     Ast=an_exp(),
-    {Env2,In2,LineNo2}=get_state(),
-    {Env2,In2,LineNo2,Ast}. 
+    {_Env2,In2,LineNo2}=get_state(),
+    {In2,LineNo2,Ast}. 
 
 %% serl lexer/parser
 
