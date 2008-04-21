@@ -10,7 +10,7 @@
 	]
 	).
 
--export([q/1,qq/1,qqp/1,
+-export([q/1,qs/1,qq/1,qqp/1,
 	 simplify/1,
 	 completely_expand/1
  	]).
@@ -31,12 +31,16 @@
 %%  t(;form) => form  ## form evals to an erlang list
 
 q(In) ->
-    {_Env,?ast_bquote(X)}=verl:read(In), 
-    simplify(expand(X)).
+    ?ast_bquote(Q)=v:read(In),
+    expand(Q).
+
+qs(In) ->
+    ?ast_bquote(Q)=v:read(In),
+    simplify(expand(Q)).
 
 qq(In) ->
-    {_Env,?ast_bquote(X)}=verl:read(In),
-    completely_expand(X).
+    ?ast_bquote(Q)=v:read(In),
+    completely_expand(Q).
 
 qqp(In) ->
     printer:p(qq(In)).
@@ -120,7 +124,8 @@ simplify(Exp) ->
 	{ls,L} -> {ls,[simplify(O) || O <- L]};
 	{block,L} -> {block,simplify(L)};
 	{paren,L} -> {paren,simplify(L)};
-	{brace,L} -> {brace,simplify(L)}; 
+	{brace,L} -> {brace,simplify(L)};
+	{cat,[]} -> {ls,[]};
 	{cat,Args} ->
 	    Args2=[simplify(A) || A <- Args],
 	    simplify_append(Args2); 
