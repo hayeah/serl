@@ -70,7 +70,7 @@ get_meta_env(Env) ->
 put_meta_env(Env,MEnv) ->
     env:assoc_put(Env,[compile_env],MEnv).
 
-?defsp('__sp_eof',[{_,_Reason}]) ->
+?defsp('__sp_eof',['after']) ->
     Env,
     cleanup();
 ?defsp('__sp_eof',[normal]) ->
@@ -203,22 +203,24 @@ emit_def(Env,CO) ->
 	    emit_def(Env,CO#opt{def=[F]}) 
     end.
 
-%% emit_meta(Env,CO) ->
-%%     Mod=CO#opt.mod,
-%%     case CO#opt.meta of
-%% 	true ->
-%% 	    MetaMod=list_to_atom([atom_to_list(CO#opt.mod)++"__meta"]),
-%% 	    Exports=
-%% 		case env:assoc(Env,[exports]) of
-%% 		    {ok,NSs} ->
-%% 			{NSType,[{Name,{Mod,}}]}
-%% 	    {meta,emit(Forms,Env,CO#opt{meta=undefined,mod=MetaMod})}; 
-%% 	undefined -> {}
-%%     end.
 
-emit_meta(_Env,_CO) ->
-    %%{meta,Env,CO},
-    {meta,nil}.
+emit_meta(Env,CO) ->
+    %% oh what the heck. Just do a quick hack to get it to work.
+    case CO#opt.meta of
+	true ->
+	    MetaMod=list_to_atom(atom_to_list(CO#opt.mod)++"__meta"),
+	    Exports=
+		case env:assoc(Env,[exports]) of
+		    {ok,NSs} ->
+			%% [{attribute,0,serl_exports,
+%% 			  erl_syntax:revert(erl_syntax:abstract(NSs))}];
+			[{attribute,0,serl_exports,NSs}]; 
+		    false -> []
+		end, 
+	    Forms=[{attribute,0,module,MetaMod}]++Exports,
+	    {meta,emit(Forms,Env,CO#opt{meta=undefined,mod=MetaMod})}; 
+	undefined -> {}
+    end.
 
 
 
@@ -408,10 +410,16 @@ def_info(Env,Name,Prop) ->
     
 %% %%  If F is an attribute -export([Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,export,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}.
 %% (export a b)
-?defsp('__sp_export',Names) ->
+?defsp('__sp_export',Atoms) ->
     Line=lineno(),
+    Mod=curmod(),
+    Names=[Name || ?ast_atom3(_,_,Name) <- Atoms],
     ?lazyout(Env2,export_attribute(Names,Line,Env2)),
-    {?header_sec,Env}.
+    {?header_sec,
+     env:assoc_append(
+       Env,
+       [exports,functions],
+       [{Name,{Mod,Name}} || Name <- Names])}.
 
 %% (export a b c)
 export_attribute(Names,Line,Env) ->
@@ -419,7 +427,7 @@ export_attribute(Names,Line,Env) ->
 	[begin
 	     {Name,def_info(Env,Name,arities)}
 	 end 
-	 ||?ast_atom3(_,_,Name) <- Names],
+	 || Name <- Names],
     {attribute,Line,export,
      [{Name,Arity} ||
 	 {Name,Arities} <- Exports,

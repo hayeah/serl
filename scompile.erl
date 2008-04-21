@@ -173,12 +173,8 @@ compile_(Mod,Env) ->
     end,
     try {0,Env2}=transform(?cast_paren([?cast_atom('__bof')]),Env),
 	compile_loop(In,Env2,0)
-    catch error:Reason ->
-	    transform(?cast_paren([?cast_atom('__eof'),{error,Reason}]),Env),
-	    erlang:error(Reason);
-	throw:Reason ->
-	    transform(?cast_paren([?cast_atom('__eof'),{throw,Reason}]),Env),
-	    throw(Reason)
+    after
+	transform(?cast_paren([?cast_atom('__eof'),'after']),Env)
     end.
 
 %% I want a way to restrict toplevel forms...
