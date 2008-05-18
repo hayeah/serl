@@ -2,7 +2,7 @@
 -module(verl).
 -include("ast.hrl").
 -include("verl.hrl").
--include_lib("eunit/include/eunit.hrl").
+%-include_lib("eunit/include/eunit.hrl").
 
 
 -import(env,[assoc/2,assoc_put/3]).
@@ -23,6 +23,7 @@
 -define(defsp(Name,Args),Name(?ast_paren3(_,_Mod,[_|Args]),Env)).
 -define(defm(Name,Args),Name(?ast_paren3(_,_Mod,[_|Args]))).
 -define(output,{?MODULE,output}).
+-define(moutput,{?MODULE,moutput}).
 
 %% -define(atomic_literals,[integer,float,string,atom]).
 %% -define(patterns,[match,var,tuple,nil,cons,op,record,record_index]++?atomic_literals).
@@ -73,7 +74,9 @@ put_meta_env(Env,MEnv) ->
     emit(Forms,Env,CO).
 
 cleanup() ->
-    put(?output,[]).
+    put(?output,[]),
+    put(?moutput,[]),
+    ok.
 
 output_forms(Env) ->
     %% lazy output waits till the very end to output.
@@ -87,12 +90,18 @@ output_forms(Env) ->
        end || Form <- get_output()]).
 
 -define(lazyout(Env,Body), output(fun (Env) -> Body end)).
+-define(lazymout(Env,Body), moutput(fun (Env) -> Body end)).
 
 
 get_output() ->
     get(?output).
+get_moutput() ->
+    get(?moutput).
+
 output(Ast) ->
     put(?output,[Ast|get_output()]).
+moutput(Ast) ->
+    put(?moutput,[Ast|get_moutput()]).
 
 
 %% verl's compiler options
@@ -175,7 +184,7 @@ write_beam(_,_) ->
     
 emit_ast(Forms,CO) ->
     case CO#opt.ast of
-	true -> {ast,Forms};
+	true -> [io:format("~s",[erl_pp:form(Form)]) || Form <- Forms],{ast,Forms};
 	undefined -> {}
     end.
 
@@ -779,7 +788,7 @@ make_call([E0|Es],Env) ->
     {call,L,RE0,REs}.
 
 
-?defsp('__sp_fn',[?ast_paren(Ps),?ast_block(Es)]) ->
+?defsp('__sp_fn',[?ast_paren(Ps)|Es]) ->
     L=lineno(),
     {'fun',L,
      {'clauses', [clause(Ps,[],Es,L,Env)]}}.

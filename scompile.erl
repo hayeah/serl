@@ -3,7 +3,7 @@
 
 -export([lineno/0,
 	 curmod/0,curmod/1,
-	 gensym/1, reset_gensym/0, %% for debug purposes
+	 gensym/0, gensym/1, reset_gensym/0, %% for debug purposes
 	 options/0,set_options/1,
 	 
 	 read/2,read_/2,
@@ -80,6 +80,9 @@ curmod(Ast) when is_tuple(Ast)->
 reset_gensym() -> put(?gensym,0).
 gensym_counter() -> get(?gensym).
 
+gensym() ->
+    [S]=gensym(1),
+    S.
 gensym(N) ->
     GC=gensym_counter(),
     put(?gensym,GC+N), 
@@ -172,7 +175,11 @@ compile_(Mod,Env) ->
 	_ -> error("Cannot find source module ~p\n",[Mod])
     end,
     try {0,Env2}=transform(?cast_paren([?cast_atom('__bof')]),Env),
-	compile_loop(In,Env2,0)
+	{eof,Env3}=compile_loop(In,Env2,0),
+	%% at end of file, transforms the pseudo special form (__eof)
+	%% what happens is language dependent.
+	%% maybe compile to erlang, maybe compile to javascript, whatever.
+	transform(?cast_paren([?cast_atom('__eof'),normal]),Env3)
     after
 	transform(?cast_paren([?cast_atom('__eof'),'after']),Env)
     end.
@@ -187,11 +194,7 @@ compile_(Mod,Env) ->
 compile_loop(In,Env,Section) -> 
     {In2,ReaderLine,Ast}=read_(In,Env), 
     case Ast of
-	eof ->
-	    %% at end of file, transforms the pseudo special form (__eof)
-	    %% what happens is language dependent.
-	    %% maybe compile to erlang, maybe compile to javascript, whatever.
-	    transform(?cast_paren([?cast_atom('__eof'),normal]),Env);
+	eof -> {eof,Env};
 	_ -> %% toplevel forms return a tuple of section-number and environment.
 	    {Section2,Env2}=transform(Ast,Env),
 	     if not(is_integer(Section2)) -> error("Not toplevel form: ~p\n",[Section2]);

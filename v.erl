@@ -8,6 +8,8 @@
 serlenv() ->
     env:import(env:new(verl),serl).
 
+%% serlenv() ->
+%%     env:new(verl). 
 
 read(In) ->
     {_,_,Ast}=scompile:read(In,serlenv()),
@@ -70,23 +72,11 @@ t() ->
 version() ->
     length(filelib:wildcard("bootstrap/*__meta.beam")).
 
+refresh() ->
+    recompile(0).
+
 next() ->
-    R=compile(serl,[bin,report,meta]),
-    %% I absolutely loath how Erlang makes binding in cases visible outside.
-    ModBin=case env:assoc(R,[bin]) of
-	       {ok,[_,Bin|_]} -> Bin
-	   end,
-    MetaBin=case env:assoc(R,[meta,bin]) of
-	       {ok,[_,Bin2|_]} -> Bin2
-	    end,
-    %% ehh... should probably at the filenames to figure out version numbers. But I don't want to figure out erlang regex.
-    %% So, never delete from the directory.
-    Version=version()+1,
-    ModPath="bootstrap/"++integer_to_list(Version)++".beam",
-    MetaModPath="bootstrap/"++integer_to_list(Version)++"__meta.beam",
-    file:write_file(ModPath,ModBin),
-    file:write_file(MetaModPath,MetaBin),
-    reload(Version).
+    recompile(1).
 
 back(N) ->
     Version=version()-N,
@@ -97,20 +87,77 @@ back(N) ->
 goto(N) ->
     reload(N).
 
+%% hand compile the meta module for now
+recompile(VersionIncrement) ->
+    R=compile(serl,[bin,report,meta]),
+    %% I absolutely loath how Erlang makes binding in cases visible outside.
+    ModBin=case env:assoc(R,[bin]) of
+	       {ok,[_,Bin|_]} -> Bin
+	   end,
+    
+%%     MetaBin=case env:assoc(R,[meta,bin]) of
+%% 	       {ok,[_,Bin2|_]} -> Bin2
+%% 	    end,
+    
+    %% ehh... should probably at the filenames to figure out version numbers. But I don't want to figure out erlang regex.
+    %% So, never delete from the directory.
+    Version=version()+VersionIncrement,
+    ModPath="bootstrap/"++integer_to_list(Version)++".beam",
+    %MetaModPath="bootstrap/"++integer_to_list(Version)++"__meta.beam",
+    file:write_file(ModPath,ModBin),
+    %file:write_file(MetaModPath,MetaBin),
+    compile:file(serl__meta),
+    reload(Version).
+    
 reload(Version) ->
     ModPath="bootstrap/"++integer_to_list(Version)++".beam",
-    MetaModPath="bootstrap/"++integer_to_list(Version)++"__meta.beam",
+    %MetaModPath="bootstrap/"++integer_to_list(Version)++"__meta.beam",
     ModBin=case file:read_file(ModPath) of
 	       {ok,Bin} -> Bin
 	   end,
-    MetaModBin=case file:read_file(MetaModPath) of
-		    {ok,Bin2} -> Bin2
-	       end,
+    %% MetaModBin=case file:read_file(MetaModPath) of
+%% 		    {ok,Bin2} -> Bin2
+%% 	       end,
+    
     code:purge(serl),
-    code:purge(serl_meta),
+    code:purge(serl__meta),
     {Version,
      code:load_binary(serl,"",ModBin),
-     code:load_binary(serl__meta,"",MetaModBin)}.
+     code:load_file(serl__meta)}.
+
+
+%% recompile(VersionIncrement) ->
+%%     R=compile(serl,[bin,report,meta]),
+%%     %% I absolutely loath how Erlang makes binding in cases visible outside.
+%%     ModBin=case env:assoc(R,[bin]) of
+%% 	       {ok,[_,Bin|_]} -> Bin
+%% 	   end,
+%%     MetaBin=case env:assoc(R,[meta,bin]) of
+%% 	       {ok,[_,Bin2|_]} -> Bin2
+%% 	    end,
+%%     %% ehh... should probably at the filenames to figure out version numbers. But I don't want to figure out erlang regex.
+%%     %% So, never delete from the directory.
+%%     Version=version()+VersionIncrement,
+%%     ModPath="bootstrap/"++integer_to_list(Version)++".beam",
+%%     MetaModPath="bootstrap/"++integer_to_list(Version)++"__meta.beam",
+%%     file:write_file(ModPath,ModBin),
+%%     file:write_file(MetaModPath,MetaBin),
+%%     reload(Version).
+    
+%% reload(Version) ->
+%%     ModPath="bootstrap/"++integer_to_list(Version)++".beam",
+%%     MetaModPath="bootstrap/"++integer_to_list(Version)++"__meta.beam",
+%%     ModBin=case file:read_file(ModPath) of
+%% 	       {ok,Bin} -> Bin
+%% 	   end,
+%%     MetaModBin=case file:read_file(MetaModPath) of
+%% 		    {ok,Bin2} -> Bin2
+%% 	       end,
+%%     code:purge(serl),
+%%     code:purge(serl_meta),
+%%     {Version,
+%%      code:load_binary(serl,"",ModBin),
+%%      code:load_binary(serl__meta,"",MetaModBin)}.
 
 
 %% c(Mod) ->

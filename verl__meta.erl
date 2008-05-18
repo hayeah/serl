@@ -76,7 +76,7 @@
      ]},
     {macros,
      [{'ls',{?MOD,'__mac_ls'}},
-      {'>>',{?MOD,'__mac_>>'}},
+      {'>>',{?MOD,'__mac_>>'}}, 
 
       {'float',{?MOD,'__mac_float'}},
       {'integer',{?MOD,'__mac_integer'}},

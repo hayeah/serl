@@ -170,10 +170,15 @@ toplevel_of(Mod) ->
 	    {ok,V} -> V;
 	    _ -> []
 	end,
+    Exports=
+	case exports_of(Mod) of
+	    {ok,V2} -> V2;
+	    _ -> []
+	end,
     %% THINK: What is the toplevel?
     %% "Toplevel" is probably used for the shell.
-    [{definitions,definitions_of(Mod)},
-     {imports,Imports}].
+    %% I think it is the imports of module plus its own exports. 
+    [{imports,[{Mod,Exports}|Imports]}].
 
 
 

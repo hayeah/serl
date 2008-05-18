@@ -35,7 +35,7 @@
 	)
 
 (export
-#  sp-+
+  sp-+
 #  sp--
 #  sp-*
 #  sp-/
@@ -50,6 +50,24 @@
 
 ## (export "sp-.*")
 ## (export "mac-.*")
+
+# (defsp defm (Name Args `[]) Env:
+#        )
+
+# (def sp-defm (`(,_ ,Name ((all ;Form)): ;Body) Env)
+  
+#   )
+
+
+(export mac-with-gensym)
+
+(def mac-with-gensym (`(,_ (;Vars) ;Body)):
+  `(let ;(lists\map (fn (V) `(,V (var (scompile\gensym))))
+		    Vars):
+     ;Body
+     ))
+
+
 
 (def sp-block (`(,_Car ;[Es]) Env):
   (transform `(ls: ;Es) Env))
@@ -66,13 +84,11 @@
   (case Tests
     ([Guard Exp|Tests]:
      (if-clauses Tests
-		 [(verl\clause [] Guard [Exp] (ast-line Guard) Env
-			       ~>> {_ RC} RC)
+		 [(verl\clause [] Guard [Exp] (ast-line Guard) Env)
 		  |Acc]
 		 Line Env))
     ([Exp]:
-     (reverse [(verl\clause [] 'true [Exp] (ast-line Exp) Env
-			    ~>> {_ RC} RC)
+     (reverse [(verl\clause [] 'true [Exp] (ast-line Exp) Env)
 	       |Acc]))
     ([]: (reverse Acc))))
 
@@ -80,10 +96,10 @@
 
 (def sp-case (`(case ,E ;Cs) Env):
   (let (Line (lineno))
-    ({_ RE} (transform E Env))
-    ({Env RCs} (map_env0 (fn (C): (case-clause C Env ~>> {_ RC} RC))
-			 Cs
-			 Env)):
+    (RE (transform E Env))
+    (RCs (map_env0 (fn (C) (case-clause C Env))
+		   Cs
+		   Env)):
     {Env {case Line RE RCs}}))
 
 # (def case-clause ((paren [P,(block Es)] L _Mod) Env):
@@ -115,11 +131,10 @@
 
 ## If E is fun Fc_1 ; ... ; Fc_k end where each Fc_i is a function clause then Rep(E) = {'fun',LINE,{clauses,[Rep(Fc_1), ..., Rep(Fc_k)]}}.
 
-(def sp-fn (`(fn (;Args): ;Es) Env):
+(def sp-fn (`(fn (;Args) ;Es) Env):
   (let (Env (scompile\lexical_shadow Env vars [])):
-    {Env {fun (lineno)
-	      {clauses (verl\clause Args [] Es (lineno) Env
-				    ~>> {_ Clause} [Clause])}}}))
+    {fun (lineno)
+	 {clauses (verl\clause Args [] Es (lineno) Env)}}))
 
 (def mac->> (`(>> ,Val ,Pattern ;Es)):
   `(let (,Pattern ,Val): ;Es))
@@ -143,6 +158,9 @@
 
 (def sp-== (`(== ,E1 ,E2) Env):
   (op-ast == E1 E2 Env))
+
+(def sp-+ (`(+ ,E1 ,E2) Env):
+  (op-ast + E1 E2 Env))
 
 # (def sp-let (`(let ;Body) Env):
 #      (let* (Line (lineno))
