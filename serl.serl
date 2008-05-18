@@ -30,23 +30,27 @@
 (export sp-block
 	sp-brace
 	sp-fn
+	sp-let
 	sp-case
 	sp-if
 	)
 
-(export
-  sp-+
-#  sp--
-#  sp-*
-#  sp-/
- sp-==
-#  sp-<
- sp->
- )
+# (export
+#   sp-+
+# #  sp--
+# #  sp-*
+# #  sp-/
+#  sp-==
+# #  sp-<
+#  sp->
+#  )
 
 
 
-(export mac->>)
+(export mac->>
+	mac-with-genvar
+	mac-let*)
+
 
 ## (export "sp-.*")
 ## (export "mac-.*")
@@ -59,13 +63,55 @@
 #   )
 
 
-(export mac-with-gensym)
+(def mac-let* (`(,_ ;Form)):
+  (let {Bindings [(block Body)]} (upto-block Form):
+       (case Bindings
+	 ([] `(begin ;Body))
+	 ([Pattern Value|Bindings] `(let ,Pattern ,Value: (let* ;Bindings: ;Body))))))
 
-(def mac-with-gensym (`(,_ (;Vars) ;Body)):
-  `(let ;(lists\map (fn (V) `(,V (var (scompile\gensym))))
-		    Vars):
-     ;Body
-     ))
+(def sp-let (`(let ;Es) Env):
+  (let* Line (lineno)
+	{Bindings [(block Body)]} (upto-block Es)
+	{Patterns Assignments} (let-bindings Bindings [] [])
+	Env2 (verl\binds Patterns (scompile\lexical_shadow Env vars []))
+	Assignments (lists\map
+		     (fn ({P V}):
+			 {match (element 2 P)
+				(verl\gen_pat P Env2) # pattern generated with new bindings
+				(transform V Env)} # value evaluated with old environment
+			 )
+		     
+		     Assignments):
+	{block Line (cat Assignments (transform_each Body Env2))}))
+
+(def let-bindings (Bindings Patterns Assignments):
+     (case Bindings
+       ([]: {(lists\reverse Patterns) (lists\reverse Assignments)})
+       ([Pattern Value|Bindings]:
+	(let-bindings Bindings [Pattern|Patterns] [{Pattern Value}|Assignments]))))
+
+
+
+(def mac-with-genvar (`(,_ ;Form)):
+  (let {Vars [BodyBlock]} (upto-block Form):
+       `(let ;(lists\foldl
+	       (fn (Var Acc) [Var '(scompile\genvar)|Acc])
+	       []
+	       Vars)
+	  ,BodyBlock
+	  )))
+
+
+# (def sp-defm (`(,_Car ,Name ,FnList :;Body) Env):
+#   (let ({RequiredArgs Blocks}
+# 	(lists\splitwith
+# 	 (fn (Arg)
+# 	     (case Arg
+# 	       ((block _) false)
+# 	       (_ true)))
+# 	  Es)): 
+#     `(_ ;RequiredArgs ;PosArg ;EnvArg)
+#     ))
 
 
 
@@ -77,30 +123,30 @@
 
 # If E is if Ic_1 ; ... ; Ic_k end, where each Ic_i is an if clause then Rep(E) = {'if',LINE,[Rep(Ic_1), ..., Rep(Ic_k)]}.
 (def sp-if (`(if ;Body) Env):
-  (let (Line (lineno)):
-    {Env {if Line (if-clauses Body [] Line Env)}}))
+  (let Line (lineno):
+       {Env {if Line (if-clauses Body [] Line Env)}}))
 
 (def if-clauses (Tests Acc Line Env):
   (case Tests
-    ([Guard Exp|Tests]:
+    ([Guard Exp|Tests]
      (if-clauses Tests
 		 [(verl\clause [] Guard [Exp] (ast-line Guard) Env)
 		  |Acc]
 		 Line Env))
-    ([Exp]:
+    ([Exp]
      (reverse [(verl\clause [] 'true [Exp] (ast-line Exp) Env)
 	       |Acc]))
-    ([]: (reverse Acc))))
+    ([] (reverse Acc))))
 
 # ## If E is case E_0 of Cc_1 ; ... ; Cc_k end, where E_0 is an expression and each Cc_i is a case clause then Rep(E) = {'case',LINE,Rep(E_0),[Rep(Cc_1), ..., Rep(Cc_k)]}.
 
 (def sp-case (`(case ,E ;Cs) Env):
-  (let (Line (lineno))
-    (RE (transform E Env))
-    (RCs (map_env0 (fn (C) (case-clause C Env))
-		   Cs
-		   Env)):
-    {Env {case Line RE RCs}}))
+  (let Line (lineno)
+       RE (transform E Env)
+       RCs (map_env0 (fn (C) (case-clause C Env))
+		     Cs
+		     Env):
+       {Env {case Line RE RCs}}))
 
 # (def case-clause ((paren [P,(block Es)] L _Mod) Env):
 #      ## ugh! Yuk. I need accessors to access the data of asts.
@@ -132,12 +178,12 @@
 ## If E is fun Fc_1 ; ... ; Fc_k end where each Fc_i is a function clause then Rep(E) = {'fun',LINE,{clauses,[Rep(Fc_1), ..., Rep(Fc_k)]}}.
 
 (def sp-fn (`(fn (;Args) ;Es) Env):
-  (let (Env (scompile\lexical_shadow Env vars [])):
+  (let Env (scompile\lexical_shadow Env vars []):
     {fun (lineno)
 	 {clauses (verl\clause Args [] Es (lineno) Env)}}))
 
 (def mac->> (`(>> ,Val ,Pattern ;Es)):
-  `(let (,Pattern ,Val): ;Es))
+  `(let ,Pattern ,Val: ;Es))
 
 # (def sp-fn (`(fn (;Args): ;Es) Env):
 #      {Env {fun (lineno)
@@ -145,50 +191,31 @@
 
 # If E is E_1 Op E_2, where Op is a binary operator, then Rep(E) = {op,LINE,Op,Rep(E_1),Rep(E_2)}.
 
+# (def op-ast (Op E1 E2 Env):
+#   {Env {op (ast-line E1)
+# 	   Op
+# 	   (transform E1 Env ~>> {_ RE1} RE1)
+# 	   (transform E2 Env ~>> {_ RE2} RE2)}})
+
+# (def sp-> (`(> ,E1 ,E2) Env):
+#   (op-ast > E1 E2 Env))
+
+# (def sp-== (`(== ,E1 ,E2) Env):
+#   (op-ast == E1 E2 Env))
+
+# (def sp-+ (`(+ ,E1 ,E2) Env):
+#   (op-ast + E1 E2 Env))
+
+
+
 (def ast-line (Ast): (erlang\element 2 Ast))
 
-(def op-ast (Op E1 E2 Env):
-  {Env {op (ast-line E1)
-	   Op
-	   (transform E1 Env ~>> {_ RE1} RE1)
-	   (transform E2 Env ~>> {_ RE2} RE2)}})
-
-(def sp-> (`(> ,E1 ,E2) Env):
-  (op-ast > E1 E2 Env))
-
-(def sp-== (`(== ,E1 ,E2) Env):
-  (op-ast == E1 E2 Env))
-
-(def sp-+ (`(+ ,E1 ,E2) Env):
-  (op-ast + E1 E2 Env))
-
-# (def sp-let (`(let ;Body) Env):
-#      (let* (Line (lineno))
-#        ([(block Bindings) (block Body)] (to_blocks Body))
-#        ({Patterns Assignments} (let-bindings Bindings [] []))
-#        (Env (verl\binds (scompile\lexical_shadow Env vars [])))
-#        (Assignments
-# 	(lists\map
-# 	       (fn ({P V}):
-# 		   {match (element 2 P)
-# 			  (gen_pat P Env2 ~>> {_ RP} RP)
-# 			  (transform V Env ~>> {_ RV} RV)})
-# 	       Assignments)):
-#        {Env {block Line (cat Assignments
-# 			     (transform_each Body Env2 ~>> {_ Body} Body))}}
-#        ))
-
-
-# (def let-bindings (Bindings Patterns Assignments):
-#      (case Bindings
-#        ([]: (lists\reverse Patterns) (lists\reverse Assignments))
-#        ([B|Bs]:
-# 	(case B
-# 	  (`(,Pattern Value):
-# 	   (let-bindings Bs [Pattern|Patterns]
-# 			 [{Pattern Value}|Assignments]))
-# 	  ((= (var _) Pattern):
-# 	   (let-bindings Bs [Pattern|Patterns]
-# 			 Assignments))
-# 	  (_ : (error "Invalid binding form: ~p" [B]))))))
-
+(def upto-block (Es):
+  (let {UpToFirstBlock Rest} (lists\splitwith
+			      (fn (E)
+				  (case E
+				    ((block _) false)
+				    (_ true)))
+			      Es):
+       {UpToFirstBlock Rest}
+       ))

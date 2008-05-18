@@ -19,7 +19,18 @@ mexpand(In) ->
     scompile:mexpand(read(In),serlenv()).
 
 expand(In) ->
-    scompile:expand(read(In),serlenv()). 
+    scompile:expand(read(In),serlenv()).
+
+expand1(In) ->
+    expandn(In,1).
+expandn(In,N) ->
+    expandn_(read(In),serlenv(),N).
+
+
+expandn_(Ast,_Env,0) ->
+    Ast;
+expandn_(Ast,Env,N) ->
+    expandn_(scompile:expand1(Ast,Env),Env,N-1).
 
 %% pexpand1(In) ->
 %%     {Env,Ast}=sread(In),

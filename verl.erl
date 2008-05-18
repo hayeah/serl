@@ -665,19 +665,12 @@ gen_pat_glist(Type,[Es,L,M],Env) ->
 
 let_bindings([],Patterns,Assignments) ->
     {lists:reverse(Patterns),lists:reverse(Assignments)};
-let_bindings([B|Bindings],Patterns,Assignments) ->
-    case B of
-	?ast_paren([Pattern,Value]) ->
-	    let_bindings(Bindings,[Pattern|Patterns],
-			 [{Pattern,Value}|Assignments]);
-	?ast_var(_)=Pattern ->
-	    let_bindings(Bindings,[Pattern|Patterns],Assignments); 
-	_ -> error("Invalid binding form: ~p",[B])
-    end.
+let_bindings([Pattern,Value|Bindings],Patterns,Assignments) ->
+    let_bindings(Bindings,[Pattern|Patterns],[{Pattern,Value}|Assignments]). 
 
 ?defm('__mac_>>',[V,P|Es]) ->
     ?cast_paren([?cast_atom('let'),
-		 ?cast_paren([P,V]),
+		 P,V,
 		 ?cast_block(Es)]).
 
 %%  If E is a variable V, then Rep(E) = {var,LINE,A}, where A is an atom with a printname consisting of the same characters as V.
@@ -809,7 +802,7 @@ make_call([E0|Es],Env) ->
 function_clause(?ast_paren3(L,_,[?ast_paren(Ps),?ast_block(Es)]),Env) ->
     clause(Ps,[],Es,L,Env).
 
-case_clause(?ast_paren3(L,_,[P,?ast_block(Es)]),Env) ->
+case_clause(?ast_paren3(L,_,[P|Es]),Env) ->
     clause([P],[],Es,L,Env). 
 
 clause(Ps,G,Es,Line,Env) ->
@@ -918,3 +911,15 @@ to_blocks(Es) ->
 		    end,
 		    Es),
     [?cast_block(FirstBlock)|Blocks].
+
+
+upto_block(Es) ->
+    {UpToFirstBlock,Rest}=
+	lists:splitwith(fun (E) ->
+			 case E of
+			     ?ast_block(_) -> false;
+			     _ -> true
+			 end
+		    end,
+		    Es),
+    {UpToFirstBlock,Rest}.

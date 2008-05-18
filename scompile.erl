@@ -3,7 +3,8 @@
 
 -export([lineno/0,
 	 curmod/0,curmod/1,
-	 gensym/0, gensym/1, reset_gensym/0, %% for debug purposes
+	 gensym/0, gensym/1, genvar/0, genvar/1,
+	 reset_gensym/0, %% for debug purposes 
 	 options/0,set_options/1,
 	 
 	 read/2,read_/2,
@@ -87,6 +88,12 @@ gensym(N) ->
     GC=gensym_counter(),
     put(?gensym,GC+N), 
     [list_to_atom("#"++io_lib:print(I)) || I <- lists:seq(GC,GC+N-1)].
+
+genvar() ->
+    [V]=genvar(1),
+    V.
+genvar(N) ->
+    [?cast_var(S) || S <- gensym(N)].
 
 options() ->
     get(?options).
