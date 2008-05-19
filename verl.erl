@@ -565,6 +565,7 @@ bind(?ast_paren([?ast_atom(Car)|Es])=P,Env) ->
 	cons -> [H,T]=Es,
 		bindmac(H,bindmac(T,Env));
 	tuple -> binds(Es,Env);
+	'=' -> binds(Es,Env);
 	_  -> error("Invalid pattern\n~.4p.",[P])
     end;
 bind(P,_) ->
@@ -599,6 +600,17 @@ gen_pat(?ast_paren([?ast_atom(Car)|Es])=P,Env) ->
 	    [?ast_block(Elements)]=Es,
 	    Rs=gen_pats(Elements,Env),
 	    {tuple,lineno(),Rs};
+	'=' ->
+	    [Last|Rest]=lists:reverse(Es),
+	    lists:foldl(
+	      fun (E,Acc) ->
+		      L=element(2,E),
+		      {match,L,
+		       gen_pat(E,Env),
+		       Acc}
+	      end,
+	      gen_pat(Last,Env),
+	      Rest);
 	%% should maybe make the ast macros special forms so they work better with pattern matching.
 	paren -> gen_pat_glist('__paren',Es,Env);
 	block -> gen_pat_glist('__block',Es,Env);
