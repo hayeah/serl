@@ -34,9 +34,11 @@
 	sp-brace
 	sp-fn
 	sp-let
+	sp-lsc
 	sp-case
 	sp-if
 	sp-defm
+	sp-defspecial
 	)
 
 (export mac->>
@@ -58,6 +60,10 @@
 
 ## (export "sp-.*")
 ## (export "mac-.*")
+
+## should import to both the meta and normal environments
+# (def sp-import (`(,_ ;Form) Env):
+#   )
 
 (def mac-let* (`(,_ ;Form)):
   (let {Bindings [(block Body)]} (upto-block Form):
@@ -86,8 +92,6 @@
        ([Pattern Value|Bindings]:
 	(let-bindings Bindings [Pattern|Patterns] [{Pattern Value}|Assignments]))))
 
-
-
 (def mac-with-genvar (`(,_ ;Form)):
   (let {Vars [BodyBlock]} (upto-block Form):
        `(let ;(lists\foldl
@@ -97,14 +101,41 @@
 	  ,BodyBlock
 	  )))
 
+# If E is a list comprehension [E_0 || W_1, ..., W_k], where each W_i is a generator or a filter, then Rep(E) = {lc,LINE,Rep(E_0),[Rep(W_1), ..., Rep(W_k)]}. For Rep(W), see below.
+
+# When W is a generator or a filter (in the body of a list or binary comprehension), then: 
+# If W is a generator P <- E, where P is a pattern and E is an expression, then Rep(W) = {generate,LINE,Rep(P),Rep(E)}. 
+# If W is a generator P <= E, where P is a pattern and E is an expression, then Rep(W) = {b_generate,LINE,Rep(P),Rep(E)}. 
+# If W is a filter E, which is an expression, then Rep(W) = Rep(E).
+
+(def sp-lsc (`(,_ ;Form) Env):
+  (let* Line (lineno)
+	{Qualifiers [(block Body)]} (upto-block Form)
+	{Env RWs} (lsc-bindings Env Qualifiers [])
+	:
+	{lc Line
+	    (transform `(begin ;Body) Env)
+	    RWs}
+	))
+
+(def lsc-bindings (Env Qs Acc):
+  (case Qs
+    ([] {Env (reverse Acc)})
+    (['if Filter|Qs] (lsc-bindings Env Qs [(transform Filter Env)|Acc]))
+    ([Pattern Generator|Qs]
+     (let Env2 (verl\bindmac Pattern Env):
+	  (lsc-bindings Env2 Qs [{generate (ast-line Pattern)
+					   (transform Pattern Env2)
+					   (transform Generator Env) 
+					   }|Acc])
+	  ))))
+
+
 (def new-def (Env NSType Name Def):
   (let Defined (env\assoc Env [definitions NSType Name]):
        (if Defined (error "%s already defined in %s" [Name NSType])
 	   (env\assoc_put Env [definitions NSType Name] Def)
 	   )))
-
-# (def new-def (Env NSType Name Def):
-#   (env\assoc_put Env [definitions NSType Name] Def))
 
 (def sp-defm (`(,_Car ,Name (;Args) :;Body) Env):
   (let* Name (let (atom Name) Name: Name)
@@ -147,6 +178,50 @@
 	      Env (verl\put_meta_env Env MEnv):
 	      {10 Env}
 	      )))
+
+
+(def sp-defspecial (`(,_Car ,Name (;Args) ,VEnv: ;Body) Env):
+  (let* Name (let (atom Name) Name: Name)
+	MEnv (let {ok MEnv} (verl\get_meta_env Env): MEnv)
+	Line (lineno)
+	#the variable for the whole macro expression
+	VAllName (gensym)
+	VAll (var VAllName)
+	#the variable for the environment during expansion
+	#VEnv
+	VEnvName (let (var Name) VEnv: Name) 
+	#the actual name to define the macro function
+	MacName (erlang\list_to_atom
+		 (cat "$special$" (erlang\atom_to_list Name))) 
+	MacBody (macro-arg-1 Args Body VAll)
+	EvalAst (transform 
+		 `(let ,VAll (eval-binding ,VAll)
+		       ,VEnv (eval-binding ,VEnv)
+		      :,MacBody)
+		 MEnv)
+	EvalFn
+	(begin
+	 ##(io\format "EvalAst: \n~s\n" [(erl_pp\expr EvalAst)])
+	 (fn (Ast Env)
+		   (let {Result _} (scompile\eval_erl EvalAst [{VAllName Ast}
+							       {VEnvName Env}]
+						      MEnv):
+			Result)))
+	DefAst {function Line MacName 1
+			 (verl\clause [VAll VEnv] [] [`(begin ,MacBody)] Line MEnv)}
+	:
+	## the macro definition needs to be in meta and normal env
+	(let* MacDef {EvalFn
+		      [{ast DefAst}
+		       {name MacName}
+		       {args Args} 
+		       {doc "A special form"}]}
+	      MEnv (new-def MEnv specials Name  MacDef)
+	      Env (new-def Env specials Name MacDef)
+	      Env (verl\put_meta_env Env MEnv):
+	      {10 Env}
+	      )))
+
 
 (def macro-aux-args (Blocks VAll):
   # auxiliary arguments that don't consume arguments.

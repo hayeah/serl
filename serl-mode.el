@@ -75,7 +75,7 @@
 (unless serl-font-lock-keywords
   (setq serl-font-lock-keywords
 	(list
-	 (list (concat "(\\s *\\(def\\|defm\\)\\s +\\("
+	 (list (concat "(\\s *\\(def\\|defm\\|defspecial\\)\\s +\\("
 		       serl-atom-re
 		       "\\)")
 	       2 font-lock-function-name-face)
@@ -83,6 +83,7 @@
 		       (regexp-opt
 			'("def"
 			  "defm"
+			  "defspecial"
 			  "module"
 			  "import"
 			  "export"
@@ -90,7 +91,6 @@
 			  "try"
 			  "catch"
 			  "finally"
-			  "xyz"
 			  ))
 		       "\\)\\b")
 	       1)

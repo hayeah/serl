@@ -155,10 +155,12 @@ eval_erl(ErlAst,Bindings,Env) ->
     
 local_funcall_handler(Name,Args,Env) ->
     case lookup(Env,functions,{curmod(),Name}) of
-	{value,{Mod,F}} ->
+	{ok,Def} when is_tuple(Def) -> 
 	    %%io:format("Applying ~s:~s/~p",[Mod,F,length(Args)]),
-	    apply(Mod,F,Args);
-	{value,F} -> apply(F,Args);
+	    case element(1,Def) of
+		{M,A} -> apply(M,A,Args);
+		F when is_function(F) -> apply(F,Args)
+	    end;
 	%% TODO should throw undef exception.
 	_ -> error("undefined function: ~p\n",[Name])
     end.
