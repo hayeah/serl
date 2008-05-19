@@ -46,23 +46,24 @@
 %% %% this is strictly a value expression.
 %% %% (eval-binding <var>) simply compiles to <var>, bypassing binding check.
 ?defsp('__sp_eval-binding',[?ast_atom(V)]) ->
+    Env,
     Line=lineno(),
-    {Env,?erl_var(Line,V)};
+    ?erl_var(Line,V);
 ?defsp('__sp_eval-binding',[?ast_var(V)]) ->
+    Env,
     Line=lineno(),
-    {Env,?erl_var(Line,V)}.
+    ?erl_var(Line,V).
 
 
 ?defsp('__sp_bof',[]) ->
     put(?output,[]),
-    %% TODO fix the meta env. It should use import rather than toplevel_of.
-    %{0,put_meta_env(Env,env:import(serlenv(0),mverl))},
-    {0,Env}.
+    %% the meta environment starts out the same as environment.
+    {0,put_meta_env(Env,Env)}.
 
 get_meta_env(Env) ->
-    env:assoc(Env,[compile_env]).
+    env:assoc(Env,[meta_env]).
 put_meta_env(Env,MEnv) ->
-    env:assoc_put(Env,[compile_env],MEnv).
+    env:assoc_put(Env,[meta_env],MEnv).
 
 ?defsp('__sp_eof',['after']) ->
     Env,
@@ -598,9 +599,20 @@ gen_pat(?ast_paren([?ast_atom(Car)|Es])=P,Env) ->
 	    [?ast_block(Elements)]=Es,
 	    Rs=gen_pats(Elements,Env),
 	    {tuple,lineno(),Rs};
+	%% should maybe make the ast macros special forms so they work better with pattern matching.
 	paren -> gen_pat_glist('__paren',Es,Env);
 	block -> gen_pat_glist('__block',Es,Env);
-	brace -> gen_pat_glist('__brace',Es,Env); 
+	brace -> gen_pat_glist('__brace',Es,Env);
+	float -> [Data]=Es,
+		 gen_pat(mk_ast_pat('__float',Data),Env);
+	integer -> [Data]=Es,
+		   gen_pat(mk_ast_pat('__integer',Data),Env);
+	string -> [Data]=Es,
+		  gen_pat(mk_ast_pat('__string',Data),Env);
+	atom -> [Data]=Es,
+		gen_pat(mk_ast_pat('__atom',Data),Env);
+	var -> [Data]=Es,
+	       gen_pat(mk_ast_pat('__var',Data),Env);
 	_ -> gen_pat(scompile:expand1_(P,Env),Env) %% can't use macroexpand here.
     end;
 gen_pat(P,Env) -> 
@@ -613,11 +625,11 @@ gen_pat_quote(E,Env) ->
 	'__paren' -> gen_pat_quote_glist(paren,Data,Env);
 	'__brace' -> gen_pat_quote_glist(brace,Data,Env);
 	'__block' -> gen_pat_quote_glist(block,Data,Env);
-	'__float' -> transform(mk_ast_pat(Type,?cast_float(Data)),Env);
-	'__integer' -> transform(mk_ast_pat(Type,?cast_integer(Data)),Env);
-	'__string' -> transform(mk_ast_pat(Type,?cast_string(Data)),Env);
-	'__atom' -> transform(mk_ast_pat(Type,?cast_atom(Data)),Env);
-	'__var' -> transform(mk_ast_pat(Type,?cast_atom(Data)),Env)
+	'__float' -> gen_pat(mk_ast_pat(Type,?cast_float(Data)),Env);
+	'__integer' -> gen_pat(mk_ast_pat(Type,?cast_integer(Data)),Env);
+	'__string' -> gen_pat(mk_ast_pat(Type,?cast_string(Data)),Env);
+	'__atom' -> gen_pat(mk_ast_pat(Type,?cast_atom(Data)),Env);
+	'__var' -> gen_pat(mk_ast_pat(Type,?cast_atom(Data)),Env)
     end.
 
 gen_pat_quote_glist(Type,Es,Env) ->
@@ -758,16 +770,16 @@ let_bindings([Pattern,Value|Bindings],Patterns,Assignments) ->
 		      Env);
        true ->
 	    case lookup(Env,functions,{M,F}) of 
-		{ok,{M2,Fn}} ->
+		{ok,{{M2,Fn}}} ->
 		    %% call to imported function
 		    transform(?cast_paren([?cast_atom('__call')|
 					   [?cast_brace([?cast_atom(M2),?cast_atom(Fn)])|Es]]),
 			      Env); 
 		{ok,_Fn} ->
-		    %% call to lexical or module function (defined)
+		    %% call to lexical or defined module function
 		    REs=transform_each(Es,Env),
 		    {call,Line,?erl_atom(Line,F),REs}; 
-		_ -> %% call to module function (not yet defined)
+		_ -> %% call to (not yet defined) module function 
 		    make_call(E,Env) 
 	    end
     end;
@@ -820,10 +832,12 @@ clause(Ps,G,Es,Line,Env) ->
 
 guard(E,Env) ->
     %% fingers crossed that they are valid Guards.
+    %% these are the allowable tests in erlang's if
     ErlAst=transform(E,Env),
-    Valid=erl_lint:is_guard_test(ErlAst),
-    io:format("Guard: ~p\nValid: ~p",[E,Valid]),
-    if Valid -> ErlAst;
+    Test=erl_lint:is_guard_test(ErlAst),
+    %Literal=erl_syntax:is_literal(ErlAst),
+    %io:format("Guard: ~p\nTest: ~p\n",[E,Test]),
+    if Test -> ErlAst;
        true -> error("Invalid guard: ~p",[E])
     end.
 

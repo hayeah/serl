@@ -11,6 +11,12 @@ serlenv() ->
 %% serlenv() ->
 %%     env:new(verl). 
 
+p(FnName,In) ->
+    Ast=?MODULE:FnName(In),
+    printer:p(Ast),
+    io:nl(),
+    Ast.
+
 read(In) ->
     {_,_,Ast}=scompile:read(In,serlenv()),
     Ast.
@@ -60,6 +66,22 @@ evaln_(N,Ast,Env,Bindings) ->
     {Ast2,Bs2}=scompile:eval(Ast,Env,Bindings),
     evaln_(N-1,Ast2,Env,Bs2).
     
+test(Mod) ->
+    compile(Mod,[strong_validation,report,dry]),
+    ok.
+
+test(Mod,Defs) ->
+    case Defs of
+	all -> compile(Mod,[strong_validation,report,dry,ast]);
+	_ -> compile(Mod,[strong_validation,report,dry,{def,Defs}])
+    end.
+
+test(Mod,Defs,Options) ->
+    case Defs of
+	all -> compile(Mod,[strong_validation,report,dry,ast]++Options);
+	_ -> compile(Mod,[strong_validation,report,dry,{def,Defs}]++Options)
+    end.
+
 
 compile(Mod) ->
     compile(Mod,[ast,report]).
@@ -77,13 +99,15 @@ compile(Mod,Options) ->
 %% backward  # rollback by n cycles
 
 t() ->
-    compile(serl,[strong_validation,ast,report,dry]).
+    test(serl).
 
+t(Defs) ->
+    test(serl,Defs).
 
 version() ->
-    length(filelib:wildcard("bootstrap/*__meta.beam")).
+    length(filelib:wildcard("bootstrap/*.beam"))-1.
 
-refresh() ->
+r() ->
     recompile(0).
 
 next() ->

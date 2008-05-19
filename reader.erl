@@ -8,7 +8,6 @@
 	]).
 
 -include("ast.hrl").
--include_lib("eunit/include/eunit.hrl").
 
 
 %% symbol chars: [a-zA-Z0-9_+_*/\]

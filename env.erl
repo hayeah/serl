@@ -130,10 +130,11 @@ exports_of(Mod,NSType,Keys) ->
 		 _ ->
 		    Exports=ordsets:from_list([F || {F,_Arity} <- Mod:module_info(exports)]),
 		    case Keys of
-			all -> {ok,{functions,[{B,{Mod,B}} || B <- Exports]}};
+			all -> {ok,{functions,[{B,{{Mod,B}}} || B <- Exports]}};
 			_ -> Names=ordsets:from_list(Keys),
 			     Bs=ordsets:intersection(Names,Exports),
-			     if length(Bs)==length(Keys) -> {ok,{functions,[{B,{Mod,B}} || B <- Bs]}};
+			     if length(Bs)==length(Keys) ->
+				     {ok,{functions,[{B,{{Mod,B}}} || B <- Bs]}};
 				true -> error("Undefined functions ~p in module ~p",
 					      [ordsets:subtract(Names,Exports),Mod])
 			     end 

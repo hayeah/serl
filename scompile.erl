@@ -19,7 +19,7 @@
 	 
 	 lexical_shadow/3,lexical_extend/3,
 	 get_def/3,new_def/4,
-	 lookup/3,toplevel_lookup/3,
+	 lookup/3,lookup_expander/2,toplevel_lookup/3,
 	 warn/1,warn/2,error/1,error/2
 	 ]).
 -import(lists,[map/2,keysearch/3]).
@@ -350,17 +350,20 @@ lookup_expander(Env,Car) ->
 	?ast_brace([?ast_atom(M),?ast_atom(A)]) ->
 	    {M,A};
 	A when is_atom(A) ->
-	    {curmod(),A}
+		{curmod(),A}; 
+	T when is_tuple(T) -> T
     end,
     case lookup(Env,macros,Key) of
 	{ok,Def} ->
-	    if is_function(Def) -> {macro,Def};
-	       is_tuple(Def) -> {macro,{element(1,Def),element(2,Def)}}
+	    case element(1,Def) of
+		F when is_function(F) -> {macro,F};
+	        MA when is_tuple(MA) -> {macro,MA}
 	    end;
 	_ -> case lookup(Env,specials,Key) of
 		 {ok,Def} ->
-		     if is_function(Def) -> {special,Def};
-			is_tuple(Def) -> {special,{element(1,Def),element(2,Def)}}
+		     case element(1,Def) of
+			 F when is_function(F) -> {special,F};
+			 MA when is_tuple(MA) -> {special,MA}
 		     end; 
 		 _ -> false
 	     end

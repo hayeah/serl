@@ -8,10 +8,16 @@
 	transform
 	transform_each
 	map_env0
+	genvar
+	gensym
 	)
 
 (import lists
-	reverse)
+	map
+	foldl
+	foldr
+	reverse
+	member)
 
 ## verl's meta-module doesn't support import.
 ### this is a special case
@@ -24,16 +30,20 @@
 # (def put-meta-env:
 #   ((Env MEnv): env\assoc_put(Env [compile_env] MEnv)))
 
-(import lists
-	map)
-
 (export sp-block
 	sp-brace
 	sp-fn
 	sp-let
 	sp-case
 	sp-if
+	sp-defm
 	)
+
+(export mac->>
+	mac-with-genvar
+	mac-let*)
+
+(export upto-block)
 
 # (export
 #   sp-+
@@ -46,22 +56,8 @@
 #  )
 
 
-
-(export mac->>
-	mac-with-genvar
-	mac-let*)
-
-
 ## (export "sp-.*")
 ## (export "mac-.*")
-
-# (defsp defm (Name Args `[]) Env:
-#        )
-
-# (def sp-defm (`(,_ ,Name ((all ;Form)): ;Body) Env)
-  
-#   )
-
 
 (def mac-let* (`(,_ ;Form)):
   (let {Bindings [(block Body)]} (upto-block Form):
@@ -74,7 +70,7 @@
 	{Bindings [(block Body)]} (upto-block Es)
 	{Patterns Assignments} (let-bindings Bindings [] [])
 	Env2 (verl\binds Patterns (scompile\lexical_shadow Env vars []))
-	Assignments (lists\map
+	Assignments (map
 		     (fn ({P V}):
 			 {match (element 2 P)
 				(verl\gen_pat P Env2) # pattern generated with new bindings
@@ -86,7 +82,7 @@
 
 (def let-bindings (Bindings Patterns Assignments):
      (case Bindings
-       ([]: {(lists\reverse Patterns) (lists\reverse Assignments)})
+       ([]: {(reverse Patterns) (reverse Assignments)})
        ([Pattern Value|Bindings]:
 	(let-bindings Bindings [Pattern|Patterns] [{Pattern Value}|Assignments]))))
 
@@ -101,18 +97,101 @@
 	  ,BodyBlock
 	  )))
 
+(def new-def (Env NSType Name Def):
+  (let Defined (env\assoc Env [definitions NSType Name]):
+       (if Defined (error "%s already defined in %s" [Name NSType])
+	   (env\assoc_put Env [definitions NSType Name] Def)
+	   )))
 
-# (def sp-defm (`(,_Car ,Name ,FnList :;Body) Env):
-#   (let ({RequiredArgs Blocks}
-# 	(lists\splitwith
-# 	 (fn (Arg)
-# 	     (case Arg
-# 	       ((block _) false)
-# 	       (_ true)))
-# 	  Es)): 
-#     `(_ ;RequiredArgs ;PosArg ;EnvArg)
-#     ))
+# (def new-def (Env NSType Name Def):
+#   (env\assoc_put Env [definitions NSType Name] Def))
 
+(def sp-defm (`(,_Car ,Name (;Args) :;Body) Env):
+  (let* Name (let (atom Name) Name: Name)
+	MEnv (let {ok MEnv} (verl\get_meta_env Env): MEnv)
+	Line (lineno)
+	#the variable for the whole macro expression
+	VAllName (gensym)
+	VAll (var VAllName)
+	#the actual name to define the macro function
+	MacName (erlang\list_to_atom
+		 (cat "$mac$" (erlang\atom_to_list Name))) 
+	MacBody (macro-arg-1 Args Body VAll)
+	## the macro function interprets the erl-ast of the macro definition
+	## the macro function closes over the current  meta-environment.
+	## the macro is not visible to its own definition.
+	## ## but the macro /can/ be used recursively.
+	## functions defined after the macro are not visible.
+	## ## I think this is sensible... 
+	EvalAst (transform 
+		 `(let ,VAll (eval-binding ,VAll)
+		      :,MacBody)
+		 MEnv)
+	EvalFn
+	(begin
+	 ##(io\format "EvalAst: \n~s\n" [(erl_pp\expr EvalAst)])
+	 (fn (Ast)
+		   (let {Result _} (scompile\eval_erl EvalAst [{VAllName Ast}] MEnv):
+			Result)))
+	DefAst {function Line MacName 1
+			 (verl\clause [VAll] [] [`(begin ,MacBody)] Line MEnv)}
+	:
+	## the macro definition needs to be in meta and normal env
+	(let* MacDef {EvalFn
+		      [{ast DefAst}
+		       {name MacName}
+		       {args Args} 
+		       {doc "A macro"}]}
+	      MEnv (new-def MEnv macros Name  MacDef)
+	      Env (new-def Env macros Name MacDef)
+	      Env (verl\put_meta_env Env MEnv):
+	      {10 Env}
+	      )))
+
+(def macro-aux-args (Blocks VAll):
+  # auxiliary arguments that don't consume arguments.
+  (foldl (fn ((block [Type|Spec]) Bindings)
+	     (case Type
+	       ('all [(>> Spec [AllArg] AllArg) VAll | Bindings])))
+	 []
+	 Blocks))
+
+(def macro-arg-1 (Args Body VAll):
+  # parse the required args
+  (let* {RequiredArgs Blocks} (upto-block Args)
+	{Blocks AuxBlocks} (lists\partition
+			    (fn ((block [Type|_]))
+				 # raise error if type not recognized
+				 (case Type
+				   ('pos true)
+				   ('all false)))
+			     Blocks)
+	AuxBindings (macro-aux-args AuxBlocks VAll)
+	VK (genvar)
+	:
+	(case Blocks
+	  ([] `(let (paren [_Car ;RequiredArgs]) ,VAll
+		    ;AuxBindings
+		    : ;Body))
+	  (_ `(let (paren [_Car ;RequiredArgs|,VK]) ,VAll
+		   ;AuxBindings
+		   :,(macro-arg-2 Blocks Body VK))
+	     ))))
+
+(def macro-arg-2 ([Block|Blocks] Body VK):
+  # parse the pos arg-block if there's one
+  (case Block
+    ((block ['pos PosArg])
+     (with-genvar VK2:
+       `(let {,PosArg ,VK2} (serl\upto-block ,VK)
+	   :,(macro-arg-3 Blocks Body VK2))
+       ))
+    (_ (macro-arg-3 [Block|Blocks] Body VK))))
+
+(def macro-arg-3 ([] Body VK):
+  # parse the block args
+  # key & etc
+  `(begin ,VK ;Body))
 
 
 (def sp-block (`(,_Car ;[Es]) Env):
@@ -124,7 +203,7 @@
 # If E is if Ic_1 ; ... ; Ic_k end, where each Ic_i is an if clause then Rep(E) = {'if',LINE,[Rep(Ic_1), ..., Rep(Ic_k)]}.
 (def sp-if (`(if ;Body) Env):
   (let Line (lineno):
-       {Env {if Line (if-clauses Body [] Line Env)}}))
+       {if Line (if-clauses Body [] Line Env)}))
 
 (def if-clauses (Tests Acc Line Env):
   (case Tests
