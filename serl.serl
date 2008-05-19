@@ -5,6 +5,7 @@
 (import scompile
 	error
 	lineno
+	curmod
 	transform
 	transform_each
 	map_env0
@@ -39,6 +40,9 @@
 	sp-if
 	sp-defm
 	sp-defspecial
+
+	sp-import-from
+
 	)
 
 (export mac->>
@@ -64,6 +68,43 @@
 ## should import to both the meta and normal environments
 # (def sp-import (`(,_ ;Form) Env):
 #   )
+
+# (import-from mod (macros ...) (functions ...))
+
+(def sp-import-from (`(,_ ,Mod ;Specs) Env):
+  (let (atom Mod) Mod:
+       {2 (env-import Env Mod Specs)}
+       ))
+
+(def env-import (Env Mod Specs):
+  (case Specs
+    ([] Env)
+    ([`(,Type ;Names)|Specs]
+     (let Names (lsc (atom A) Names: A)
+	  (atom Type) Type:
+	  (lists\foreach
+	   (fn (Name)
+	       (case (scompile\lookup Env Type {(curmod) Name})
+		 ({ok _} (error "Import conflict: ~p:~p" [Mod Name]))
+		 (_ ok)))
+	   Names)
+	  #TODO allow importing unknown functions 
+#     Env2=try env:import(Env,Mod,functions,Imports)
+# 	 catch no_imports ->
+# 		 env:assoc_put(
+# 		   Env,
+# 		   [imports,Mod,functions],
+# 		   [{F,{Mod,F}} || F <- Imports]) 
+# 	 end,
+	  (env-import (env\import Env Mod Type Names) Mod Specs)
+	  ))))
+
+# (defm importm (Mod :pos Names)
+#   `(import-from ,Mod (macros ;Names)))
+
+# (defm import (Mod :pos Names)
+#   `(import-from ,Mod (functions ;Names)))
+
 
 (def mac-let* (`(,_ ;Form)):
   (let {Bindings [(block Body)]} (upto-block Form):
@@ -125,9 +166,9 @@
     ([Pattern Generator|Qs]
      (let Env2 (verl\bindmac Pattern Env):
 	  (lsc-bindings Env2 Qs [{generate (ast-line Pattern)
-					   (transform Pattern Env2)
-					   (transform Generator Env) 
-					   }|Acc])
+					   (verl\gen_pat Pattern Env2)
+					   (transform Generator Env)}
+				 |Acc])
 	  ))))
 
 
