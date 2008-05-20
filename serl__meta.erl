@@ -7,6 +7,7 @@
      [{'__block',{{?MOD,'sp-block'}}},
       {'__brace',{{?MOD,'sp-brace'}}},
       {'import-from',{{?MOD,'sp-import-from'}}},
+      {'def',{{?MOD,'sp-def'}}},
       {'defm',{{?MOD,'sp-defm'}}},
       {'defspecial',{{?MOD,'sp-defspecial'}}},
       %{'let2',{{?MOD,'sp-let'}}},

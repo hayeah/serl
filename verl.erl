@@ -58,7 +58,7 @@
 ?defsp('__sp_bof',[]) ->
     put(?output,[]),
     %% the meta environment starts out the same as environment.
-    {0,put_meta_env(Env,Env)}.
+    {0,Env}.
 
 get_meta_env(Env) ->
     env:assoc(Env,[meta_env]).
@@ -200,7 +200,7 @@ emit_def(Env,CO) ->
 	undefined ->
 	    {};
 	Fs when is_list(Fs) ->
-	    [begin Ast=def_info(Env,F,ast),
+	    [begin Ast=def_info(Env,functions,F,ast),
 		   io:format("Function: ~p ::\n~s\n",[F,erl_pp:form(Ast)])
 	     end
 	     || F <- Fs, is_atom(F)],
@@ -228,90 +228,6 @@ emit_meta(Env,CO) ->
 	undefined -> {}
     end.
 
-
-
-
-%% (defm foo "a macro":
-%%  (A: 'foo)
-%%  ([A B]: 'bar)
-%%  )
-
-%% %% macros are interpreted when used within the compiling module.
-%% %%%% yuk, extremely hairy.
-%% ?defsp('__sp_defm',Es) ->
-%%     Line=lineno(),
-%%     [?ast_block(Header),?ast_block(TmpClauses)]=to_blocks(Es),
-%%     %% massage the defm clauses
-%%     %% ((A B): ...)   ## => ([A B]: ...)
-%%     %% (A: ...)   ## => (A: ...)
-%%     Clauses=
-%% 	[case C of
-%% 	     ?ast_paren([?ast_paren(Args)|Body]) ->
-%% 		 ?cast_paren([?cast_block(Args)|Body]);
-%% 	     _ -> C
-%% 	 end
-%% 	 || C <- TmpClauses],
-%%     {Name,Doc}=
-%% 	case Header of
-%% 	    [?ast_atom(A)] -> {A,""};
-%% 	    [?ast_atom(A),?ast_string(S)] -> {A,S}
-%% 	end,
-%%     case env:assoc(Env,[definitions,macros,Name]) of
-%% 	{ok,_} -> error("Macro already defined: ~p/~p\n", [Name]); 
-%% 	_ -> ok
-%%     end,
-%%     %% macro is compiled using the meta-environment
-%%     [GSym]=scompile:gensym(1), 
-%%     {ok,MEnv}=get_meta_env(Env),
-%%     %% (paren [_|$V]) == (paren (ls: _ :$V))
-%%     PatternAst=
-%% 	?cast_paren([?cast_atom(paren),
-%% 		     ?cast_paren([?cast_atom(ls),
-%% 				  ?cast_block([?cast_var('_')]),
-%% 				  ?cast_block([?cast_var(GSym)])])]), 
-%%     %% the form to be evaled when macro is used.
-%%     %% `(begin (= (paren [_|$V]) (eval-binding $V)) (case $V ...))
-%%     CaseAst=
-%% 	?cast_paren(
-%% 	   [?cast_atom('begin'),
-%% 	    ?cast_paren([?cast_atom('='),PatternAst,?cast_paren([?cast_atom('eval-binding'), ?cast_var(GSym)])]),
-%% 	    ?cast_paren(
-%% 	       [?cast_atom('case'),?cast_var(GSym)
-%% 		|Clauses])
-%% 	   ]), 
-%%     {_,CaseErlAst}=transform(CaseAst, MEnv),
-    
-%%     %% the ast to be compiled for the meta-module
-%%     %% %% (def $mac$<macro-name>: (((paren [_|$V])): (case $V (A: 'foo) ([A B]: 'bar))) )
-%%     MacName=list_to_atom("$mac$"++atom_to_list(Name)),
-%%     {_,FnClauseErlAst}=
-%% 	function_clause(
-%% 	  ?cast_paren([?cast_paren([PatternAst]),
-%% 		       ?cast_block(
-%% 			  [?cast_paren(
-%% 			      [?cast_atom('case'),?cast_var(GSym)
-%% 			       |Clauses])])]),
-%% 	  MEnv),
-%%     FnErlAst={function,Line, MacName, 1, FnClauseErlAst}, 
-%%     %% the macro function interprets the erl-ast of the macro definition
-%%     %% the macro function closes over the current  meta-environment.
-%%     %% the macro is not visible to its own definition.
-%%     %% %% but the macro /can/ be used recursively.
-%%     %% functions defined after the macro are not visible.
-%%     %% %% I think this is sensible... 
-%%     FnVal=fun (MacData) ->
-%% 		  {_,Val,_}=erl_eval:expr(CaseErlAst,[{GSym,MacData}],MEnv),
-%% 		  Val
-%% 	  end, 
-%%     %% augument environment with the new macro 
-%%     Env2=scompile:new_def(Env,macros,Name,FnVal),
-%%     Env3=scompile:new_def(Env2,macros_info,Name,[{ast,FnErlAst},{doc,Doc}]),
-%%     %% do the same for MEnv, so macro is usable for macro definitions that come later.
-%%     MEnv2=scompile:new_def(MEnv,macros,Name,FnVal),
-%%     Env4=put_meta_env(Env3,MEnv2),
-%%     {Env4,?def_sec}.
-
-
 %% (def name (A1 A2 ...): E1 E2 ...)
 
 ?defsp('__sp_def',[?ast_atom(Name),?ast_paren(Args),?ast_block(Es)]) ->
@@ -329,7 +245,7 @@ emit_meta(Env,CO) ->
 %%     end,
     Ast={function,Line, Name, Arity, [FunClause]},
     NewEnv=env:assoc_put(Env,[definitions,functions,Name],
-			 {Name,{curmod(),Name},
+			 {{curmod(),Name},
 			  [{ast,Ast},
 			   {doc,Doc},
 			   {arities,[Arity]}]
@@ -337,10 +253,10 @@ emit_meta(Env,CO) ->
     output(Ast),
     {?def_sec,NewEnv}.
 
-def_info(Env,Name,Prop) ->
-    case env:assoc(Env,[definitions,functions,Name]) of
+def_info(Env,NSType,Name,Prop) ->
+    case env:assoc(Env,[definitions,NSType,Name]) of
 	{ok,Def} ->
-	    case env:assoc(element(3,Def),Prop) of
+	    case env:assoc(element(2,Def),Prop) of
 		{ok,Val} -> Val;
 		_ -> error("Unknown property ~p of function ~p",[Prop,Name])
 	    end;
@@ -415,6 +331,7 @@ def_info(Env,Name,Prop) ->
     {?module_sec,Env}.
     
 %% %%  If F is an attribute -export([Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,export,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}.
+
 %% (export a b)
 ?defsp('__sp_export',Atoms) ->
     Line=lineno(),
@@ -431,7 +348,7 @@ def_info(Env,Name,Prop) ->
 export_attribute(Names,Line,Env) ->
     Exports=
 	[begin
-	     {Name,def_info(Env,Name,arities)}
+	     {Name,def_info(Env,functions,Name,arities)}
 	 end 
 	 || Name <- Names],
     {attribute,Line,export,
@@ -551,7 +468,7 @@ bind(?ast_bquote(E),Env) ->
 bind(?ast_var('_'),Env) -> Env;
 bind(?ast_float(_),Env) -> Env;
 bind(?ast_integer(_),Env) -> Env;
-%%bind(?ast_string(_),Env) -> Env;
+bind(?ast_string(_),Env) -> Env;
 bind(?ast_atom(_),Env) -> Env;
 bind(?ast_var3(_L,M,V),Env) ->
     scompile:lexical_extend(Env,vars,[{M,V}]); 
@@ -583,7 +500,7 @@ gen_pat(?ast_bquote(E),Env) ->
 gen_pat(?ast_var(_)=E,Env) -> transform(E,Env);
 gen_pat(?ast_float(_)=E,Env) -> transform(E,Env);
 gen_pat(?ast_integer(_)=E,Env) -> transform(E,Env);
-%%gen_pat(?ast_string(_),Env) -> Env;
+gen_pat(?ast_string(_)=E,Env) -> transform(E,Env);
 gen_pat(?ast_atom(_)=E,Env) -> transform(E,Env); 
 gen_pat(?ast_block(Es),Env) ->
     gen_pat(?cast_paren([?cast_atom(ls),?cast_block(Es)]),Env);

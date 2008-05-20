@@ -158,8 +158,12 @@ local_funcall_handler(Name,Args,Env) ->
 	{ok,Def} when is_tuple(Def) -> 
 	    %%io:format("Applying ~s:~s/~p",[Mod,F,length(Args)]),
 	    case element(1,Def) of
+		%% import function
 		{M,A} -> apply(M,A,Args);
-		F when is_function(F) -> apply(F,Args)
+		%% defined function made available at compile time
+		%% %% Note that function call protocol is different
+		F when is_function(F) ->
+		    F(Args)
 	    end;
 	%% TODO should throw undef exception.
 	_ -> error("undefined function: ~p\n",[Name])

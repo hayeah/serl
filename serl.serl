@@ -22,14 +22,8 @@
 
 ## verl's meta-module doesn't support import.
 ### this is a special case
-## (import verl clause)
-
+# (import verl clause) 
 #(importm verl ...)
-
-# (def get-meta-env:
-#   ((Env): env\assoc(Env [compile_env])))
-# (def put-meta-env:
-#   ((Env MEnv): env\assoc_put(Env [compile_env] MEnv)))
 
 (export sp-block
 	sp-brace
@@ -38,6 +32,7 @@
 	sp-lsc
 	sp-case
 	sp-if
+	sp-def
 	sp-defm
 	sp-defspecial
 
@@ -65,11 +60,12 @@
 ## (export "sp-.*")
 ## (export "mac-.*")
 
-## should import to both the meta and normal environments
-# (def sp-import (`(,_ ;Form) Env):
-#   )
+##################################################
+# 1. Environment
 
-# (import-from mod (macros ...) (functions ...)) 
+# (import-from mod (macros ...) (functions ...))
+
+#\import-from
 (def sp-import-from (`(,_ ,Mod ;Specs) Env):
   (let (atom Mod) Mod:
        {2 (env-import Env Mod Specs)}
@@ -105,81 +101,65 @@
 #   `(import-from ,Mod (functions ;Names)))
 
 
-(def mac-let* (`(,_ ;Form)):
-  (let {Bindings [(block Body)]} (upto-block Form):
-       (case Bindings
-	 ([] `(begin ;Body))
-	 ([Pattern Value|Bindings] `(let ,Pattern ,Value: (let* ;Bindings: ;Body))))))
-
-(def sp-let (`(let ;Es) Env):
-  (let* Line (lineno)
-	{Bindings [(block Body)]} (upto-block Es)
-	{Patterns Assignments} (let-bindings Bindings [] [])
-	Env2 (verl\binds Patterns (scompile\lexical_shadow Env vars []))
-	Assignments (map
-		     (fn ({P V}):
-			 {match (element 2 P)
-				(verl\gen_pat P Env2) # pattern generated with new bindings
-				(transform V Env)} # value evaluated with old environment
-			 )
-		     
-		     Assignments):
-	{block Line (cat Assignments (transform_each Body Env2))}))
-
-(def let-bindings (Bindings Patterns Assignments):
-     (case Bindings
-       ([]: {(reverse Patterns) (reverse Assignments)})
-       ([Pattern Value|Bindings]:
-	(let-bindings Bindings [Pattern|Patterns] [{Pattern Value}|Assignments]))))
-
-(def mac-with-genvar (`(,_ ;Form)):
-  (let {Vars [BodyBlock]} (upto-block Form):
-       `(let ;(lists\foldl
-	       (fn (Var Acc) [Var '(scompile\genvar)|Acc])
-	       []
-	       Vars)
-	  ,BodyBlock
-	  )))
-
-# If E is a list comprehension [E_0 || W_1, ..., W_k], where each W_i is a generator or a filter, then Rep(E) = {lc,LINE,Rep(E_0),[Rep(W_1), ..., Rep(W_k)]}. For Rep(W), see below.
-
-# When W is a generator or a filter (in the body of a list or binary comprehension), then: 
-# If W is a generator P <- E, where P is a pattern and E is an expression, then Rep(W) = {generate,LINE,Rep(P),Rep(E)}. 
-# If W is a generator P <= E, where P is a pattern and E is an expression, then Rep(W) = {b_generate,LINE,Rep(P),Rep(E)}. 
-# If W is a filter E, which is an expression, then Rep(W) = Rep(E).
-
-(def sp-lsc (`(,_ ;Form) Env):
-  (let* Line (lineno)
-	{Qualifiers [(block Body)]} (upto-block Form)
-	{Env RWs} (lsc-bindings Env Qualifiers [])
-	:
-	{lc Line
-	    (transform `(begin ;Body) Env)
-	    RWs}
-	))
-
-(def lsc-bindings (Env Qs Acc):
-  (case Qs
-    ([] {Env (reverse Acc)})
-    (['if Filter|Qs] (lsc-bindings Env Qs [(transform Filter Env)|Acc]))
-    ([Pattern Generator|Qs]
-     (let Env2 (verl\bindmac Pattern Env):
-	  (lsc-bindings Env2 Qs [{generate (ast-line Pattern)
-					   (verl\gen_pat Pattern Env2)
-					   (transform Generator Env)}
-				 |Acc])
-	  ))))
-
-
 (def new-def (Env NSType Name Def):
   (let Defined (env\assoc Env [definitions NSType Name]):
        (if Defined (error "%s already defined in %s" [Name NSType])
 	   (env\assoc_put Env [definitions NSType Name] Def)
 	   )))
 
+# (def def-info (Env NSType Name Key):
+#   (case (env\assoc Env [definitions NSType Name])
+#     ({ok Def} (proplists\lookup Key (erlang\element 2 Def) ~case
+# 				({_ Val} Val)
+# 				(none (error "Unknown property ~p of function ~p"
+# 					     [Key Name]))))
+#     (_ (error "Undefined function: ~p" [Name]))))
+
+
+##################################################
+# 2. Definitions
+
+#\def
+(def sp-def (`(,_Car ,(atom Name) (;Args) ;Es) Env):
+  (let* Line (lineno)
+	Arity (erlang\length Args)
+	[(block Body)|Options] (reverse Es)
+	Options (lsc (block [(atom Type)|Spec]) Options: {Type Spec})
+	Doc (proplists\lookup doc Options ~case
+			      (none "No doc")
+			      ({doc [(string Doc)]} Doc))
+	EvalFlag (proplists\lookup eval Options ~case
+				   (none false)
+				   ({eval []} true))
+	DefAst {function Line Name Arity
+			 [(verl\clause Args [] Body Line Env)]}
+	EvalVarName (gensym)
+	EvalVar (var EvalVarName)
+	## Note that the it expects compiler to pass in the args in a list.
+	EvalAst (if EvalFlag (transform
+			      `(case (eval-binding ,EvalVar)
+				 ([;Args] ;Body))
+			      Env)
+		    false)
+	## TODO support multiple arities
+	EvalFn (if EvalFlag (fn (Args)
+				(scompile\eval_erl EvalAst [{EvalVarName Args}] Env ~>>
+						   {Result _} Result))
+		   {(curmod) Name})
+	:
+	(verl\output DefAst)
+	{10 (new-def Env functions Name
+		     {EvalFn
+		      [{ast DefAst}
+		       {doc Doc}
+		       {eval EvalFlag}
+		       {arities [Arity]}]})}
+	))
+
+
+#\defm
 (def sp-defm (`(,_Car ,Name (;Args) :;Body) Env):
   (let* Name (let (atom Name) Name: Name)
-	MEnv (let {ok MEnv} (verl\get_meta_env Env): MEnv)
 	Line (lineno)
 	#the variable for the whole macro expression
 	VAllName (gensym)
@@ -197,32 +177,29 @@
 	EvalAst (transform 
 		 `(let ,VAll (eval-binding ,VAll)
 		      :,MacBody)
-		 MEnv)
+		 Env)
 	EvalFn
 	(begin
 	 ##(io\format "EvalAst: \n~s\n" [(erl_pp\expr EvalAst)])
 	 (fn (Ast)
-		   (let {Result _} (scompile\eval_erl EvalAst [{VAllName Ast}] MEnv):
-			Result)))
+	     (scompile\eval_erl EvalAst [{VAllName Ast}] Env ~>>
+				{Result _} Result)
+	     ))
 	DefAst {function Line MacName 1
-			 (verl\clause [VAll] [] [`(begin ,MacBody)] Line MEnv)}
+			 (verl\clause [VAll] [] [`(begin ,MacBody)] Line Env)}
 	:
 	## the macro definition needs to be in meta and normal env
-	(let* MacDef {EvalFn
+	{10 (new-def Env macros Name
+		     {EvalFn
 		      [{ast DefAst}
 		       {name MacName}
 		       {args Args} 
-		       {doc "A macro"}]}
-	      MEnv (new-def MEnv macros Name  MacDef)
-	      Env (new-def Env macros Name MacDef)
-	      Env (verl\put_meta_env Env MEnv):
-	      {10 Env}
-	      )))
+		       {doc "A macro"}]})}))
 
 
+#\defspecial
 (def sp-defspecial (`(,_Car ,Name (;Args) ,VEnv: ;Body) Env):
   (let* Name (let (atom Name) Name: Name)
-	MEnv (let {ok MEnv} (verl\get_meta_env Env): MEnv)
 	Line (lineno)
 	#the variable for the whole macro expression
 	VAllName (gensym)
@@ -238,29 +215,26 @@
 		 `(let ,VAll (eval-binding ,VAll)
 		       ,VEnv (eval-binding ,VEnv)
 		      :,MacBody)
-		 MEnv)
+		 Env)
 	EvalFn
 	(begin
 	 ##(io\format "EvalAst: \n~s\n" [(erl_pp\expr EvalAst)])
 	 (fn (Ast Env)
 		   (let {Result _} (scompile\eval_erl EvalAst [{VAllName Ast}
 							       {VEnvName Env}]
-						      MEnv):
+						      Env):
 			Result)))
 	DefAst {function Line MacName 1
-			 (verl\clause [VAll VEnv] [] [`(begin ,MacBody)] Line MEnv)}
+			 (verl\clause [VAll VEnv] [] [`(begin ,MacBody)] Line Env)}
 	:
 	## the macro definition needs to be in meta and normal env
-	(let* MacDef {EvalFn
+	{10 (new-def Env specials Name
+		     {EvalFn
 		      [{ast DefAst}
 		       {name MacName}
 		       {args Args} 
-		       {doc "A special form"}]}
-	      MEnv (new-def MEnv specials Name  MacDef)
-	      Env (new-def Env specials Name MacDef)
-	      Env (verl\put_meta_env Env MEnv):
-	      {10 Env}
-	      )))
+		       {doc "A special form"}]})}
+	))
 
 
 (def macro-aux-args (Blocks VAll):
@@ -309,6 +283,108 @@
   `(begin ,VK ;Body))
 
 
+
+##################################################
+# 3. Binding Forms
+
+#\let
+(def mac-let* (`(,_ ;Form)):
+  (let {Bindings [(block Body)]} (upto-block Form):
+       (case Bindings
+	 ([] `(begin ;Body))
+	 ([Pattern Value|Bindings] `(let ,Pattern ,Value: (let* ;Bindings: ;Body))))))
+
+(def sp-let (`(let ;Es) Env):
+  (let* Line (lineno)
+	{Bindings [(block Body)]} (upto-block Es)
+	{Patterns Assignments} (let-bindings Bindings [] [])
+	Env2 (verl\binds Patterns (scompile\lexical_shadow Env vars []))
+	Assignments (map
+		     (fn ({P V}):
+			 {match (element 2 P)
+				(verl\gen_pat P Env2) # pattern generated with new bindings
+				(transform V Env)} # value evaluated with old environment
+			 )
+		     
+		     Assignments):
+	{block Line (cat Assignments (transform_each Body Env2))}))
+
+(def let-bindings (Bindings Patterns Assignments):
+     (case Bindings
+       ([]: {(reverse Patterns) (reverse Assignments)})
+       ([Pattern Value|Bindings]:
+	(let-bindings Bindings [Pattern|Patterns] [{Pattern Value}|Assignments]))))
+
+(def mac->> (`(>> ,Val ,Pattern ;Es)):
+  `(let ,Pattern ,Val: ;Es))
+
+
+#\with-genvar
+(def mac-with-genvar (`(,_ ;Form)):
+  (let {Vars [BodyBlock]} (upto-block Form):
+       `(let ;(lists\foldl
+	       (fn (Var Acc) [Var '(scompile\genvar)|Acc])
+	       []
+	       Vars)
+	  ,BodyBlock
+	  )))
+
+# ## If E is case E_0 of Cc_1 ; ... ; Cc_k end, where E_0 is an expression and each Cc_i is a case clause then Rep(E) = {'case',LINE,Rep(E_0),[Rep(Cc_1), ..., Rep(Cc_k)]}.
+
+#\case
+(def sp-case (`(case ,E ;Cs) Env):
+  (let Line (lineno):
+       {case Line
+	 (transform E Env)
+	 (map_env0 (fn (`(,P ;Es))
+		       (verl\clause [P] [] Es (ast-line P) Env))
+		   Cs
+		   Env)}
+       )) 
+
+# If E is a list comprehension [E_0 || W_1, ..., W_k], where each W_i is a generator or a filter, then Rep(E) = {lc,LINE,Rep(E_0),[Rep(W_1), ..., Rep(W_k)]}. For Rep(W), see below.
+
+# When W is a generator or a filter (in the body of a list or binary comprehension), then: 
+# If W is a generator P <- E, where P is a pattern and E is an expression, then Rep(W) = {generate,LINE,Rep(P),Rep(E)}. 
+# If W is a generator P <= E, where P is a pattern and E is an expression, then Rep(W) = {b_generate,LINE,Rep(P),Rep(E)}. 
+# If W is a filter E, which is an expression, then Rep(W) = Rep(E).
+
+#\lsc
+(def sp-lsc (`(,_ ;Form) Env):
+  (let* Line (lineno)
+	{Qualifiers [(block Body)]} (upto-block Form)
+	{Env RWs} (lsc-bindings Env Qualifiers [])
+	:
+	{lc Line
+	    (transform `(begin ;Body) Env)
+	    RWs}
+	))
+
+(def lsc-bindings (Env Qs Acc):
+  (case Qs
+    ([] {Env (reverse Acc)})
+    (['if Filter|Qs] (lsc-bindings Env Qs [(transform Filter Env)|Acc]))
+    ([Pattern Generator|Qs]
+     (let Env2 (verl\bindmac Pattern Env):
+	  (lsc-bindings Env2 Qs [{generate (ast-line Pattern)
+					   (verl\gen_pat Pattern Env2)
+					   (transform Generator Env)}
+				 |Acc])
+	  ))))
+
+
+## If E is fun Fc_1 ; ... ; Fc_k end where each Fc_i is a function clause then Rep(E) = {'fun',LINE,{clauses,[Rep(Fc_1), ..., Rep(Fc_k)]}}.
+
+#\fn
+(def sp-fn (`(fn (;Args) ;Es) Env):
+  (let Env (scompile\lexical_shadow Env vars []):
+    {fun (lineno)
+	 {clauses (verl\clause Args [] Es (lineno) Env)}}))
+
+
+##################################################
+# .Misc
+
 (def sp-block (`(,_Car ;[Es]) Env):
   (transform `(ls: ;Es) Env))
 
@@ -316,6 +392,7 @@
   (transform `(tuple: ;Es) Env))
 
 # If E is if Ic_1 ; ... ; Ic_k end, where each Ic_i is an if clause then Rep(E) = {'if',LINE,[Rep(Ic_1), ..., Rep(Ic_k)]}.
+
 (def sp-if (`(if ;Body) Env):
   (let Line (lineno):
        {if Line (if-clauses Body [] Line Env)}))
@@ -332,56 +409,8 @@
 	       |Acc]))
     ([] (reverse Acc))))
 
-# ## If E is case E_0 of Cc_1 ; ... ; Cc_k end, where E_0 is an expression and each Cc_i is a case clause then Rep(E) = {'case',LINE,Rep(E_0),[Rep(Cc_1), ..., Rep(Cc_k)]}.
-
-(def sp-case (`(case ,E ;Cs) Env):
-  (let Line (lineno)
-       RE (transform E Env)
-       RCs (map_env0 (fn (C) (case-clause C Env))
-		     Cs
-		     Env):
-       {Env {case Line RE RCs}}))
-
-# (def case-clause ((paren [P,(block Es)] L _Mod) Env):
-#      ## ugh! Yuk. I need accessors to access the data of asts.
-#      ## TODO I would prefer (paren [P|Es]: L _Mod). 
-#      (clause [P] [] Es L Env))
-
-(def case-clause (`(,P: ;Es) Env):
-  (verl\clause [P] [] Es (ast-line P) Env))
-
-# (def case-clause (`(,P: ;Es) Env):
-#      (let (L (ast-line Es)):
-#        (clause [P] [] Es L Env)))
-
-# (def clause (Ps Gs Es L Env):
-#      (let ({Env RPs} (verl\patterns Ps Env)):
-#        {Env {clause L RPs
-# 		    ## an erlang clause takes a guard sequence
-# 		    ## a guard sequence is a list of guard tests
-# 		    ## (we support only one guard sequence)
-# 		    (verl\guards Gs Env ~>> {_ RGs} RGs)
-# 		    (transform_each Es Env ~>> {_ REs} REs)}}
-#        ))
-
-## 4.6
-
 # (def guards (GuardTests Env):
 #      (transform_each GuardTests Env))
-
-## If E is fun Fc_1 ; ... ; Fc_k end where each Fc_i is a function clause then Rep(E) = {'fun',LINE,{clauses,[Rep(Fc_1), ..., Rep(Fc_k)]}}.
-
-(def sp-fn (`(fn (;Args) ;Es) Env):
-  (let Env (scompile\lexical_shadow Env vars []):
-    {fun (lineno)
-	 {clauses (verl\clause Args [] Es (lineno) Env)}}))
-
-(def mac->> (`(>> ,Val ,Pattern ;Es)):
-  `(let ,Pattern ,Val: ;Es))
-
-# (def sp-fn (`(fn (;Args): ;Es) Env):
-#      {Env {fun (lineno)
-# 	       {clauses (verl\clause Args [] Es (lineno) Env ~at 2)}}})
 
 # If E is E_1 Op E_2, where Op is a binary operator, then Rep(E) = {op,LINE,Op,Rep(E_1),Rep(E_2)}.
 
@@ -401,6 +430,31 @@
 #   (op-ast + E1 E2 Env))
 
 
+##################################################
+# .Helper
+
+
+# (def clause (Ps G Es Line Env):
+#   (let {Env RPs} (verl\patterns Ps Env)
+# 	  :
+#        {clause Line (transform_each Es Env2)
+# 	       ## an erlang clause takes a guard sequence
+# 	       ## a guard sequence is a list of guard tests
+# 	       ## (we support only one guard sequence)
+# 	       (verl\guards Gs Env ~>> {_ RGs} RGs)
+# 	       (transform_each Es Env ~>> {_ REs} REs)}
+#        ))
+
+# clause(Ps,G,Es,Line,Env) ->
+#     %% A <guard> is a list of <guard-test>
+#     {Env2,RPs}=patterns(Ps,scompile:lexical_shadow(Env,vars,[])),
+#     REs=transform_each(Es,Env2), 
+#     GuardSequence=
+# 	case G of
+# 	    [] -> [];
+# 	    _ -> [[guard(G,Env2)]]
+# 	end,
+#     {clause,Line, RPs, GuardSequence, REs}.
 
 (def ast-line (Ast): (erlang\element 2 Ast))
 
