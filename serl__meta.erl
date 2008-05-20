@@ -12,7 +12,7 @@
       {'defspecial',{{?MOD,'sp-defspecial'}}},
       %{'let2',{{?MOD,'sp-let'}}},
       {'lsc',{{?MOD,'sp-lsc'}}},
-      %{'case',{{?MOD,'sp-case'}}},
+      {'case',{{?MOD,'sp-case'}}},
       {'if',{{?MOD,'sp-if'}}},
       %{'fn',{{?MOD,'sp-fn'}}},
       

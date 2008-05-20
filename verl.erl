@@ -109,6 +109,7 @@ moutput(Ast) ->
 -record(opt,
 	{bin, %% if true, do not output .beam
 	 dry,
+	 expand_only, %% expansion only
 	 ast, %% the erlang ast
 	 def, %% pick out the definitions of defs
 	 env, %% the final compile environment
@@ -121,6 +122,7 @@ moutput(Ast) ->
 set_opts(Options) ->
     #opt{bin=lookup_opt(Options,bin),
 	 dry=lookup_opt(Options,dry),
+	 expand_only=lookup_opt(Options,expand_only),
 	 ast=lookup_opt(Options,ast),
 	 def=lookup_opt(Options,def),
 	 env=lookup_opt(Options,env),
@@ -143,7 +145,9 @@ lookup_opt(Opts,Key) ->
 
 emit(Forms,Env,CO) ->
     Emits
-	=[emit_bin(Forms,CO),
+	=[if CO#opt.expand_only -> {expand_only};
+	     true -> emit_bin(Forms,CO)
+	  end,
 	  emit_ast(Forms,CO),
 	  emit_def(Env,CO),
 	  emit_env(Env,CO),
@@ -665,10 +669,10 @@ let_bindings([Pattern,Value|Bindings],Patterns,Assignments) ->
     REt=transform(Et,Env),
     {cons,Line,REh,REt}.
 
-
 %% %%  If E is case E_0 of Cc_1 ; ... ; Cc_k end, where E_0 is an expression and each Cc_i is a case clause then Rep(E) = {'case',LINE,Rep(E_0),[Rep(Cc_1), ..., Rep(Cc_k)]}.
 %% <case-expr> := (case <exp> <case-clause>+)
 %% <case-clause> := (<pattern>: <form>+) | (<pattern> when <guard>: <form>+)
+
 ?defsp('__sp_case',[E|Cs]) ->
     Line=lineno(),
     {'case',Line, transform(E,Env),
@@ -721,7 +725,6 @@ make_call([E0|Es],Env) ->
     REs=transform_each(Es,Env),
     {call,L,RE0,REs}.
 
-
 ?defsp('__sp_fn',[?ast_paren(Ps)|Es]) ->
     L=lineno(),
     {'fun',L,
@@ -739,9 +742,6 @@ make_call([E0|Es],Env) ->
 
 %% There are function clauses, if clauses, case clauses and catch clauses. 
 %% A clause C is one of the following alternatives:
-
-function_clause(?ast_paren3(L,_,[?ast_paren(Ps),?ast_block(Es)]),Env) ->
-    clause(Ps,[],Es,L,Env).
 
 case_clause(?ast_paren3(L,_,[P|Es]),Env) ->
     clause([P],[],Es,L,Env). 

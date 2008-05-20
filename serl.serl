@@ -1,5 +1,10 @@
 ## make sure I can change the AST representation whenver I feel like it.
 
+## each custom namespace probably needs to define a set of pseudo special forms
+## export-<NS>
+## import-<NS>
+## output-<NS>
+
 (module serl)
 
 (import scompile
@@ -62,6 +67,8 @@
 
 ##################################################
 # 1. Environment
+#
+# Just support functions & macros/specials for the moment.
 
 # (import-from mod (macros ...) (functions ...))
 
@@ -83,7 +90,7 @@
 		 ({ok _} (error "Import conflict: ~p:~p" [Mod Name]))
 		 (_ ok)))
 	   Names)
-	  #TODO allow importing unknown functions 
+	  #TODO allow importing functions from not yet loaded modules
 #     Env2=try env:import(Env,Mod,functions,Imports)
 # 	 catch no_imports ->
 # 		 env:assoc_put(
@@ -93,6 +100,37 @@
 # 	 end,
 	  (env-import (env\import Env Mod Type Names) Mod Specs)
 	  ))))
+
+# (export-from (functions a b c) (macros c d e)) ## =>
+# (toplevel
+#  (functions-export a b c)
+#  (macros-export c d e))
+
+# (def sp-export-from (`(,_ ;Specs)):
+#   )
+
+# ?defsp('__sp_export',Atoms) ->
+#     Line=lineno(),
+#     Mod=curmod(),
+#     Names=[Name || ?ast_atom3(_,_,Name) <- Atoms],
+#     ?lazyout(Env2,export_attribute(Names,Line,Env2)),
+#     {?header_sec,
+#      env:assoc_append(
+#        Env,
+#        [exports,functions],
+#        [{Name,{Mod,Name}} || Name <- Names])}.
+
+# %% (export a b c)
+# export_attribute(Names,Line,Env) ->
+#     Exports=
+# 	[begin
+# 	     {Name,def_info(Env,functions,Name,arities)}
+# 	 end 
+# 	 || Name <- Names],
+#     {attribute,Line,export,
+#      [{Name,Arity} ||
+# 	 {Name,Arities} <- Exports,
+# 	 Arity <- Arities]}.
 
 # (defm importm (Mod :pos Names)
 #   `(import-from ,Mod (macros ;Names)))
@@ -336,10 +374,8 @@
   (let Line (lineno):
        {case Line
 	 (transform E Env)
-	 (map_env0 (fn (`(,P ;Es))
-		       (verl\clause [P] [] Es (ast-line P) Env))
-		   Cs
-		   Env)}
+	 (lsc `(,P ;Es) Cs:
+	      (verl\clause [P] [] Es (ast-line P) Env))}
        )) 
 
 # If E is a list comprehension [E_0 || W_1, ..., W_k], where each W_i is a generator or a filter, then Rep(E) = {lc,LINE,Rep(E_0),[Rep(W_1), ..., Rep(W_k)]}. For Rep(W), see below.
@@ -373,9 +409,19 @@
 	  ))))
 
 
-## If E is fun Fc_1 ; ... ; Fc_k end where each Fc_i is a function clause then Rep(E) = {'fun',LINE,{clauses,[Rep(Fc_1), ..., Rep(Fc_k)]}}.
 
-#\fn
+
+
+# If E is fun Fc_1 ; ... ; Fc_k end where each Fc_i is a function clause then Rep(E) = {'fun',LINE,{clauses,[Rep(Fc_1), ..., Rep(Fc_k)]}}.
+# (fn (A B) ...)
+# (fn 3 ...) == (fn (V1 V2 V3) ...)
+
+# If E is fun Name / Arity, then Rep(E) = {'fun',LINE,{function,Name,Arity}}. 
+# If E is fun Module:Name/Arity, then Rep(E) = {'fun',LINE,{function,Module,Name,Arity}}.
+# (fn foo 3)
+
+
+#\fn 
 (def sp-fn (`(fn (;Args) ;Es) Env):
   (let Env (scompile\lexical_shadow Env vars []):
     {fun (lineno)
@@ -408,6 +454,9 @@
      (reverse [(verl\clause [] 'true [Exp] (ast-line Exp) Env)
 	       |Acc]))
     ([] (reverse Acc))))
+
+# (def sp-toplevel (`(_ ;Forms) Env)
+#   (map_env0 (fn transform 2) Forms Env Env))
 
 # (def guards (GuardTests Env):
 #      (transform_each GuardTests Env))

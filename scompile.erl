@@ -396,7 +396,13 @@ local_lookup(Env,NSType,{M,A}) ->
 remote_lookup(Env,NSType,{M,A}) ->
     case lexical_lookup(Env,NSType,{M,A}) of
 	%% TODO cache toplevels
-	false -> toplevel_lookup(env:toplevel_of(M),NSType,A);
+	false ->
+	    case get({remote_lookup_topenv,M}) of
+		undefined -> TopEnv=env:toplevel_of(M),
+			     put({remote_lookup_topenv,M},TopEnv); 
+		TopEnv -> TopEnv
+	    end,
+	    toplevel_lookup(TopEnv,NSType,A);
 	Val -> Val
     end.
 
