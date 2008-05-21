@@ -425,11 +425,44 @@
 # (fn foo 3)
 
 
-#\fn 
-(def sp-fn (`(fn (;Args) ;Es) Env):
-  (let Env (scompile\lexical_shadow Env vars []):
-    {fun (lineno)
-	 {clauses (verl\clause Args [] Es (lineno) Env)}}))
+#\fn
+(def sp-fn (`(,_ ,Arg ;Es) Env):
+  (case Arg
+    (`(;Args) (fn-value Args Es Env)) 
+    ((integer N)
+     (fn-value
+      ## A1 ... AN
+      (lsc I (lists\seq 1 N):
+	   ## TODO this is quite an ugly way to do it.
+	   ## should have a help function/macro to construct capturing var
+	   (var (erlang\list_to_atom (cat "V" (erlang\integer_to_list I)))
+		0
+		## this variable intends to capture. Should use the pseudo module "true"
+		## but this doesn't work at the moment b
+		true 
+		))
+      Es Env)) 
+    ((atom A)
+     (let* L (lineno)
+	   M (ast-mod Arg)
+	   [(integer Arity)] Es
+	   FromSource (== M (curmod)):
+	   (if FromSource
+	       (case (scompile\lookup_imports Env functions A)
+		 ## function is associated with import
+		 ({ok {{M A}}} {fun L {function M A Arity}})
+		 ## function name is assumed to be local
+		 (_ {fun L {function A Arity}}))
+	       ## function name is remote
+	       {fun L {function M A Arity}}
+	       )))
+    ))
+
+(def fn-value (Args Es Env):
+  (let L (lineno)
+       Env (scompile\lexical_shadow Env vars []):
+       {fun L
+	    {clauses [(verl\clause Args [] Es L Env)]}}))
 
 
 # %%  If E is E_m:E_0(E_1, ..., E_k), then Rep(E) = {call,LINE,{remote,LINE,Rep(E_m),Rep(E_0)},[Rep(E_1), ..., Rep(E_k)]}. 
@@ -442,19 +475,20 @@
 (def sp-call (`(,_ ,Fn ;Args) Env):
   (case Fn
     (`{,M ,A} (remote-call M A Args Env))
-    ((atom A) (let* M (ast-mod Fn)
-		    # check to see if the atom is from the source or from macro.
-		    FromSource (== M (curmod)): 
-		    (if FromSource
-			(case (scompile\lookup_imports Env functions A)
-			  # atom is associated with import
-			  ({ok {{M A}}} (remote-call (atom M) (atom A) Args Env))
-			  # atom is assumed to be local call
-			  (R (io\format "Result: ~p\n Env: ~p\n" [R Env])
-			     (local-call Fn Args Env)))
-			# atom is not from the source, so interpret as remote
-			(remote-call (atom M) Fn Args Env))
-		   ))
+    ((atom A)
+     (let* M (ast-mod Fn)
+	   ## check to see if the atom is from the source or from macro.
+	   FromSource (== M (curmod)): 
+	   (if FromSource
+	       (case (scompile\lookup_imports Env functions A)
+		 ## atom is associated with import
+		 ({ok {{M A}}} (remote-call (atom M) (atom A) Args Env))
+		 ## atom is assumed to be local call
+		 (R (io\format "Result: ~p\n Env: ~p\n" [R Env])
+		    (local-call Fn Args Env)))
+	       ## atom is not from the source, so interpret as remote
+	       (remote-call (atom M) Fn Args Env))
+	   ))
     (_ (local-call Fn Args Args))))
 
 (def local-call (A Args Env):

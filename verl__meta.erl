@@ -103,7 +103,7 @@
      ]},
     {functions,
      [{'cat',{{lists,append}}},
-      {'format',{{io,format}}}
+      {'fmt',{{io,format}}}
      ]}
    ]).
 

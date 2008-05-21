@@ -2,7 +2,7 @@
 -include("ast.hrl").
 
 -export([lineno/0,
-	 curmod/0,curmod/1,
+	 curmod/0,is_curmod/1,
 	 gensym/0, gensym/1, genvar/0, genvar/1,
 	 reset_gensym/0, %% for debug purposes 
 	 options/0,set_options/1,
@@ -72,12 +72,17 @@ init_state(S) when is_record(S,state) ->
 lineno() -> get(?lineno).
 set_lineno(L) -> put(?lineno,L). 
 
-is_curmod(Mod) when is_atom(Mod) -> Mod==curmod().
+is_curmod(Mod) when is_atom(Mod) ->
+    %% whenever the module of syntax object is the module true,
+    %% it behaves as though it came from source.
+    (Mod==curmod()) or (Mod==true);
+is_curmod(Ast) when is_tuple(Ast)->
+    AstMod=element(3,Ast),
+    is_curmod(AstMod). 
+
 curmod() -> get(?curmod). 
 %% check to see if a syntax object is contained within the current compiling module.
-curmod(Ast) when is_tuple(Ast)->
-    AstMod=element(3,Ast),
-    curmod()==AstMod. 
+
 
 reset_gensym() -> put(?gensym,0).
 gensym_counter() -> get(?gensym).
@@ -377,6 +382,7 @@ lookup_expander(Env,Car) ->
     end.
 
 lookup(Env,NSType,{M,_F}=Key) ->
+    %% note that if M is true, it is local lookup
     T=is_curmod(M),
     if T -> local_lookup(Env,NSType,Key);
        true -> remote_lookup(Env,NSType,Key)
@@ -475,7 +481,8 @@ lookup_scopes(Key,[Scope|Ss]) ->
 
 lookup_scope(_,[]) -> false;
 lookup_scope({Mod,Key}=K,[{{BMod,BKey},Val}|Bs]) ->
-    if ((Mod==true) or (Mod==BMod)) and (Key==BKey) -> {ok,Val};
+    %% captures binding if either of Key or Binding belongs to the pseudo module true.
+    if ((Mod==true) or (BMod==true) or (Mod==BMod)) and (Key==BKey) -> {ok,Val};
        true -> lookup_scope(K,Bs)
     end.
     

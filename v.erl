@@ -4,6 +4,10 @@
 %-import(verl,[serlenv/1]).
 
 
+bootup() ->
+    dbg:tracer(),
+    dbg:p(new,[c]),
+    reload(version()).
 
 serlenv() ->
     env:import(env:new(verl),serl).

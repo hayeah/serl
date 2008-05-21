@@ -8,7 +8,7 @@
 -import(env,[assoc/2,assoc_put/3]).
 -import(scompile,[error/1,
 		  error/2,
-		  curmod/0,
+		  curmod/0,is_curmod/1,
 		  lineno/0,
 		  lookup/3,
 		  transform/2,
@@ -327,8 +327,8 @@ def_info(Env,NSType,Name,Prop) ->
 
 ?defsp('__sp_module',[?ast_atom(Mod)]) ->
     Line=lineno(),
-    CM=curmod(),
-    if CM==Mod -> ok;
+    T=is_curmod(Mod),
+    if T -> ok;
        true -> error("Module name mismatch: ~p",[Mod])
     end,
     output({attribute,Line,module,Mod}),

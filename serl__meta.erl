@@ -14,7 +14,7 @@
       {'lsc',{{?MOD,'sp-lsc'}}},
       {'case',{{?MOD,'sp-case'}}},
       {'if',{{?MOD,'sp-if'}}},
-      %{'fn',{{?MOD,'sp-fn'}}},
+      {'fn',{{?MOD,'sp-fn'}}},
       {'call',{{?MOD,'sp-call'}}},
       
 
