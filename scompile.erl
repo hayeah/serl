@@ -20,6 +20,7 @@
 	 lexical_shadow/3,lexical_extend/3,
 	 get_def/3,new_def/4,
 	 lookup/3,lookup_expander/2,toplevel_lookup/3,
+	 lookup_imports/3,
 	 warn/1,warn/2,error/1,error/2
 	 ]).
 -import(lists,[map/2,keysearch/3]).

@@ -30,9 +30,13 @@
 # (import verl clause) 
 #(importm verl ...)
 
-(export sp-block
-	sp-brace
+(export ast-tag ast-line ast-mod ast-data
+	upto-block
+	)
+
+(export sp-block sp-brace
 	sp-fn
+	sp-call
 	sp-let
 	sp-lsc
 	sp-case
@@ -40,26 +44,26 @@
 	sp-def
 	sp-defm
 	sp-defspecial
-
+	
 	sp-import-from
 
 	)
 
-(export mac->>
+(export mac-let*
+	mac->>
 	mac-with-genvar
-	mac-let*)
+	)
 
-(export upto-block)
-
-# (export
-#   sp-+
-# #  sp--
-# #  sp-*
-# #  sp-/
-#  sp-==
-# #  sp-<
-#  sp->
-#  )
+(export
+  sp-+
+  sp--
+  sp-*
+  sp-/
+  sp-==
+  sp-not
+#  sp-<
+# sp->
+ )
 
 
 ## (export "sp-.*")
@@ -428,6 +432,40 @@
 	 {clauses (verl\clause Args [] Es (lineno) Env)}}))
 
 
+# %%  If E is E_m:E_0(E_1, ..., E_k), then Rep(E) = {call,LINE,{remote,LINE,Rep(E_m),Rep(E_0)},[Rep(E_1), ..., Rep(E_k)]}. 
+# (call Em\E0 ...)
+
+# %%  If E is E_0(E_1, ..., E_k), then Rep(E) = {call,LINE,Rep(E_0),[Rep(E_1), ..., Rep(E_k)]}.
+# (call E0 ...)
+
+#\call 
+(def sp-call (`(,_ ,Fn ;Args) Env):
+  (case Fn
+    (`{,M ,A} (remote-call M A Args Env))
+    ((atom A) (let* M (ast-mod Fn)
+		    # check to see if the atom is from the source or from macro.
+		    FromSource (== M (curmod)): 
+		    (if FromSource
+			(case (scompile\lookup_imports Env functions A)
+			  # atom is associated with import
+			  ({ok {{M A}}} (remote-call (atom M) (atom A) Args Env))
+			  # atom is assumed to be local call
+			  (R (io\format "Result: ~p\n Env: ~p\n" [R Env])
+			     (local-call Fn Args Env)))
+			# atom is not from the source, so interpret as remote
+			(remote-call (atom M) Fn Args Env))
+		   ))
+    (_ (local-call Fn Args Args))))
+
+(def local-call (A Args Env):
+  {call (ast-line A) (transform A Env) (transform_each Args Env)})
+
+(def remote-call (M A Args Env):
+  (let L (ast-line M):
+       {call L
+	     {remote L (transform M Env) (transform A Env)}
+	     (transform_each Args Env)}))
+
 ##################################################
 # .Misc
 
@@ -438,6 +476,9 @@
   (transform `(tuple: ;Es) Env))
 
 # If E is if Ic_1 ; ... ; Ic_k end, where each Ic_i is an if clause then Rep(E) = {'if',LINE,[Rep(Ic_1), ..., Rep(Ic_k)]}.
+
+##################################################
+# .Control Forms
 
 (def sp-if (`(if ;Body) Env):
   (let Line (lineno):
@@ -463,20 +504,112 @@
 
 # If E is E_1 Op E_2, where Op is a binary operator, then Rep(E) = {op,LINE,Op,Rep(E_1),Rep(E_2)}.
 
+##################################################
+# .Operators
+
+# Term Comparisons
+# == 	equal to 
+# /= 	not equal to 
+# =< 	less than or equal to 
+# < 	less than 
+# >= 	greater than or equal to 
+# > 	greater than 
+# =:= 	exactly equal to 
+# =/= 	exactly not equal to
+
+
+# Arithmetic Ops
+# op 	Description 	Argument type 
+# + 	unary + 	number 
+# - 	unary - 	number 
+# + 	  	number 
+# - 	  	number 
+# * 	  	number 
+# / 	floating point division 	number 
+# bnot 	unary bitwise not 	integer 
+# div 	integer division 	integer 
+# rem 	integer remainder of X/Y 	integer 
+# band 	bitwise and 	integer 
+# bor 	bitwise or 	integer 
+# bxor 	arithmetic bitwise xor 	integer 
+# bsl 	arithmetic bitshift left 	integer 
+# bsr 	bitshift right 	integer
+
+# Boolean Ops
+
+# not 	unary logical not 
+# and 	logical and 
+# or 	logical or 
+# xor 	logical xor
+
+# (def-ops
+#     (binary-nested + - * /)
+#     (binary == /= =< < >= >) 
+#   (binary div rem bnot band bor bxor bsl bsr)
+#   #(binary === /==) # defined separately
+#   (unary not and or xor))
+
+# (def-ops
+#     :binary-nested
+#     + - * /
+#     :binary
+#      == /= =< < >= >
+#      div rem
+#      bnot band bor bxor bsl bsr
+#      # === /== # defined separately
+#      :unary
+#       not and or xor
+#   )
+
+#If E is Op E_0, where Op is a unary operator, then Rep(E) = {op,LINE,Op,Rep(E_0)}.
+
+#If E is E_1 Op E_2, where Op is a binary operator, then Rep(E) = {op,LINE,Op,Rep(E_1),Rep(E_2)}.
+
+(def nest-bin-op (Op [Arg1 Arg2|Args] Env):
+  # (Op A B ...) => (Op (Op A B) C ...)
+  # (- A B C ...) => (- (- A B) C ...)
+  (foldl (fn (Arg Exp)
+	     {op (ast-line Arg) Op
+		 Exp
+		 (transform Arg Env)})
+	 {op (lineno) Op (transform Arg1 Env) (transform Arg2 Env)}
+	 Args))
+
+(def bin-op (Op [Arg1 Arg2] Env):
+  {op (ast-line Arg1)
+      Op
+      (transform Arg1 Env)
+      (transform Arg2 Env)})
+
+(def una-op (Op [Arg1] Env):
+  {op (ast-line Arg1)
+      Op
+      (transform Arg1 Env)})
+
 # (def op-ast (Op E1 E2 Env):
 #   {Env {op (ast-line E1)
 # 	   Op
 # 	   (transform E1 Env ~>> {_ RE1} RE1)
 # 	   (transform E2 Env ~>> {_ RE2} RE2)}})
 
-# (def sp-> (`(> ,E1 ,E2) Env):
-#   (op-ast > E1 E2 Env))
 
-# (def sp-== (`(== ,E1 ,E2) Env):
-#   (op-ast == E1 E2 Env))
+(def sp-+ (`(+ ;Args) Env):
+  (nest-bin-op + Args Env))
 
-# (def sp-+ (`(+ ,E1 ,E2) Env):
-#   (op-ast + E1 E2 Env))
+(def sp-- (`(- ;Args) Env):
+  (nest-bin-op - Args Env))
+
+(def sp-/ (`(/ ;Args) Env):
+  (nest-bin-op / Args Env))
+
+(def sp-* (`(* ;Args) Env):
+  (nest-bin-op * Args Env))
+
+(def sp-== (`(== ;Args) Env):
+  (bin-op == Args Env))
+
+(def sp-not (`(not ;Args) Env):
+  (una-op not Args Env))
 
 
 ##################################################
@@ -505,7 +638,10 @@
 # 	end,
 #     {clause,Line, RPs, GuardSequence, REs}.
 
+(def ast-tag (Ast): (erlang\element 1 Ast))
 (def ast-line (Ast): (erlang\element 2 Ast))
+(def ast-mod (Ast): (erlang\element 3 Ast))
+(def ast-data (Ast): (erlang\element 4 Ast))
 
 (def upto-block (Es):
   (let {UpToFirstBlock Rest} (lists\splitwith
