@@ -185,6 +185,11 @@ If a @function@ is shadowed, it may still be called dynamically or referenced by
 (call foo ...)
 (fn foo 3)
 
+h4. Export
+
+@export@ only exports definitions.
+
+All user defined namespaces should export only definitions.
 
 h1. Builtin Macros
 

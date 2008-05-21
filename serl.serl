@@ -57,11 +57,13 @@
 	sp-defm
 	sp-defspecial
 	sp-functions-import
+	sp-functions-export
 	)
 
 (export mac-export-from
 	mac-import-from
 	mac-import
+	mac-export
 	)
 
 
@@ -77,6 +79,69 @@
 # sp->
  )
 
+
+
+##################################################
+# .Helper
+
+
+# (def clause (Ps G Es Line Env):
+#   (let {Env RPs} (verl\patterns Ps Env)
+# 	  :
+#        {clause Line (transform_each Es Env2)
+# 	       ## an erlang clause takes a guard sequence
+# 	       ## a guard sequence is a list of guard tests
+# 	       ## (we support only one guard sequence)
+# 	       (verl\guards Gs Env ~>> {_ RGs} RGs)
+# 	       (transform_each Es Env ~>> {_ REs} REs)}
+#        ))
+
+# clause(Ps,G,Es,Line,Env) ->
+#     %% A <guard> is a list of <guard-test>
+#     {Env2,RPs}=patterns(Ps,scompile:lexical_shadow(Env,vars,[])),
+#     REs=transform_each(Es,Env2), 
+#     GuardSequence=
+# 	case G of
+# 	    [] -> [];
+# 	    _ -> [[guard(G,Env2)]]
+# 	end,
+#     {clause,Line, RPs, GuardSequence, REs}.
+
+(def ast-tag (Ast): (erlang\element 1 Ast))
+(def ast-line (Ast): (erlang\element 2 Ast))
+(def ast-mod (Ast): (erlang\element 3 Ast))
+(def ast-data (Ast): (erlang\element 4 Ast))
+
+(def upto-block (Es):eval:
+  (let {UpToFirstBlock Rest} (lists\splitwith
+			      (fn (E)
+				  (case E
+				    ((block _) false)
+				    (_ true)))
+			      Es):
+       {UpToFirstBlock Rest}
+       ))
+
+(def atom-cat (Vs):
+  ## perhaps name it catom??
+  (foldl
+   (fn (V Acc)
+       (let Str (if (erlang\is_integer V) (erlang\integer_to_list V)
+		    (erlang\is_atom V) (erlang\atom_to_list V)
+		    (erlang\is_list V) V):
+	    [Str|Acc]))
+   [] Vs
+   .reverse ~string\join "-" .erlang\list_to_atom))
+
+##################################################
+# .Code Generator
+
+(def output (E):
+  (verl\output E))
+# -define(lazyout(Env,Body), output(fun (Env) -> Body end)).
+
+(defm lazyout (Env :pos Body):
+  `(output (fn (,Env) ;Body)))
 
 ## (export "sp-.*")
 ## (export "mac-.*")
@@ -125,34 +190,28 @@
        {2 (env\import Env Mod functions Names)}
        ))
 
-# ?defsp('__sp_export',Atoms) ->
-#     Line=lineno(),
-#     Mod=curmod(),
-#     Names=[Name || ?ast_atom3(_,_,Name) <- Atoms],
-#     ?lazyout(Env2,export_attribute(Names,Line,Env2)),
-#     {?header_sec,
-#      env:assoc_append(
-#        Env,
-#        [exports,functions],
-#        [{Name,{Mod,Name}} || Name <- Names])}.
+#\export
+(def mac-export (`(,_ ;Es)):
+  `(functions-export ;Es))
 
-# %% (export a b c)
-# export_attribute(Names,Line,Env) ->
-#     Exports=
-# 	[begin
-# 	     {Name,def_info(Env,functions,Name,arities)}
-# 	 end 
-# 	 || Name <- Names],
-#     {attribute,Line,export,
-#      [{Name,Arity} ||
-# 	 {Name,Arities} <- Exports,
-# 	 Arity <- Arities]}.
+(def sp-functions-export (`(,_ ;Names) Env):
+  (let L (lineno)
+       Names (lsc (atom A) Names: A):
+       (lazyout Env
+		(function-export-attributes Names L Env))
+       {2 Env}
+       ))
+
+#If F is an attribute -export([Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,export,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}.
+(def function-export-attributes (Names L Env):
+  {attribute L export
+	     (lsc Name Names
+		  Arity (def-info Env functions Name arities):
+		  {Name Arity}
+		  )})
 
 # (defm importm (Mod :pos Names)
 #   `(import-from ,Mod (macros ;Names)))
-
-# (defm import (Mod :pos Names)
-#   `(import-from ,Mod (functions ;Names)))
 
 
 (def new-def (Env NSType Name Def):
@@ -161,13 +220,13 @@
 	   (env\assoc_put Env [definitions NSType Name] Def)
 	   )))
 
-# (def def-info (Env NSType Name Key):
-#   (case (env\assoc Env [definitions NSType Name])
-#     ({ok Def} (proplists\lookup Key (erlang\element 2 Def) ~case
-# 				({_ Val} Val)
-# 				(none (error "Unknown property ~p of function ~p"
-# 					     [Key Name]))))
-#     (_ (error "Undefined function: ~p" [Name]))))
+(def def-info (Env NSType Name Key):
+  (case (env\assoc Env [definitions NSType Name])
+    ({ok Def} (proplists\lookup Key (erlang\element 2 Def) ~case
+				({_ Val} Val)
+				(none (error "Unknown property ~p of function ~p"
+					     [Key Name]))))
+    (_ (error "Undefined function: ~p" [Name]))))
 
 
 ##################################################
@@ -201,7 +260,7 @@
 						   {Result _} Result))
 		   {(curmod) Name})
 	:
-	(verl\output DefAst)
+	(output DefAst)
 	{10 (new-def Env functions Name
 		     {EvalFn
 		      [{ast DefAst}
@@ -677,55 +736,3 @@
 (def sp-not (`(not ;Args) Env):
   (una-op not Args Env))
 
-
-##################################################
-# .Helper
-
-
-# (def clause (Ps G Es Line Env):
-#   (let {Env RPs} (verl\patterns Ps Env)
-# 	  :
-#        {clause Line (transform_each Es Env2)
-# 	       ## an erlang clause takes a guard sequence
-# 	       ## a guard sequence is a list of guard tests
-# 	       ## (we support only one guard sequence)
-# 	       (verl\guards Gs Env ~>> {_ RGs} RGs)
-# 	       (transform_each Es Env ~>> {_ REs} REs)}
-#        ))
-
-# clause(Ps,G,Es,Line,Env) ->
-#     %% A <guard> is a list of <guard-test>
-#     {Env2,RPs}=patterns(Ps,scompile:lexical_shadow(Env,vars,[])),
-#     REs=transform_each(Es,Env2), 
-#     GuardSequence=
-# 	case G of
-# 	    [] -> [];
-# 	    _ -> [[guard(G,Env2)]]
-# 	end,
-#     {clause,Line, RPs, GuardSequence, REs}.
-
-(def ast-tag (Ast): (erlang\element 1 Ast))
-(def ast-line (Ast): (erlang\element 2 Ast))
-(def ast-mod (Ast): (erlang\element 3 Ast))
-(def ast-data (Ast): (erlang\element 4 Ast))
-
-(def upto-block (Es):
-  (let {UpToFirstBlock Rest} (lists\splitwith
-			      (fn (E)
-				  (case E
-				    ((block _) false)
-				    (_ true)))
-			      Es):
-       {UpToFirstBlock Rest}
-       ))
-
-(def atom-cat (Vs):
-  ## perhaps name it catom??
-  (foldl
-   (fn (V Acc)
-       (let Str (if (erlang\is_integer V) (erlang\integer_to_list V)
-		    (erlang\is_atom V) (erlang\atom_to_list V)
-		    (erlang\is_list V) V):
-	    [Str|Acc]))
-   [] Vs
-   .reverse ~string\join "-" .erlang\list_to_atom))

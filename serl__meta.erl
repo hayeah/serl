@@ -19,6 +19,7 @@
       
       {'import-from',{{?MOD,'sp-import-from'}}},
       {'functions-import',{{?MOD,'sp-functions-import'}}},
+      {'functions-export',{{?MOD,'sp-functions-export'}}},
       
       {'+',{{?MOD,'sp-+'}}},
       {'-',{{?MOD,'sp--'}}}, 
@@ -33,6 +34,7 @@
      [{'with-genvar',{{?MOD,'mac-with-genvar'}}},
       {'let*',{{?MOD,'mac-let*'}}},
       {'import',{{?MOD,'mac-import'}}},
+      {'export',{{?MOD,'mac-export'}}},
 
       {'>>',{{?MOD,'mac->>'}}}
      ]}

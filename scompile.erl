@@ -52,6 +52,7 @@ error(Message,Args) ->
 -define(curmod,{?MODULE,'curmod'}).
 -define(gensym,{?MODULE,'gensym_counter'}).
 -define(options,{?MODULE,'options'}).
+-define(toplevel_cache(M),{?MODULE,{toplevel_env_cache,M}}).
 
 init_state() ->
     %% reset compiler state.
@@ -107,7 +108,14 @@ options() ->
 set_options(Opts) ->
     put(?options,Opts).
 
-
+toplevel_of(M) ->
+    case get(?toplevel_cache(M)) of
+	undefined -> TopEnv=env:toplevel_of(M),
+		     put(?toplevel_cache(M),TopEnv),
+		     TopEnv; 
+	TopEnv -> TopEnv
+    end,
+    TopEnv.
 
 read(In,Env) -> 
     new_process(fun read_/2,[In,Env]). 
@@ -228,6 +236,7 @@ new_process(Fun,Args) ->
     new_process(Fun,Args,#state{}).
 
 new_process(Fun,Args,State) ->
+    erase(), %% clear process dictionary. Not necessary if this is in a thread. But it's not at the moment. 
     init_state(State),
     %%process_flag(trap_exit, true),
     try apply(Fun,Args) of
@@ -402,14 +411,7 @@ local_lookup(Env,NSType,{M,A}) ->
 
 remote_lookup(Env,NSType,{M,A}) ->
     case lexical_lookup(Env,NSType,{M,A}) of
-	%% TODO cache toplevels
-	false ->
-	    case get({remote_lookup_topenv,M}) of
-		undefined -> TopEnv=env:toplevel_of(M),
-			     put({remote_lookup_topenv,M},TopEnv); 
-		TopEnv -> TopEnv
-	    end,
-	    toplevel_lookup(TopEnv,NSType,A);
+	false -> toplevel_lookup(toplevel_of(M),NSType,A);
 	Val -> Val
     end.
 
