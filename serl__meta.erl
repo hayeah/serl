@@ -16,6 +16,7 @@
       {'if',{{?MOD,'sp-if'}}},
       {'fn',{{?MOD,'sp-fn'}}},
       {'call',{{?MOD,'sp-call'}}},
+      {'toplevel',{{?MOD,'sp-toplevel'}}},
       
 
       {'+',{{?MOD,'sp-+'}}},

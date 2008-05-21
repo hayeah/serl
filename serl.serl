@@ -44,8 +44,8 @@
 	sp-def
 	sp-defm
 	sp-defspecial
-	
 	sp-import-from
+	sp-toplevel
 
 	)
 
@@ -514,6 +514,7 @@
 ##################################################
 # .Control Forms
 
+#\if
 (def sp-if (`(if ;Body) Env):
   (let Line (lineno):
        {if Line (if-clauses Body [] Line Env)}))
@@ -530,8 +531,19 @@
 	       |Acc]))
     ([] (reverse Acc))))
 
-# (def sp-toplevel (`(_ ;Forms) Env)
-#   (map_env0 (fn transform 2) Forms Env Env))
+#\toplevel
+(def sp-toplevel (`(,_ ;[Form|Forms]) Env):
+  (let* {Section Env} (transform Form Env)
+	Env
+	(lists\foldl
+	 (fn (Form Env)
+	     (let {Section2 Env} (transform Form Env):
+		  (if (== Section Section2) Env
+		      (error "Toplevel forms must belong to the same section."))
+		  ))
+	 Env Forms)
+	:
+	{Section Env}))
 
 # (def guards (GuardTests Env):
 #      (transform_each GuardTests Env))
