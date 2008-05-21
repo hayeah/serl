@@ -1,0 +1,185 @@
+
+h1. Syntax
+
+<pre>
+<exp> = <var> | <atom> | <float> | <integer> |
+        <paren> | <block> | <brace>
+</pre>
+
+h2. Lexical Items
+
+h3. Symbols
+
+<pre>
+<symbol-char> := [a-zA-Z0-9<>+-*/_]
+<atom> := [a-z0-9<>+-*/]<symbol-char>*
+<var> := [A-Z_]<symbol-char>*
+</pre>
+
+h3. Numbers
+
+<pre>
+<float> := <erlang-float>
+<integer> := <erlang-integer>
+</pre>
+
+h2. Grammar
+
+h3. Lists
+
+<pre>
+<block> = [<exp>*]
+<brace> = {<exp>*} 
+<paren> = (<exp>*)
+</pre>
+
+h3. Quotation
+
+<pre>
+<unquote> = ,<exp>
+<backquote> = `<exp>
+<splice-unquote> = ;<exp>
+</pre>
+
+h2. Misc
+
+h3. Reader Macro
+
+%
+
+h3. Comment
+
+\\# to end of line
+
+h1. Special Forms
+
+def
+defm
+import-from
+case
+if
+import
+
+
+h1. Expression
+
+h2. Value Constructors
+
+|_. Type|_. Example|
+|atom|@a, a-b, a_b@|
+|integer|@42, -3@|
+|float|@1.0, -1, 42.0e42@|
+|list|<code>[], [1], [1|[2 3]]</code>|
+|tuple|@{}, {1 2}@|
+|string|@"", "abc"@|
+
+h2. Record Type
+
+defstruct Name :pos Fields
+
+Fields := <atom> | (<atom> <exp>)
+Name := <atom>
+
+(defstruct foo f1 (f2 default-value))
+
+Supports static at the moment
+
+(foo: f1 v1 f2 v2) # creation
+## => (record foo: f1 V1 f2 V2)
+(foo Foo: f1 V1 f2 V2) # pattern matching 
+## => (record foo Foo: f1 V1 f2 V2)
+(foo= Foo: f1 V1 f2 V2)
+## => (record= foo Foo: f1 V1 f2 V2)
+(foo-f1 Foo) # field acces
+(foo-f2 Foo) # field access
+
+Maybe dynamic record creation/access in the future
+
+(foo: F1 v1 F2 v2) 
+
+
+h2. Syntax Constructors
+
+Syntax objects are records. The fields are
+
+* @tag@ -- the type of the syntax object
+* @line@ -- the line number of the syntax object. It is 0 if produced from a macro.
+* @mod@ -- the source module where the syntax object originated.
+* @data@ -- the payload of the syntax object.
+
+h3. Builtin Syntax Objects
+
+Each syntax object type take a value as its payload.
+
+|_. Syntax Type|_. Data Type|_. e.g.|
+|atom|atom|'a, (atom a)|
+|var|atom|'A, (var a)|
+|integer|integer|(integer 2)|
+|float|float|(float 3.0)|
+|paren|list|(paren ['a 'b 'c]), '(a b c)|
+|block|list|(block ['a 'b 'c]), '[a b c]|
+|brace|list|(brace ['a 'b 'c]), '{a b c}|
+
+@paren, block, brace@ all take a list of syntax objects.
+
+h3. Quotation
+
+Quotation is used only to produce syntax objects.
+
+<pre>
+Quote
+'<exp>
+
+Quasiquote
+`<exp>
+
+Unquote
+,<exp>
+
+Splice-unquote
+;<exp>
+</pre>
+
+h2. Patterns
+
+A splice unquote can match the tail of a glist.
+`(A ;X)
+
+Syntax objects are matchable
+
+(atom A)
+
+Builtin syntax object types are
+
+h2.
+
+h1. Builtin Special Forms
+
+<pre>
+toplevel :pos Forms
+
+Forms := <exp>
+</pre>
+
+All @Forms@ are compiled as toplevel forms. The @Forms@ should belong to the same section.
+
+h1. Builtin Macros
+
+
+h1. Metaprogramming
+
+An AST element is a record with four fields:
+
+tag 
+line
+mod
+data
+
+h2. Module
+
+h2. Capturing
+
+use pseudo module true
+
+(var %a(X) 0 true)
+(var-capturing %a(X))
