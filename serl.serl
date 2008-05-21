@@ -23,7 +23,9 @@
 	foldl
 	foldr
 	reverse
-	member)
+	member
+	foreach
+	)
 
 ## verl's meta-module doesn't support import.
 ### this is a special case
@@ -32,6 +34,7 @@
 
 (export ast-tag ast-line ast-mod ast-data
 	upto-block
+	atom-cat
 	)
 
 (export sp-block sp-brace
@@ -41,18 +44,27 @@
 	sp-lsc
 	sp-case
 	sp-if
-	sp-def
-	sp-defm
-	sp-defspecial
-	sp-import-from
 	sp-toplevel
-
 	)
 
 (export mac-let*
 	mac->>
-	mac-with-genvar
+	mac-with-genvar 
 	)
+
+#\ex \env
+(export sp-def
+	sp-defm
+	sp-defspecial
+	sp-functions-import
+	)
+
+(export mac-export-from
+	mac-import-from
+	mac-import
+	)
+
+
 
 (export
   sp-+
@@ -77,41 +89,41 @@
 # (import-from mod (macros ...) (functions ...))
 
 #\import-from
-(def sp-import-from (`(,_ ,Mod ;Specs) Env):
-  (let (atom Mod) Mod:
-       {2 (env-import Env Mod Specs)}
-       ))
+(def mac-import-from (`(,_ ,Mod ;Specs)):
+  `(toplevel
+    ;(lsc `(,(atom Type) ;Names) Specs:
+	  `(,(atom (atom-cat: Type import)) ,Mod ;Names)
+	  )))
 
-(def env-import (Env Mod Specs):
-  (case Specs
-    ([] Env)
-    ([`(,Type ;Names)|Specs]
-     (let Names (lsc (atom A) Names: A)
-	  (atom Type) Type:
-	  (lists\foreach
-	   (fn (Name)
-	       (case (scompile\lookup Env Type {(curmod) Name})
-		 ({ok _} (error "Import conflict: ~p:~p" [Mod Name]))
-		 (_ ok)))
-	   Names)
-	  #TODO allow importing functions from not yet loaded modules
-#     Env2=try env:import(Env,Mod,functions,Imports)
-# 	 catch no_imports ->
-# 		 env:assoc_put(
-# 		   Env,
-# 		   [imports,Mod,functions],
-# 		   [{F,{Mod,F}} || F <- Imports]) 
-# 	 end,
-	  (env-import (env\import Env Mod Type Names) Mod Specs)
-	  ))))
 
 # (export-from (functions a b c) (macros c d e)) ## =>
 # (toplevel
 #  (functions-export a b c)
 #  (macros-export c d e))
 
-# (def sp-export-from (`(,_ ;Specs)):
-#   )
+#\export-from
+(def mac-export-from (`(,_ ;Specs)):
+  `(toplevel
+    ;(lsc `(,(atom Type) ;Names) Specs:
+	  `(,(atom (atom-cat: Type export)) ;Names)
+	  )))
+
+#\import
+(def mac-import (`(,_ ;Es)):
+  `(functions-import ;Es))
+
+(def sp-functions-import (`(,_ ,Mod ;Names) Env):
+  (let (atom Mod) Mod
+       Names (lsc (atom A) Names: A):
+       (foreach (fn (Name)
+		    (case (scompile\lookup Env functions {(curmod) Name})
+		      ({ok {{M A}}} (error "Function import conflict: ~p:~p with ~p:~p"
+					   [Mod Name M A]))
+		      (_ ok)))
+		Names)
+       ##TODO allow importing functions from not yet loaded modules
+       {2 (env\import Env Mod functions Names)}
+       ))
 
 # ?defsp('__sp_export',Atoms) ->
 #     Line=lineno(),
@@ -414,8 +426,6 @@
 
 
 
-
-
 # If E is fun Fc_1 ; ... ; Fc_k end where each Fc_i is a function clause then Rep(E) = {'fun',LINE,{clauses,[Rep(Fc_1), ..., Rep(Fc_k)]}}.
 # (fn (A B) ...)
 # (fn 3 ...) == (fn (V1 V2 V3) ...)
@@ -508,6 +518,16 @@
 
 (def sp-brace (`(,_Car ;[Es]) Env): 
   (transform `(tuple: ;Es) Env))
+
+# #\defstruct
+# (def sp-defstruct (`(,_ ,(atom Name) ;Fields) Env)
+#   `(toplevel
+#     ;(lsc F Fields:
+# 	  (case F
+# 	    ('(,FieldName ,InitExp))
+# 	    (FieldName )
+# 	    )))
+#   )
 
 # If E is if Ic_1 ; ... ; Ic_k end, where each Ic_i is an if clause then Rep(E) = {'if',LINE,[Rep(Ic_1), ..., Rep(Ic_k)]}.
 
@@ -698,3 +718,14 @@
 			      Es):
        {UpToFirstBlock Rest}
        ))
+
+(def atom-cat (Vs):
+  ## perhaps name it catom??
+  (foldl
+   (fn (V Acc)
+       (let Str (if (erlang\is_integer V) (erlang\integer_to_list V)
+		    (erlang\is_atom V) (erlang\atom_to_list V)
+		    (erlang\is_list V) V):
+	    [Str|Acc]))
+   [] Vs
+   .reverse ~string\join "-" .erlang\list_to_atom))

@@ -163,6 +163,29 @@ Forms := <exp>
 
 All @Forms@ are compiled as toplevel forms. The @Forms@ should belong to the same section.
 
+
+h3. Environment
+
+<pre>
+import-from Module :pos Specs
+export-from :pos Specs
+
+Specs := (<atom> <atom>*)*
+</pre>
+
+(import-from foo
+ (functions a b c)
+ (macros c d e))
+(export-from (functions foo bar))
+
+@macros@ have precedence over @specials@ over @functions@.
+
+If a @function@ is shadowed, it may still be called dynamically or referenced by @fn@.
+
+(call foo ...)
+(fn foo 3)
+
+
 h1. Builtin Macros
 
 

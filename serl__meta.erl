@@ -5,8 +5,7 @@
 -serl_exports(
    [{specials,
      [{'__block',{{?MOD,'sp-block'}}},
-      {'__brace',{{?MOD,'sp-brace'}}},
-      {'import-from',{{?MOD,'sp-import-from'}}},
+      {'__brace',{{?MOD,'sp-brace'}}}, 
       {'def',{{?MOD,'sp-def'}}},
       {'defm',{{?MOD,'sp-defm'}}},
       {'defspecial',{{?MOD,'sp-defspecial'}}},
@@ -18,7 +17,9 @@
       {'call',{{?MOD,'sp-call'}}},
       {'toplevel',{{?MOD,'sp-toplevel'}}},
       
-
+      {'import-from',{{?MOD,'sp-import-from'}}},
+      {'functions-import',{{?MOD,'sp-functions-import'}}},
+      
       {'+',{{?MOD,'sp-+'}}},
       {'-',{{?MOD,'sp--'}}}, 
       {'==',{{?MOD,'sp-=='}}},
@@ -31,6 +32,7 @@
     {macros,
      [{'with-genvar',{{?MOD,'mac-with-genvar'}}},
       {'let*',{{?MOD,'mac-let*'}}},
+      {'import',{{?MOD,'mac-import'}}},
 
       {'>>',{{?MOD,'mac->>'}}}
      ]}
