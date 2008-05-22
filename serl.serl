@@ -58,6 +58,7 @@
 	sp-defspecial
 	sp-functions-import
 	sp-functions-export
+	sp-functions-output
 	sp-specials-export
 	sp-macros-export
 	)
@@ -109,10 +110,10 @@
 # 	end,
 #     {clause,Line, RPs, GuardSequence, REs}.
 
-(def ast-tag (Ast): (erlang\element 1 Ast))
-(def ast-line (Ast): (erlang\element 2 Ast))
-(def ast-mod (Ast): (erlang\element 3 Ast))
-(def ast-data (Ast): (erlang\element 4 Ast))
+(def ast-tag (Ast):eval: (erlang\element 1 Ast))
+(def ast-line (Ast):eval: (erlang\element 2 Ast))
+(def ast-mod (Ast):eval: (erlang\element 3 Ast))
+(def ast-data (Ast):eval: (erlang\element 4 Ast))
 
 (def upto-block (Es):eval:
   (let {UpToFirstBlock Rest} (lists\splitwith
@@ -196,21 +197,51 @@
 (def mac-export (`(,_ ;Es)):
   `(functions-export ;Es))
 
-(def sp-functions-export (`(,_ ;Names) Env):
-  (let L (lineno)
-       Names (lsc (atom A) Names: A):
-       (lazyout Env
-		(function-export-attributes Names L Env))
-       {2 Env}
-       ))
+# (def sp-functions-export (`(,_ ;Names) Env):
+#   (let L (lineno)
+#        ANames (lsc (atom A) Names: A):
+#        (lazyout Env (function-export-attribute ANames L Env))
+#        {2 (env\assoc_append Env [exports functions] Names)}
+#        ))
 
-#If F is an attribute -export([Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,export,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}.
-(def function-export-attributes (Names L Env):
-  {attribute L export
-	     (lsc Name Names
-		  Arity (def-info Env functions Name arities):
-		  {Name Arity}
-		  )})
+(def sp-functions-export (`(,_ ;Names) Env):
+  {2 (env\assoc_append Env [exports functions] Names)})
+
+# #If F is an attribute -export([Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,export,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}.
+
+# (def function-export-attribute (Names L Env):
+#   {attribute L export
+# 	     (lsc Name Names
+# 		  Arity (def-info Env functions Name arities ~case
+# 				  ({ok Arities} Arities)
+# 				  (false (error "Exporting function undefined: ~p" [Name]))):
+# 		  {Name Arity}
+# 		  )})
+
+
+(def sp-functions-output (`(,_) Env):
+  (let Fns (lsc {Name _} (get-defs Env functions):
+		Name)
+       Exports (env\assoc Env [exports functions] ~case
+			({ok Names} Names)
+			(_ []))
+       :
+       {#export attributes
+	(lsc Name Exports
+	     Arity (def-info Env functions (ast-data Name) arities ~case
+			     ({ok Arities} Arities)
+			     (_ (error "~p: Exporting function undefined: ~p"
+				       [(ast-line Name) (ast-data Name)])))
+	     :
+	     {attribute (ast-line Name) export
+			[{(ast-data Name) Arity}]})
+	#definitions
+	(lsc Name Fns:
+	     (def-info Env functions Name ast ~case
+		       ({ok Ast} Ast)))
+	}))
+
+
 
 # (defm importm (Mod :pos Names)
 #   `(import-from ,Mod (macros ;Names)))
@@ -239,12 +270,18 @@
 	   )))
 
 (def def-info (Env NSType Name Key):
+  # caller of this function should check its result
   (case (env\assoc Env [definitions NSType Name])
     ({ok Def} (proplists\lookup Key (erlang\element 2 Def) ~case
-				({_ Val} Val)
-				(none (error "Unknown property ~p of ~s ~p"
-					     [Key NSType Name]))))
-    (_ (error "Undefined ~s: ~p" [NSType Name]))))
+				(none false)
+				({_ R} {ok R})))
+    (_ false)))
+
+(def get-defs (Env NSType):
+  # get all the definitions related to a namespace
+  (env\assoc Env [definitions NSType] ~case
+	     ({ok Defs} Defs)
+	     (false [])))
 
 
 ##################################################
@@ -278,7 +315,7 @@
 						   {Result _} Result))
 		   {(curmod) Name})
 	:
-	(output DefAst)
+	#(output DefAst)
 	{10 (new-def Env functions Name
 		     {EvalFn
 		      [{ast DefAst}

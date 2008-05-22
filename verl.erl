@@ -79,16 +79,32 @@ cleanup() ->
     put(?moutput,[]),
     ok.
 
+%% output_forms(Env) ->
+%%     %% lazy output waits till the very end to output.
+%%     %% it receives the final compilation environment.
+%%     %% no evaluation order is gauranteed.
+    
+%%     try 
+%% 	{Header,Body}=transform(?cast_paren([?cast_atom('functions-output')]),Env),
+%% 	io:format("~p\n~p",[Header,Body])
+%%     catch
+%% 	error:R ->
+%% 	    io:format("Error ~p\n",[R])
+
+%%     end, 
+%%     lists:reverse(
+%%       [case Form of
+%% 	   Fn when is_function(Fn) ->
+%% 	       Fn(Env);
+%% 	   Ast when is_tuple(Ast) -> Ast 
+%%        end || Form <- get_output()]).
+
+
 output_forms(Env) ->
-    %% lazy output waits till the very end to output.
-    %% it receives the final compilation environment.
-    %% no evaluation order is gauranteed.
-    lists:reverse(
-      [case Form of
-	   Fn when is_function(Fn) ->
-	       Fn(Env);
-	   Ast when is_tuple(Ast) -> Ast 
-       end || Form <- get_output()]).
+    {Header,Body}=
+	transform(?cast_paren([?cast_atom('functions-output')]),Env),
+    [{attribute,0,module,curmod()}|Header]++Body.
+
 
 -define(lazyout(Env,Body), output(fun (Env) -> Body end)).
 -define(lazymout(Env,Body), moutput(fun (Env) -> Body end)).

@@ -19,6 +19,8 @@
       
       {'functions-import',{{?MOD,'sp-functions-import'}}},
       {'functions-export',{{?MOD,'sp-functions-export'}}},
+      {'functions-output',{{?MOD,'sp-functions-output'}}},
+      
       {'specials-export',{{?MOD,'sp-specials-export'}}},
       {'macros-export',{{?MOD,'sp-macros-export'}}},
       
