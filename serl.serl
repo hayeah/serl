@@ -19,7 +19,7 @@
 	)
 
 (import lists
-	map
+	map 
 	foldl
 	foldr
 	reverse
@@ -45,6 +45,8 @@
 	sp-case
 	sp-if
 	sp-toplevel
+	sp-bof
+	sp-eof
 	)
 
 (export mac-let*
@@ -59,8 +61,11 @@
 	sp-functions-import
 	sp-functions-export
 	sp-functions-output
-	sp-specials-export
 	sp-macros-export
+	sp-macros-output
+	sp-specials-export
+	sp-specials-output
+	
 	)
 
 (export mac-export-from
@@ -88,6 +93,44 @@
 # .Helper
 
 
+(def ast-tag (Ast):eval: (erlang\element 1 Ast))
+(def ast-line (Ast):eval: (erlang\element 2 Ast))
+(def ast-mod (Ast):eval: (erlang\element 3 Ast))
+(def ast-data (Ast):eval: (erlang\element 4 Ast))
+
+(def upto-block (Es):eval:
+  (let {UpToFirstBlock Rest} (lists\splitwith
+			      (fn (E)
+				  (case E
+				    ((block _) false)
+				    (_ true)))
+			      Es):
+       {UpToFirstBlock Rest}
+       ))
+
+(def atom-cat (Vs):eval:
+  ## perhaps name it catom??
+  (foldl
+   (fn (V Acc)
+       (let Str (if (erlang\is_integer V) (erlang\integer_to_list V)
+		    (erlang\is_atom V) (erlang\atom_to_list V)
+		    (erlang\is_list V) V):
+	    [Str|Acc]))
+   [] Vs
+   .reverse ~string\join "-" .erlang\list_to_atom))
+
+
+#\with-genvar
+(def mac-with-genvar (`(,_ ;Form)):
+  (let {Vars [BodyBlock]} (upto-block Form):
+       `(let ;(lists\foldl
+	       (fn (Var Acc) [Var '(scompile\genvar)|Acc])
+	       []
+	       Vars)
+	  ,BodyBlock
+	  )))
+
+
 # (def clause (Ps G Es Line Env):
 #   (let {Env RPs} (verl\patterns Ps Env)
 # 	  :
@@ -110,49 +153,42 @@
 # 	end,
 #     {clause,Line, RPs, GuardSequence, REs}.
 
-(def ast-tag (Ast):eval: (erlang\element 1 Ast))
-(def ast-line (Ast):eval: (erlang\element 2 Ast))
-(def ast-mod (Ast):eval: (erlang\element 3 Ast))
-(def ast-data (Ast):eval: (erlang\element 4 Ast))
-
-(def upto-block (Es):eval:
-  (let {UpToFirstBlock Rest} (lists\splitwith
-			      (fn (E)
-				  (case E
-				    ((block _) false)
-				    (_ true)))
-			      Es):
-       {UpToFirstBlock Rest}
-       ))
-
-(def atom-cat (Vs):
-  ## perhaps name it catom??
-  (foldl
-   (fn (V Acc)
-       (let Str (if (erlang\is_integer V) (erlang\integer_to_list V)
-		    (erlang\is_atom V) (erlang\atom_to_list V)
-		    (erlang\is_list V) V):
-	    [Str|Acc]))
-   [] Vs
-   .reverse ~string\join "-" .erlang\list_to_atom))
 
 ##################################################
-# .Code Generator
+# .Pseudo Forms
 
-(def output (E):
-  (verl\output E))
-# -define(lazyout(Env,Body), output(fun (Env) -> Body end)).
 
-(defm lazyout (Env :pos Body):
-  `(output (fn (,Env) ;Body)))
+(def sp-bof (`(,_) Env):
+  {0 Env})
 
-## (export "sp-.*")
-## (export "mac-.*")
+(def sp-eof (`(,_ ,Command) Env):
+  (case Command
+    (normal (verl\emit (output-forms Env) Env
+		       (verl\set_opts (scompile\options))))
+    (after (verl\cleanup))))
+
+(def output-forms (Env):
+  ## do output for each NS types
+  (let* Types (lsc {Type _} (env\assoc Env [definitions] ~>>
+				       {ok NSs} NSs):
+		   Type)
+	Outputs (lsc Type Types:
+		     (transform `(,(atom (atom-cat: Type output))) Env))
+	: 
+	(lists\unzip Outputs ~>>
+		     {Headers Bodies}
+		     (lists\flatten [{attribute 0 module (curmod)} Headers Bodies])
+		     ##~>> Forms (fmt "Ast: ~p\n" [Forms]) Forms
+		     )))
+
 
 ##################################################
 # 1. Environment
 #
 # Just support functions & macros/specials for the moment.
+
+## (export "sp-.*")
+## (export "mac-.*")
 
 # (import-from mod (macros ...) (functions ...))
 
@@ -197,71 +233,82 @@
 (def mac-export (`(,_ ;Es)):
   `(functions-export ;Es))
 
-# (def sp-functions-export (`(,_ ;Names) Env):
-#   (let L (lineno)
-#        ANames (lsc (atom A) Names: A):
-#        (lazyout Env (function-export-attribute ANames L Env))
-#        {2 (env\assoc_append Env [exports functions] Names)}
-#        ))
-
-(def sp-functions-export (`(,_ ;Names) Env):
-  {2 (env\assoc_append Env [exports functions] Names)})
-
 # #If F is an attribute -export([Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,export,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}.
 
-# (def function-export-attribute (Names L Env):
-#   {attribute L export
-# 	     (lsc Name Names
-# 		  Arity (def-info Env functions Name arities ~case
-# 				  ({ok Arities} Arities)
-# 				  (false (error "Exporting function undefined: ~p" [Name]))):
-# 		  {Name Arity}
-# 		  )})
-
+(def sp-functions-export (`(,_ ;Names) Env):
+  {2 (export-defs Env functions Names)})
 
 (def sp-functions-output (`(,_) Env):
-  (let Fns (lsc {Name _} (get-defs Env functions):
+  (output-fun Env functions))
+
+
+
+(def sp-macros-export (`(,_ ;Names) Env):
+  {2 (export-defs Env macros Names)})
+
+(def sp-macros-output (`(,_) Env):
+  (output-meta-fun Env macros))
+
+
+
+(def sp-specials-export (`(,_ ;Names) Env):
+  {2 (export-defs Env specials Names)})
+
+(def sp-specials-output (`(,_) Env):
+  (output-meta-fun Env specials))
+
+
+(def output-fun (Env Type):
+  ## used so far by functions
+  (let FNames (lsc {Name _} (get-defs Env Type):
 		Name)
-       Exports (env\assoc Env [exports functions] ~case
-			({ok Names} Names)
-			(_ []))
-       :
+       Exports (get-exports Env Type):
        {#export attributes
 	(lsc Name Exports
-	     Arity (def-info Env functions (ast-data Name) arities ~case
+	     Arity (def-info Env Type (ast-data Name) arities ~case
 			     ({ok Arities} Arities)
-			     (_ (error "~p: Exporting function undefined: ~p"
-				       [(ast-line Name) (ast-data Name)])))
-	     :
+			     (_ (error "~p: Exporting ~p undefined: ~p"
+				       [(ast-line Name) Type (ast-data Name)]))):
 	     {attribute (ast-line Name) export
 			[{(ast-data Name) Arity}]})
 	#definitions
-	(lsc Name Fns:
-	     (def-info Env functions Name ast ~case
+	(lsc Name FNames:
+	     (def-info Env Type Name ast ~case
 		       ({ok Ast} Ast)))
 	}))
 
+(def output-meta-fun (Env Type):
+  ## shared by exports,specials
+  ## only the exported defs need actually be output
+  (let Exports (get-exports Env Type):
+       (lsc Name Exports:
+	    (let* Line (ast-line Name) 
+		  Name (ast-data Name)
+		  MacName (def-info Env Type Name name ~case
+				    ({ok Name} Name)
+				    (_ (error "~p: Exporting ~p undefined: ~p"
+					      [Line Type Name])))
+		  :
+		  {(lsc Arity (def-info Env Type Name arities ~>>
+					{ok Arities} Arities):
+			{attribute Line export [{MacName Arity}]})
+		   (def-info Env Type Name ast ~case
+			     ({ok Ast} Ast))})
+	    .lists\unzip ~>> {Exports Defs}
+	     {(lists\flatten Exports) Defs})))
 
 
-# (defm importm (Mod :pos Names)
-#   `(import-from ,Mod (macros ;Names)))
 
-#\importm 
-(def sp-macros-export (`(,_ ;Names) Env):
-  (lazyout Env
-	   {attribute (lineno) export
-		      (lsc (atom Name) Names:
-			   {(def-info Env macros Name name) 1}
-			   )})
-  {2 Env})
 
-(def sp-specials-export (`(,_ ;Names) Env):
-  (lazyout Env
-	   {attribute (lineno) export
-		      (lsc (atom Name) Names:
-			   {(def-info Env specials Name name) 2}
-			   )})
-  {2 Env})
+(def export-defs (Env Type Names):
+  (env\assoc_append Env [exports Type] Names))
+
+(def get-exports (Env Type):
+  (env\assoc Env [exports Type] ~case
+	     ({ok Names} Names)
+	     (_ [])))
+
+
 
 (def new-def (Env NSType Name Def):
   (let Defined (env\assoc Env [definitions NSType Name]):
@@ -282,6 +329,7 @@
   (env\assoc Env [definitions NSType] ~case
 	     ({ok Defs} Defs)
 	     (false [])))
+
 
 
 ##################################################
@@ -353,12 +401,13 @@
 				{Result _} Result)
 	     ))
 	DefAst {function Line MacName 1
-			 (verl\clause [VAll] [] [`(begin ,MacBody)] Line Env)}
+			 [(verl\clause [VAll] [] [`(begin ,MacBody)] Line Env)]}
 	:
 	## the macro definition needs to be in meta and normal env
 	{10 (new-def Env macros Name
 		     {EvalFn
 		      [{ast DefAst}
+		       {arities [1]}
 		       {name MacName}
 		       {args Args} 
 		       {doc "A macro"}]})}))
@@ -391,12 +440,13 @@
 						      Env):
 			Result)))
 	DefAst {function Line MacName 1
-			 (verl\clause [VAll VEnv] [] [`(begin ,MacBody)] Line Env)}
+			 [(verl\clause [VAll VEnv] [] [`(begin ,MacBody)] Line Env)]}
 	:
 	## the macro definition needs to be in meta and normal env
 	{10 (new-def Env specials Name
 		     {EvalFn
 		      [{ast DefAst}
+		       {arities [2]}
 		       {name MacName}
 		       {args Args} 
 		       {doc "A special form"}]})}
@@ -484,16 +534,6 @@
 (def mac->> (`(>> ,Val ,Pattern ;Es)):
   `(let ,Pattern ,Val: ;Es))
 
-
-#\with-genvar
-(def mac-with-genvar (`(,_ ;Form)):
-  (let {Vars [BodyBlock]} (upto-block Form):
-       `(let ;(lists\foldl
-	       (fn (Var Acc) [Var '(scompile\genvar)|Acc])
-	       []
-	       Vars)
-	  ,BodyBlock
-	  )))
 
 # ## If E is case E_0 of Cc_1 ; ... ; Cc_k end, where E_0 is an expression and each Cc_i is a case clause then Rep(E) = {'case',LINE,Rep(E_0),[Rep(Cc_1), ..., Rep(Cc_k)]}.
 

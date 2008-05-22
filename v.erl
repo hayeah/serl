@@ -111,18 +111,29 @@ t(Defs) ->
 t(Defs,Options) ->
     test(serl,Defs,Options).
 
+tt() ->
+    test(test).
+
+tt(Defs) ->
+    test(test,Defs).
+
+tt(Defs,Options) ->
+    test(test,Defs,Options).
+
+
 version() ->
     length(filelib:wildcard("bootstrap/*.beam"))-1.
 
 r() ->
     recompile(0).
 
-rr() ->
-    %% recompile with the previous version
-    back(1),
-    r().
+r(N) ->
+     %% recompile with the nth version back.
+     back(N),
+     r().
 
 next() ->
+    %% step to next version
     recompile(1).
 
 back(N) ->

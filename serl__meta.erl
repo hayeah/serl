@@ -5,7 +5,9 @@
 -serl_exports(
    [{specials,
      [{'__block',{{?MOD,'sp-block'}}},
-      {'__brace',{{?MOD,'sp-brace'}}}, 
+      {'__brace',{{?MOD,'sp-brace'}}},
+      {'__bof',{{?MOD,'sp-bof'}}},
+      {'__eof',{{?MOD,'sp-eof'}}}, 
       {'def',{{?MOD,'sp-def'}}},
       {'defm',{{?MOD,'sp-defm'}}},
       {'defspecial',{{?MOD,'sp-defspecial'}}},
@@ -20,9 +22,15 @@
       {'functions-import',{{?MOD,'sp-functions-import'}}},
       {'functions-export',{{?MOD,'sp-functions-export'}}},
       {'functions-output',{{?MOD,'sp-functions-output'}}},
-      
-      {'specials-export',{{?MOD,'sp-specials-export'}}},
+
+      {'macros-import',{{?MOD,'sp-macros-import'}}},
       {'macros-export',{{?MOD,'sp-macros-export'}}},
+      {'macros-output',{{?MOD,'sp-macros-output'}}},
+
+      {'specials-import',{{?MOD,'sp-specials-import'}}},
+      {'specials-export',{{?MOD,'sp-specials-export'}}},
+      {'specials-output',{{?MOD,'sp-specials-output'}}},
+      
       
       {'+',{{?MOD,'sp-+'}}},
       {'-',{{?MOD,'sp--'}}}, 

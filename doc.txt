@@ -222,3 +222,11 @@ Each custom namespace _NS_ must define the following special forms
 
 <pre>
 </pre>
+
+h2. DSL
+
+__bof
+
+__eof -- call as `(__eof normal) `(__eof after)
+
+

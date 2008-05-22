@@ -74,6 +74,11 @@ put_meta_env(Env,MEnv) ->
     CO=set_opts(Options), 
     emit(Forms,Env,CO).
 
+output_forms(Env) ->
+    {Header,Body}=
+	transform(?cast_paren([?cast_atom('functions-output')]),Env),
+    [{attribute,0,module,curmod()}|Header]++Body.
+
 cleanup() ->
     put(?output,[]),
     put(?moutput,[]),
@@ -99,11 +104,6 @@ cleanup() ->
 %% 	   Ast when is_tuple(Ast) -> Ast 
 %%        end || Form <- get_output()]).
 
-
-output_forms(Env) ->
-    {Header,Body}=
-	transform(?cast_paren([?cast_atom('functions-output')]),Env),
-    [{attribute,0,module,curmod()}|Header]++Body.
 
 
 -define(lazyout(Env,Body), output(fun (Env) -> Body end)).
