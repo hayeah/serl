@@ -88,7 +88,7 @@ test(Mod,Defs,Options) ->
 
 
 compile(Mod) ->
-    compile(Mod,[ast,report]).
+    compile(Mod,[report]).
 
 compile(Mod,Options) ->
     scompile:compile(Mod,env(),Options).
