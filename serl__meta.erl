@@ -17,9 +17,10 @@
       {'call',{{?MOD,'sp-call'}}},
       {'toplevel',{{?MOD,'sp-toplevel'}}},
       
-      {'import-from',{{?MOD,'sp-import-from'}}},
       {'functions-import',{{?MOD,'sp-functions-import'}}},
       {'functions-export',{{?MOD,'sp-functions-export'}}},
+      {'specials-export',{{?MOD,'sp-specials-export'}}},
+      {'macros-export',{{?MOD,'sp-macros-export'}}},
       
       {'+',{{?MOD,'sp-+'}}},
       {'-',{{?MOD,'sp--'}}}, 
@@ -35,7 +36,8 @@
       {'let*',{{?MOD,'mac-let*'}}},
       {'import',{{?MOD,'mac-import'}}},
       {'export',{{?MOD,'mac-export'}}},
-
+      {'import-from',{{?MOD,'mac-import-from'}}},
+      {'export-from',{{?MOD,'mac-export-from'}}},
       {'>>',{{?MOD,'mac->>'}}}
      ]}
    ]).

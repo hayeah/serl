@@ -759,6 +759,48 @@ clause(Ps,G,Es,Line,Env) ->
 
 %% 4.6 Guards
 
+
+%% The set of valid guard expressions (sometimes called guard tests) is a subset of the set of valid Erlang expressions. The reason for restricting the set of valid expressions is that evaluation of a guard expression must be guaranteed to be free of side effects. Valid guard expressions are:
+
+%%  the atom true, 
+%%  other constants (terms and bound variables), all regarded as false, 
+%%  calls to the BIFs specified below, 
+%%  term comparisons, 
+%%  arithmetic expressions, 
+%%  boolean expressions, and 
+%%  short-circuit boolean expressions.
+
+%% Type Test BIFs.
+%% is_atom/1 
+%%   is_binary/1 
+%%   is_constant/1 
+%%   is_float/1 
+%%   is_function/1 
+%%   is_function/2 
+%%   is_integer/1 
+%%   is_list/1 
+%%   is_number/1 
+%%   is_pid/1 
+%%   is_port/1 
+%%   is_reference/1 
+%%   is_tuple/1 
+%%   is_record/2 
+%%   is_record/3
+
+%% Other BIFs Allowed in Guard Expressions.
+%% abs(Number) 
+%%   element(N, Tuple) 
+%%   float(Term) 
+%%   hd(List) 
+%%   length(List) 
+%%   node() 
+%%   node(Pid|Ref|Port) 
+%%   round(Number) 
+%%   self() 
+%%   size(Tuple|Binary) 
+%%   tl(List) 
+%%   trunc(Number)
+
 guard(E,Env) ->
     %% fingers crossed that they are valid Guards.
     %% these are the allowable tests in erlang's if

@@ -211,3 +211,14 @@ use pseudo module true
 
 (var %a(X) 0 true)
 (var-capturing %a(X))
+
+h2. Custom namespace
+
+Each custom namespace _NS_ must define the following special forms
+
+* _NS_-output -- serl compiler expects it to return a 2-tuple. The first element is a list of Erlang module attributes, the second element is a list of Erlang forms that consists of the body of an erlang module.
+* _NS_-import
+* _NS_-export
+
+<pre>
+</pre>

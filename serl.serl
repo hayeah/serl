@@ -58,6 +58,8 @@
 	sp-defspecial
 	sp-functions-import
 	sp-functions-export
+	sp-specials-export
+	sp-macros-export
 	)
 
 (export mac-export-from
@@ -213,6 +215,22 @@
 # (defm importm (Mod :pos Names)
 #   `(import-from ,Mod (macros ;Names)))
 
+#\importm 
+(def sp-macros-export (`(,_ ;Names) Env):
+  (lazyout Env
+	   {attribute (lineno) export
+		      (lsc (atom Name) Names:
+			   {(def-info Env macros Name name) 1}
+			   )})
+  {2 Env})
+
+(def sp-specials-export (`(,_ ;Names) Env):
+  (lazyout Env
+	   {attribute (lineno) export
+		      (lsc (atom Name) Names:
+			   {(def-info Env specials Name name) 2}
+			   )})
+  {2 Env})
 
 (def new-def (Env NSType Name Def):
   (let Defined (env\assoc Env [definitions NSType Name]):
@@ -224,9 +242,9 @@
   (case (env\assoc Env [definitions NSType Name])
     ({ok Def} (proplists\lookup Key (erlang\element 2 Def) ~case
 				({_ Val} Val)
-				(none (error "Unknown property ~p of function ~p"
-					     [Key Name]))))
-    (_ (error "Undefined function: ~p" [Name]))))
+				(none (error "Unknown property ~p of ~s ~p"
+					     [Key NSType Name]))))
+    (_ (error "Undefined ~s: ~p" [NSType Name]))))
 
 
 ##################################################
@@ -278,8 +296,7 @@
 	VAllName (gensym)
 	VAll (var VAllName)
 	#the actual name to define the macro function
-	MacName (erlang\list_to_atom
-		 (cat "$mac$" (erlang\atom_to_list Name))) 
+	MacName (atom-cat: "$mac" Name) 
 	MacBody (macro-arg-1 Args Body VAll)
 	## the macro function interprets the erl-ast of the macro definition
 	## the macro function closes over the current  meta-environment.
@@ -321,8 +338,7 @@
 	#VEnv
 	VEnvName (let (var Name) VEnv: Name) 
 	#the actual name to define the macro function
-	MacName (erlang\list_to_atom
-		 (cat "$special$" (erlang\atom_to_list Name))) 
+	MacName (atom-cat: "$special" Name) 
 	MacBody (macro-arg-1 Args Body VAll)
 	EvalAst (transform 
 		 `(let ,VAll (eval-binding ,VAll)

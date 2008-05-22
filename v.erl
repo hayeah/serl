@@ -9,10 +9,10 @@ bootup() ->
     dbg:p(new,[c]),
     reload(version()).
 
-serlenv() ->
+env() ->
     env:import(env:new(verl),serl).
 
-%% serlenv() ->
+%% env() ->
 %%     env:new(verl). 
 
 p(FnName,In) ->
@@ -22,19 +22,19 @@ p(FnName,In) ->
     Ast.
 
 read(In) ->
-    {_,_,Ast}=scompile:read(In,serlenv()),
+    {_,_,Ast}=scompile:read(In,env()),
     Ast.
 
 mexpand(In) ->
-    scompile:mexpand(read(In),serlenv()).
+    scompile:mexpand(read(In),env()).
 
 expand(In) ->
-    scompile:expand(read(In),serlenv()).
+    scompile:expand(read(In),env()).
 
 expand1(In) ->
     expandn(In,1).
 expandn(In,N) ->
-    expandn_(read(In),serlenv(),N).
+    expandn_(read(In),env(),N).
 
 
 expandn_(Ast,_Env,0) ->
@@ -62,7 +62,7 @@ evaln(N,In) ->
     evaln(N,In,[]). 
 evaln(N,In,Bindings) ->
     Ast=read(In),
-    evaln_(N,Ast,serlenv(),Bindings).
+    evaln_(N,Ast,env(),Bindings).
 
 evaln_(0,Ast,_Env,Bindings) ->
     {Ast,Bindings};
@@ -91,7 +91,7 @@ compile(Mod) ->
     compile(Mod,[ast,report]).
 
 compile(Mod,Options) ->
-    scompile:compile(Mod,serlenv(),Options).
+    scompile:compile(Mod,env(),Options).
 
 %% verl     ## base
 %% serl     ## stable
@@ -212,7 +212,3 @@ reload(Version) ->
 %%     R2=code:load_file(verl2__meta), 
 %%     {R1,R2}. 
 
-
-%% save the boostrap beams in a directory, with numbered names.
-%% serlenv(0) is the latest
-%% serlenv(1) is the last version ...

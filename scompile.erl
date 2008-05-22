@@ -223,6 +223,7 @@ compile_loop(In,Env,Section) ->
     case Ast of
 	eof -> {eof,Env};
 	_ -> %% toplevel forms return a tuple of section-number and environment.
+	    %% TODO should give better error when compile loop protocol is violated
 	    {Section2,Env2}=transform(Ast,Env),
 	     if not(is_integer(Section2)) -> error("Not toplevel form: ~p\n",[Section2]);
 		Section2<Section -> error("Toplevel form out of sequence: ~p\n",[Section2]);
