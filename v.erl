@@ -9,6 +9,11 @@ bootup() ->
     dbg:p(new,[c]),
     reload(version()).
 
+profile() ->
+    fprof:apply(v,test,[test,[],[dry,expand_only]]),
+    fprof:profile(),
+    fprof:analyse({dest,"profile.dat"}).
+
 env() ->
     env:import(env:new(verl),serl).
 

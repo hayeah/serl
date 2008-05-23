@@ -15,7 +15,7 @@
 %% 	 remote_lookup/3,
 %% 	 toplevel_lookup/3,
 	 
-	 flatten/2,
+%%	 flatten/2,
 	 exports_of/1,exports_of/2,exports_of/3,
 	 imports_of/1,
 	 definitions_of/1,
@@ -38,37 +38,37 @@ new(ImportMod) ->
     assoc_put(Env,[lexical],[]).
 
 
-%% collapse namespace
-flatten(Env,NSType) ->
-    %% fuck. This is totaly crap.
-    {ok,Imports}=assoc(Env,imports),
-    ImportBs=map(fun ({_Mod,NSs}) -> assoc(NSs,NSType) end,
-		 Imports),
-    DefBs=assoc(Env,[definitions,NSType]),
-    LexicalBase=assoc(Env,[lexical_base,NSType]),
-    LexicalScopes=
-	case assoc(Env,[lexical,NSType]) of
-	    false -> []; 
-	    {ok,Scopes} ->  Scopes
-	end,
-    %% collapse according to lookup order.
-    Bs=lists:foldl(
-	 fun (Bs,AccDict) ->
-		 if Bs/=false ->
-			 case Bs of
-			     {ok,Val} -> Defs=Val;
-			     _ -> Defs=Bs
-			 end,
-			 dict:merge(
-			   fun (_K,Old,_New) -> Old end,
-			   AccDict,
-			   dict:from_list(Defs));
-		    true -> AccDict
-		 end
-	 end,
-	 dict:new(),
-	 LexicalScopes++[LexicalBase,DefBs|ImportBs]),
-    dict:to_list(Bs).
+%% %% collapse namespace
+%% flatten(Env,NSType) ->
+%%     %% fuck. This is totaly crap.
+%%     {ok,Imports}=assoc(Env,imports),
+%%     ImportBs=map(fun ({_Mod,NSs}) -> assoc(NSs,NSType) end,
+%% 		 Imports),
+%%     DefBs=assoc(Env,[definitions,NSType]),
+%%     LexicalBase=assoc(Env,[lexical_base,NSType]),
+%%     LexicalScopes=
+%% 	case assoc(Env,[lexical,NSType]) of
+%% 	    false -> []; 
+%% 	    {ok,Scopes} ->  Scopes
+%% 	end,
+%%     %% collapse according to lookup order.
+%%     Bs=lists:foldl(
+%% 	 fun (Bs,AccDict) ->
+%% 		 if Bs/=false ->
+%% 			 case Bs of
+%% 			     {ok,Val} -> Defs=Val;
+%% 			     _ -> Defs=Bs
+%% 			 end,
+%% 			 dict:merge(
+%% 			   fun (_K,Old,_New) -> Old end,
+%% 			   AccDict,
+%% 			   dict:from_list(Defs));
+%% 		    true -> AccDict
+%% 		 end
+%% 	 end,
+%% 	 dict:new(),
+%% 	 LexicalScopes++[LexicalBase,DefBs|ImportBs]),
+%%     dict:to_list(Bs).
 
 
 import(Env,Mod) ->
@@ -91,7 +91,7 @@ import(Env,Mod,NSType,Keys) ->
 
 
 exports_of(Mod) ->
-    case module_meta_info(Mod,[serl_exports]) of
+    case module_meta_info(Mod,[exports]) of
 	%% treat as serl
 	{ok,NSs} -> {ok,NSs};
 	%% treat as compiled and loaded normal erlang modules
@@ -112,7 +112,7 @@ exports_of(Mod,NSType) ->
     end.
 
 exports_of(Mod,NSType,Keys) ->
-    case module_meta_info(Mod,[serl_exports,NSType]) of
+    case module_meta_info(Mod,[exports,NSType]) of
 	{ok,NS} ->
 	    case Keys of
 		all -> {ok,{NSType,NS}};
@@ -144,7 +144,7 @@ exports_of(Mod,NSType,Keys) ->
     end.
 
 imports_of(Mod) ->
-    case module_meta_info(Mod,[serl_imports]) of
+    case module_meta_info(Mod,[imports]) of
 	{ok,Imports} ->
 	    {ok,map(fun ({ImportMod,NSs}) -> 
 		 {ImportMod,[imports_from(ImportMod,NSType,Keys) || {NSType,Keys} <- NSs]}
@@ -160,7 +160,7 @@ imports_from(Mod,NSType,Keys) ->
     end.
 
 definitions_of(Mod) ->
-    case module_meta_info(Mod,[serl_definitions]) of
+    case module_meta_info(Mod,[definitions]) of
 	{ok,AllDefs} -> AllDefs;
 	_ -> []
     end.
@@ -216,22 +216,13 @@ assoc_append(AList,Keys,List) ->
 	false -> assoc_put(AList,Keys,List)
     end.
     
-
 module_meta_info(Mod,Fs) when is_list(Fs) ->
-    case meta_module_of(Mod) of
-	{ok,MetaMod} -> module_meta_info__(MetaMod,Fs);
-	_ -> false
-    end;
+    Mod2=case Mod of
+	     verl -> verl__meta;
+	     serl -> serl__meta;
+	     _ -> Mod
+	 end,
+    assoc(Mod2:module_info(attributes),[serl_info|Fs]);
 module_meta_info(Mod,F) when is_atom(F) ->
     module_meta_info(Mod,[F]).
-
-module_meta_info__(MetaMod,Fs) ->
-    assoc(MetaMod:module_info(attributes),Fs).
-
-meta_module_of(Mod) when is_atom(Mod) ->
-    MetaMod=list_to_atom(atom_to_list(Mod)++"__meta"),
-    case code:which(MetaMod) of
-	non_existing -> false;
-	_ -> {ok,MetaMod}
-    end.
 
