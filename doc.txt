@@ -203,6 +203,14 @@ line
 mod
 data
 
+h2. defm
+
+(defm foo (:etc A B R :etc A B R))
+
+If the very first item is :etc, it is treated as a special case of :etc block (an argument block not preceded a ':').
+
+
+
 h2. Module
 
 h2. Capturing

@@ -406,7 +406,7 @@
 	VAll (var VAllName)
 	#the actual name to define the macro function
 	MacName (atom-cat: "$mac" Name) 
-	MacBody (macro-arg-1 Args Body VAll)
+	MacBody (macro-parse-args Args Body VAll)
 	## the macro function interprets the erl-ast of the macro definition
 	## the macro function closes over the current  meta-environment.
 	## the macro is not visible to its own definition.
@@ -414,8 +414,9 @@
 	## functions defined after the macro are not visible.
 	## ## I think this is sensible... 
 	EvalAst (transform 
-		 `(let ,VAll (eval-binding ,VAll)
-		      :,MacBody)
+		 `(let ,VAll (eval-binding ,VAll) :
+		       #(io\format "VAll ~p\n" [,VAll])
+		       ,MacBody)
 		 Env)
 	EvalFn
 	(begin
@@ -427,7 +428,6 @@
 	DefAst {function Line MacName 1
 			 [(verl\clause [VAll] [] [`(begin ,MacBody)] Line Env)]}
 	:
-	## the macro definition needs to be in meta and normal env
 	{10 (new-def Env macros Name
 		     {EvalFn
 		      [{ast DefAst}
@@ -449,7 +449,7 @@
 	VEnvName (let (var Name) VEnv: Name) 
 	#the actual name to define the macro function
 	MacName (atom-cat: "$special" Name) 
-	MacBody (macro-arg-1 Args Body VAll)
+	MacBody (macro-parse-args Args Body VAll)
 	EvalAst (transform 
 		 `(let ,VAll (eval-binding ,VAll)
 		       ,VEnv (eval-binding ,VEnv)
@@ -477,7 +477,66 @@
 	))
 
 
-(def macro-aux-args (Blocks VAll):
+
+(def macro-parse-args (Args Body VAll):
+  # V_n are the continuaton variables that store partial parsing results.
+  # parse the required args or a leading :etc block (special case).
+  # auxiliary args must follow the leading args.
+  (case Args
+    ([] `(let (paren [_Car]) ,VAll : ;Body))
+    ([(block ['etc|EArgs])|Blocks]
+     (let {Heads Tail} (reverse EArgs ~>> [Tail|RHeads]
+				{(reverse RHeads) Tail})
+	  VK (genvar) VK2 (genvar)
+	  :
+	  `(let* (paren [_Car ;Heads | ,VK]) ,VAll
+		 ## test to see if i can just say (upto-block ...)
+		 {,Tail ,VK2} (serl\upto-block ,VK)
+		 : ,(macro-arg-blocks Blocks Body VAll VK2))))
+    (_ (let* {Heads Blocks} (upto-block Args)
+	     VK (genvar)
+	     :
+	     `(let (paren [_Car ;Heads | ,VK]) ,VAll
+		   : ,(macro-arg-blocks Blocks Body VAll VK))
+	     ))))
+
+(def macro-arg-blocks (Blocks Body VAll VK):
+    (let* {Blocks AuxBlocks} (lists\partition
+				 (fn ((block [(atom Type) | _]))
+				     ## raise error if type not recognized
+				     (case Type
+				       (etc true)
+				       (all false)
+				       (_ (error "Unrecognized macro argument block: ~p"
+						 [Type]))))
+				 Blocks) 
+	  AuxBindings (macro-aux-blocks AuxBlocks VAll)
+	  :
+	  (case Blocks
+	    ([] `(let ;AuxBindings : ,VK ;Body))
+	    (_ `(let ;AuxBindings
+		     : ,(macro-arg-blocks-2 Blocks Body VK))
+	       ))))
+
+(def macro-arg-blocks-2 (Blocks Body VK):
+  # parse the non-auxiliary block args
+  # key & etc
+  (case Blocks
+    ([] `(begin ,VK ;Body))
+    ([(block [(atom Type)|Args])|Blocks]
+     (case Type
+       (etc (let VK2 (genvar)
+		 EtcBinding (case Args
+			      ([Tail] Tail)
+			      ## more than two args in :etc
+			      ([_ _|_] (reverse Args ~>> [Tail|RHeads]
+					  `[;RHeads|,Tail]))) 
+		 :
+		 `(let [(block ,EtcBinding)|,VK2] ,VK
+		       : ,(macro-arg-blocks-2 Blocks Body VK2)))))
+     )))
+
+(def macro-aux-blocks (Blocks VAll):
   # auxiliary arguments that don't consume arguments.
   (foldl (fn ((block [Type|Spec]) Bindings)
 	     (case Type
@@ -485,42 +544,7 @@
 	 []
 	 Blocks))
 
-(def macro-arg-1 (Args Body VAll):
-  # parse the required args
-  (let* {RequiredArgs Blocks} (upto-block Args)
-	{Blocks AuxBlocks} (lists\partition
-			    (fn ((block [Type|_]))
-				 # raise error if type not recognized
-				 (case Type
-				   ('pos true)
-				   ('all false)))
-			     Blocks)
-	AuxBindings (macro-aux-args AuxBlocks VAll)
-	VK (genvar)
-	:
-	(case Blocks
-	  ([] `(let (paren [_Car ;RequiredArgs]) ,VAll
-		    ;AuxBindings
-		    : ;Body))
-	  (_ `(let (paren [_Car ;RequiredArgs|,VK]) ,VAll
-		   ;AuxBindings
-		   :,(macro-arg-2 Blocks Body VK))
-	     ))))
 
-(def macro-arg-2 ([Block|Blocks] Body VK):
-  # parse the pos arg-block if there's one
-  (case Block
-    ((block ['pos PosArg])
-     (with-genvar VK2:
-       `(let {,PosArg ,VK2} (serl\upto-block ,VK)
-	   :,(macro-arg-3 Blocks Body VK2))
-       ))
-    (_ (macro-arg-3 [Block|Blocks] Body VK))))
-
-(def macro-arg-3 ([] Body VK):
-  # parse the block args
-  # key & etc
-  `(begin ,VK ;Body))
 
 
 
