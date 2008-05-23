@@ -166,7 +166,8 @@ eval_erl(ErlAst,Bindings,Env) ->
 	      end},
       {value, fun remote_funcall_handler/2}),
     {Val,erl_eval:bindings(NewBindings)}.
-    
+
+
 local_funcall_handler(Name,Args,Env) ->
     case lookup(Env,functions,{curmod(),Name}) of
 	{ok,Def} when is_tuple(Def) -> 
@@ -177,7 +178,7 @@ local_funcall_handler(Name,Args,Env) ->
 		%% defined function made available at compile time
 		%% %% Note that function call protocol is different
 		F when is_function(F) ->
-		    F(Args)
+		    F(Args,Env)
 	    end;
 	%% TODO should throw undef exception.
 	_ -> error("undefined function: ~p\n",[Name])
@@ -185,6 +186,7 @@ local_funcall_handler(Name,Args,Env) ->
 
 remote_funcall_handler({M,F},Args) ->
     apply(M,F,Args).
+
 
 
 compile(Mod,Env) when is_atom(Mod) ->

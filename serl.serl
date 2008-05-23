@@ -381,8 +381,9 @@
 				 ([;Args] ;Body))
 			      Env)
 		    false)
-	## TODO support multiple arities
-	EvalFn (if EvalFlag (fn (Args)
+	## TODO support multiple arities 
+	EvalFn (if EvalFlag (fn (Args Env)
+				# the environment at the time of call is passed in.
 				(scompile\eval_erl EvalAst [{EvalVarName Args}] Env ~>>
 						   {Result _} Result))
 		   {(curmod) Name})
