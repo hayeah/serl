@@ -506,6 +506,7 @@
 				     ## raise error if type not recognized
 				     (case Type
 				       (etc true)
+				       (tag true)
 				       (all false)
 				       (_ (error "Unrecognized macro argument block: ~p"
 						 [Type]))))
@@ -522,7 +523,8 @@
   # parse the non-auxiliary block args
   # key & etc
   (case Blocks
-    ([] `(begin ,VK ;Body))
+    ([] `(case ,VK
+	   ([] ;Body)))
     ([(block [(atom Type)|Args])|Blocks]
      (case Type
        (etc (let VK2 (genvar)
@@ -530,11 +532,20 @@
 			      ([Tail] Tail)
 			      ## more than two args in :etc
 			      ([_ _|_] (reverse Args ~>> [Tail|RHeads]
-					  `[;RHeads|,Tail]))) 
+					  `[;(reverse RHeads)|,Tail]))) 
 		 :
 		 `(let [(block ,EtcBinding)|,VK2] ,VK
-		       : ,(macro-arg-blocks-2 Blocks Body VK2)))))
-     )))
+		       : ,(macro-arg-blocks-2 Blocks Body VK2))))
+       (tag (let [Tag TagArg] Args
+		 VK2 (genvar) 
+		 :
+		 `(let {,TagArg ,VK2} (case ,VK
+					([(block [(atom ,Tag)|TagVal])|Blocks]
+					 {TagVal Blocks})
+					(Args {false Args})):
+		       ,(macro-arg-blocks-2 Blocks Body VK2))
+		 ))
+       ))))
 
 (def macro-aux-blocks (Blocks VAll):
   # auxiliary arguments that don't consume arguments.
