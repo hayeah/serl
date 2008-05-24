@@ -54,9 +54,10 @@ error(Message,Args) ->
 -define(options,{?MODULE,'options'}).
 -define(toplevel_cache(M),{?MODULE,{toplevel_env_cache,M}}).
 
-init_state() ->
-    %% reset compiler state.
-    init_state(#state{}).
+%% init_state() ->
+%%     %% reset compiler state.
+%%     init_state(#state{}).
+
 init_state(S) when is_record(S,state) ->
     put(?lineno,S#state.lineno),
     put(?curmod,S#state.curmod),
@@ -239,49 +240,30 @@ new_process(Fun,Args) ->
     new_process(Fun,Args,#state{}).
 
 new_process(Fun,Args,State) ->
-    erase(), %% clear process dictionary. Not necessary if this is in a thread. But it's not at the moment. 
-    init_state(State),
-    %%process_flag(trap_exit, true),
-    try apply(Fun,Args) of
-	R -> R
-    after
-	%% reset compiler state.
-	init_state()
-    end. 
+    process_flag(trap_exit, true),
+    Sync=spawn_link(
+	   fun () -> init_state(State), 
+		     R=apply(Fun,Args),
+		     exit({result,R})
+	   end),
+    wait_result(Sync).
 
 
-%% new_process(Fun,Args,State) ->
-%%     %%process_flag(trap_exit, true),
-%%     Return=self(),
-%%     Sync=spawn_link(
-%% 	   fun () -> init_state(State), 
-%% 		     R=apply(Fun,Args),
-%% 		     Return ! {self(),R}
-%% 	   end),
-%%     wait_result(Sync).
-
-
-%% wait_exit(Sync) ->
-%%     receive
-%% 	{'EXIT',Sync,normal} -> wait_result(Sync);
+wait_result(Sync) ->
+    receive
+	{'EXIT',Sync,{result,R}} -> R;
+	
 %% 	{'EXIT',Sync,{{serl_error,Reason,Trace},_}} ->
 %% 	    io:format("Error: ~p\n~p\n",[Reason,Trace]),
 %% 	    {error,Reason};
-%% 	{'EXIT',Sync,Reason} ->
-%% 	    io:format("Error: ~p\n",[Reason]),
-%% 	    erlang:error(Reason) 
-%%     after 120000 ->
-%% 	    %% time out after 2 minutes
-%% 	    erlang:error(timeout)
-%%     end.
-
-%% wait_result(Sync) ->
-%%     receive
-%% 	{Sync,Result} -> Result
-%%     after 120000 ->
-%% 	    %% time out after 2 minutes
-%% 	    erlang:error(timeout)
-%%     end.
+	
+	{'EXIT',Sync,Reason} ->
+	    io:format("Error: ~p\n",[Reason]),
+	    erlang:error(Reason) 
+    after 10000 ->
+	    %% time out after 10 seconds
+	    erlang:error(timeout)
+    end.
 
 macroexpand(?ast_paren([Car|_])=Exp,Env) when is_tuple(Exp) ->
     try case lookup_expander(Env,Car) of
