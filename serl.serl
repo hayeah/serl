@@ -1,10 +1,5 @@
 ## make sure I can change the AST representation whenver I feel like it.
 
-## each custom namespace probably needs to define a set of pseudo special forms
-## export-<NS>
-## import-<NS>
-## output-<NS>
-
 (module serl)
 
 (import scompile
@@ -27,66 +22,50 @@
 	foreach
 	)
 
+(import erlang
+	length)
+
 ## verl's meta-module doesn't support import.
 ### this is a special case
 # (import verl clause) 
 #(importm verl ...)
 
-(export ast-tag ast-line ast-mod ast-data
-	upto-block
-	atom-cat
-	)
+# (export ast-tag ast-line ast-mod ast-data
+# 	upto-block
+# 	atom-cat
+# 	erlpp ## TODO: remove when eval-only is implemented
+# 	output-forms ## TODO: remove later when verl is removed.
+# 	)
 
-(export sp-block sp-brace
-	sp-fn
-	sp-call
-	sp-let
-	sp-lsc
-	sp-case
-	sp-if
-	sp-toplevel
-	sp-bof
-	sp-eof
-	)
-
-(export mac-let*
-	mac->>
-	mac-with-genvar 
-	)
-
-#\ex \env
-(export sp-def
-	sp-defm
-	sp-defspecial
-	sp-functions-import
-	sp-functions-export
-	sp-functions-output
-	sp-macros-export
-	sp-macros-output
-	sp-specials-export
-	sp-specials-output
-	
-	)
-
-(export mac-export-from
-	mac-import-from
-	mac-import
-	mac-export
-	)
-
-
-
-(export
-  sp-+
-  sp--
-  sp-*
-  sp-/
-  sp-==
-  sp-not
-#  sp-<
-# sp->
- )
-
+(export-from
+ (functions
+  ast-tag ast-line ast-mod ast-data
+  upto-block
+  atom-cat
+  erlpp		     ## TODO: remove when eval-only is implemented
+  output-forms	     ## TODO: remove later when verl is removed.
+  )
+ (specials
+  %a{__eof} %a{__bof}
+  %a{__block} %a{__brace} 
+  def defm defspecial
+  functions-import functions-export functions-output
+  #macros-import
+  macros-export macros-output
+  #specials-import
+  specials-export specials-output
+  let lsc
+  fn call 
+  case if
+  toplevel
+  + - * / ==
+  not
+  )
+ (macros
+  export-from import-from
+  export import
+  let*
+  ))
 
 
 ##################################################
@@ -97,6 +76,9 @@
 (def ast-line (Ast):eval: (erlang\element 2 Ast))
 (def ast-mod (Ast):eval: (erlang\element 3 Ast))
 (def ast-data (Ast):eval: (erlang\element 4 Ast))
+
+(def erlpp (Ast):eval:
+     (fmt "~s\n" [(erl_pp\expr Ast)]))
 
 (def upto-block (Es):eval:
   (let {UpToFirstBlock Rest} (lists\splitwith
@@ -121,14 +103,14 @@
 
 
 #\with-genvar
-(def mac-with-genvar (`(,_ ;Form)):
-  (let {Vars [BodyBlock]} (upto-block Form):
-       `(let ;(lists\foldl
-	       (fn (Var Acc) [Var '(scompile\genvar)|Acc])
-	       []
-	       Vars)
-	  ,BodyBlock
-	  )))
+
+(defm with-genvar (:etc Vars :etc Body): 
+  `(let ;(lists\foldl
+	  (fn (Var Acc) [Var '(scompile\genvar)|Acc])
+	  []
+	  Vars):
+     ;Body
+     ))
 
 
 # (def clause (Ps G Es Line Env):
@@ -158,31 +140,41 @@
 # .Pseudo Forms
 
 
-(def sp-bof (`(,_) Env):
+(defspecial %a{__bof} () Env:
   {0 Env})
 
-(def sp-eof (`(,_ ,Command) Env):
+(defspecial %a{__eof} (Command) Env:
   (case Command
     (normal (verl\emit (output-forms Env) Env
 		       (verl\set_opts (scompile\options))))
     (after (verl\cleanup))))
 
-(def output-forms (Env):
+(defspecial %a{__block} (:etc [Es]) Env:
+  (transform `(ls: ;Es) Env))
+
+(defspecial %a{__brace} (:etc [Es]) Env: 
+  (transform `(tuple: ;Es) Env))
+
+(def output-forms (Env):eval:
   ## do output for each NS types
   (let* Types (lsc {Type _} (env\assoc Env [definitions] ~>>
 				       {ok NSs} NSs):
 		   Type):
 	(foldl (fn (Type {Info Headers Bodies})
+		   ## transform (<Type>-output) for each namespace
 		   (transform `(,(atom (atom-cat: Type output)) ,Info) Env
 			      ~>> {I H B} {I [H|Headers] [B|Bodies]}))
 	       {(env\new) [] []}
 	       Types
 	       ~>> {Info Headers Bodies}
-	       (lists\flatten [{attribute 0 module (curmod)}
-			       {attribute 0 serl true}
-			       {attribute 0 serl_info Info}
-			       Headers Bodies])
-	       )))
+		(let Info (env\assoc_put Info [imports]
+					 (env\assoc Env [imports]
+						    ~>> {ok Imports} Imports)):
+		  (lists\flatten [{attribute 0 module (curmod)}
+				  {attribute 0 serl true}
+				  {attribute 0 serl_info Info}
+				  Headers Bodies])
+		  ))))
 
 
 ##################################################
@@ -195,8 +187,56 @@
 
 # (import-from mod (macros ...) (functions ...))
 
+
+(def export-defs (Env Type Names):eval:
+  (env\assoc_append Env [exports Type] Names))
+
+(def get-exports (Env Type):eval:
+  (env\assoc Env [exports Type] ~case
+	     ({ok Names} Names)
+	     (_ [])))
+
+# (def get-imports (Env Type):eval:
+#      (let Names (env\assoc Env [imports] ~>> {ok Imports}
+# 			   (lsc {Mod _} Imports
+# 				Name (env\assoc [imports Mod Type] ~>> {ok }
+# 						)
+# 				: Mod)):
+# 	  Namess (lsc Mod Mods
+# 		      Val (env\imports_of Mod Type all ~>> {Type Vals}):
+# 		      )
+# 	  ))
+
+
+(def new-def (Env NSType Name Def):eval:
+  (let Defined (env\assoc Env [definitions NSType Name]):
+       (if Defined (error "%s already defined in %s" [Name NSType])
+	   (env\assoc_put Env [definitions NSType Name] Def)
+	   )))
+
+(def def-info (Env NSType Name Key):eval:
+  # caller of this function should check its result
+  (case (env\assoc Env [definitions NSType Name])
+    ({ok Def} (proplists\lookup Key (erlang\element 2 Def) ~case
+				(none false)
+				({_ R} {ok R})))
+    (_ false)))
+
+# (def get-def (Env NSType Name):eval:
+#   # get the definition of a name
+#   (env\assoc Env [definitions NSType Name] ~case
+# 	     ({ok Def} Def)
+# 	     (_ false)))
+
+(def get-defs (Env NSType):eval:
+  # get all the definitions related to a namespace
+  (env\assoc Env [definitions NSType] ~case
+	     ({ok Defs} Defs)
+	     (false [])))
+
+
 #\import-from
-(def mac-import-from (`(,_ ,Mod ;Specs)):
+(defm import-from (:etc Mod Specs):
   `(toplevel
     ;(lsc `(,(atom Type) ;Names) Specs:
 	  `(,(atom (atom-cat: Type import)) ,Mod ;Names)
@@ -209,17 +249,17 @@
 #  (macros-export c d e))
 
 #\export-from
-(def mac-export-from (`(,_ ;Specs)):
+(defm export-from (:etc Specs):
   `(toplevel
     ;(lsc `(,(atom Type) ;Names) Specs:
 	  `(,(atom (atom-cat: Type export)) ;Names)
 	  )))
 
 #\import
-(def mac-import (`(,_ ;Es)):
-  `(functions-import ;Es))
+(defm import (:etc Mod Names):
+  `(functions-import ,Mod ;Names))
 
-(def sp-functions-import (`(,_ ,Mod ;Names) Env):
+(defspecial functions-import (:etc Mod Names) Env:
   (let (atom Mod) Mod
        Names (lsc (atom A) Names: A):
        (foreach (fn (Name)
@@ -233,256 +273,119 @@
        ))
 
 #\export
-(def mac-export (`(,_ ;Es)):
-  `(functions-export ;Es))
+(defm export (:etc Mod Names):
+  `(functions-export ,Mod ;Names))
 
-# #If F is an attribute -export([Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,export,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}.
+#If F is an attribute -export([Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,export,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}.
 
-(def sp-functions-export (`(,_ ;Names) Env):
+(defspecial functions-export (:etc Names) Env:
+  (fmt "fun-export: ~p\n" [Names])
   {2 (export-defs Env functions Names)})
 
-(def sp-functions-output (`(,_ ,Info) Env):
+(defspecial functions-output (Info) Env:
   (output-fun Info Env functions))
 
 
 
-(def sp-macros-export (`(,_ ;Names) Env):
+(defspecial macros-export (:etc Names) Env:
   {2 (export-defs Env macros Names)})
 
-(def sp-macros-output (`(,_ ,Info) Env):
+(defspecial macros-output (Info) Env:
   (output-meta-fun Info Env macros))
 
 
 
-(def sp-specials-export (`(,_ ;Names) Env):
+(defspecial specials-export (:etc Names) Env:
   {2 (export-defs Env specials Names)})
 
-(def sp-specials-output (`(,_ ,Info) Env):
+(defspecial specials-output (Info) Env:
   (output-meta-fun Info Env specials))
 
 
-(def output-fun (Info Env Type):
-  ## used so far by functions
-  (let FNames (lsc {Name _} (get-defs Env Type):
-		Name)
-       Exports (get-exports Env Type):
-       {(env\assoc_put Info [exports Type]
-		       (let M (curmod):
-			    (lsc (atom Name) Exports:
-				 {Name {M Name}
-				       [{doc (def-info Env Type Name doc ~>>
-						       {ok Doc} Doc)}]})))
-	##export attributes
-	(lsc Name Exports
-	     Arity (def-info Env Type (ast-data Name) arities ~case
-			     ({ok Arities} Arities)
-			     (_ (error "~p: Exporting ~p undefined: ~p"
-				       [(ast-line Name) Type (ast-data Name)]))):
-	     {attribute (ast-line Name) export
-			[{(ast-data Name) Arity}]})
-	##definitions
-	(lsc Name FNames:
-	     (def-info Env Type Name ast ~case
-		       ({ok Ast} Ast)))
-	}))
 
-(def output-meta-fun (Info Env Type):
+(def output-fun (Info Env Type):eval:
+  ## used so far by functions
+     (fmt "output: ~p\n" [Type])
+  (let* FNames (lsc {Name _} (get-defs Env Type):
+		    Name)
+	Exports (lsc Export (get-exports Env Type): 
+		     {(ast-line Export)
+		      (ast-data Export)
+		      })
+	Info (env\assoc_put
+	      Info [exports Type]
+	      (let M (curmod):
+		   (lsc {Line Name} Exports:
+			{Name {{M Name}
+			       [{doc
+				 (def-info Env Type Name doc ~case
+					   ({ok Doc} Doc)
+					   (_ (error "~p: Exporting ~p undefined: ~p"
+						     [Line Type Name])))
+				 }]}})))
+	:
+	##(fmt "Info: ~p\n" [Info])
+	{Info
+	 ##export attributes
+	 (lsc {Line Name} Exports
+	      Arity (def-info Env Type Name arities ~>>
+			      {ok Arities} Arities):
+	      {attribute Line export
+			 [{Name Arity}]})
+	 ##definitions
+	 (lsc Name FNames:
+	      (def-info Env Type Name ast ~case
+			({ok Ast} Ast)))
+	 }))
+
+(def output-meta-fun (Info Env Type):eval:
   ## shared by exports,specials
   ## only the exported defs need actually be output
-  (let* Exports (get-exports Env Type)
+     (fmt "output-meta: ~p\n" [Type])
+  (let* Exports (lsc Export (get-exports Env Type):
+		     {(ast-line Export) (ast-data Export)})
 	{Headers Bodies}
-	(lsc Name Exports:
-	     (let* Line (ast-line Name) 
-		   Name (ast-data Name)
-		   MacName (def-info Env Type Name name ~case
+	(lsc {Line Name} Exports:
+	     (let* MacName (def-info Env Type Name name ~case
 				     ({ok Name} Name)
 				     (_ (error "~p: Exporting ~p undefined: ~p"
-					       [Line Type Name]))) :
-		   {(lsc Arity (def-info Env Type Name arities ~>>
-					 {ok Arities} Arities):
-			 {attribute Line export [{MacName Arity}]})
-		    (def-info Env Type Name ast ~case
-			      ({ok Ast} Ast))})
+					       [Line Type Name])))
+		   Attributes (lsc Arity (def-info Env Type Name arities ~>>
+						   {ok Arities} Arities):
+				   {attribute Line export [{MacName Arity}]})
+		   Ast (def-info Env Type Name ast ~case
+				 ({ok Ast} Ast)):
+		   {Attributes Ast})
 	     .lists\unzip)
+	Info
+	(env\assoc_put Info [exports Type]
+		       (lsc {_L Name} Exports:
+			    {Name {## Fun
+				   {(curmod) (def-info Env Type Name name ~>>
+						       {ok MacName} MacName)}
+				   ## Info
+				   [{doc (def-info Env Type Name doc ~>>
+						   {ok Doc} Doc)}]}}))
 	:
-	{(env\assoc_put Info [exports Type]
-			(let Names (lsc (atom Name) Exports: Name)
-			     M (curmod):
-			     (lsc Name Names:
-				  {Name {M (def-info Env Type Name name ~>>
-						     {ok MacName} MacName)}
-					[{doc (def-info Env Type Name doc ~>>
-							{ok Doc} Doc)}]})))
+	##(fmt "Info: ~p\n" [Info])
+	{Info 
+	 ## export attributes
 	 (lists\flatten Headers)
+	 ## definitions
 	 Bodies})) 
 
 
 
-(def export-defs (Env Type Names):
-  (env\assoc_append Env [exports Type] Names))
-
-(def get-exports (Env Type):
-  (env\assoc Env [exports Type] ~case
-	     ({ok Names} Names)
-	     (_ [])))
-
-
-
-(def new-def (Env NSType Name Def):
-  (let Defined (env\assoc Env [definitions NSType Name]):
-       (if Defined (error "%s already defined in %s" [Name NSType])
-	   (env\assoc_put Env [definitions NSType Name] Def)
-	   )))
-
-(def def-info (Env NSType Name Key):
-  # caller of this function should check its result
-  (case (env\assoc Env [definitions NSType Name])
-    ({ok Def} (proplists\lookup Key (erlang\element 2 Def) ~case
-				(none false)
-				({_ R} {ok R})))
-    (_ false)))
-
-# (def get-def (Env NSType Name):
-#   # get the definition of a name
-#   (env\assoc Env [definitions NSType Name] ~case
-# 	     ({ok Def} Def)
-# 	     (_ false)))
-
-(def get-defs (Env NSType):
-  # get all the definitions related to a namespace
-  (env\assoc Env [definitions NSType] ~case
-	     ({ok Defs} Defs)
-	     (false [])))
-
-
 
 ##################################################
-# 2. Definitions
-
-#\def
-(def sp-def (`(,_Car ,(atom Name) (;Args) ;Es) Env):
-  (let* Line (lineno)
-	Arity (erlang\length Args)
-	[(block Body)|Options] (reverse Es)
-	Options (lsc (block [(atom Type)|Spec]) Options: {Type Spec})
-	Doc (proplists\lookup doc Options ~case
-			      (none "No doc")
-			      ({doc [(string Doc)]} Doc))
-	EvalFlag (proplists\lookup eval Options ~case
-				   (none false)
-				   ({eval []} true))
-	DefAst {function Line Name Arity
-			 [(verl\clause Args [] Body Line Env)]}
-	EvalVarName (gensym)
-	EvalVar (var EvalVarName)
-	## Note that the it expects compiler to pass in the args in a list.
-	EvalAst (if EvalFlag (transform
-			      `(case (eval-binding ,EvalVar)
-				 ([;Args] ;Body))
-			      Env)
-		    false)
-	## TODO support multiple arities 
-	EvalFn (if EvalFlag (fn (Args Env)
-				# the environment at the time of call is passed in.
-				(scompile\eval_erl EvalAst [{EvalVarName Args}] Env ~>>
-						   {Result _} Result))
-		   {(curmod) Name})
-	:
-	#(output DefAst)
-	{10 (new-def Env functions Name
-		     {EvalFn
-		      [{ast DefAst}
-		       {doc Doc}
-		       {eval EvalFlag}
-		       {arities [Arity]}]})}
-	))
+# .Definitions
 
 
-#\defm
-(def sp-defm (`(,_Car ,Name (;Args) :;Body) Env):
-  (let* Name (let (atom Name) Name: Name)
-	Line (lineno)
-	#the variable for the whole macro expression
-	VAllName (gensym)
-	VAll (var VAllName)
-	#the actual name to define the macro function
-	MacName (atom-cat: "$mac" Name) 
-	MacBody (macro-parse-args Args Body VAll)
-	## the macro function interprets the erl-ast of the macro definition
-	## the macro function closes over the current  meta-environment.
-	## the macro is not visible to its own definition.
-	## ## but the macro /can/ be used recursively.
-	## functions defined after the macro are not visible.
-	## ## I think this is sensible... 
-	EvalAst (transform 
-		 `(let ,VAll (eval-binding ,VAll) :
-		       #(io\format "VAll ~p\n" [,VAll])
-		       ,MacBody)
-		 Env)
-	EvalFn
-	(begin
-	 ##(io\format "EvalAst: \n~s\n" [(erl_pp\expr EvalAst)])
-	 (fn (Ast)
-	     (scompile\eval_erl EvalAst [{VAllName Ast}] Env ~>>
-				{Result _} Result)
-	     ))
-	DefAst {function Line MacName 1
-			 [(verl\clause [VAll] [] [`(begin ,MacBody)] Line Env)]}
-	:
-	{10 (new-def Env macros Name
-		     {EvalFn
-		      [{ast DefAst}
-		       {arities [1]}
-		       {name MacName}
-		       {args Args} 
-		       {doc "A macro"}]})}))
-
-
-#\defspecial
-(def sp-defspecial (`(,_Car ,Name (;Args) ,VEnv: ;Body) Env):
-  (let* Name (let (atom Name) Name: Name)
-	Line (lineno)
-	#the variable for the whole macro expression
-	VAllName (gensym)
-	VAll (var VAllName)
-	#the variable for the environment during expansion
-	#VEnv
-	VEnvName (let (var Name) VEnv: Name) 
-	#the actual name to define the macro function
-	MacName (atom-cat: "$special" Name) 
-	MacBody (macro-parse-args Args Body VAll)
-	EvalAst (transform 
-		 `(let ,VAll (eval-binding ,VAll)
-		       ,VEnv (eval-binding ,VEnv)
-		      :,MacBody)
-		 Env)
-	EvalFn
-	(begin
-	 ##(io\format "EvalAst: \n~s\n" [(erl_pp\expr EvalAst)])
-	 (fn (Ast Env)
-		   (let {Result _} (scompile\eval_erl EvalAst [{VAllName Ast}
-							       {VEnvName Env}]
-						      Env):
-			Result)))
-	DefAst {function Line MacName 2
-			 [(verl\clause [VAll VEnv] [] [`(begin ,MacBody)] Line Env)]}
-	:
-	## the macro definition needs to be in meta and normal env
-	{10 (new-def Env specials Name
-		     {EvalFn
-		      [{ast DefAst}
-		       {arities [2]}
-		       {name MacName}
-		       {args Args} 
-		       {doc "A special form"}]})}
-	))
-
-
-
-(def macro-parse-args (Args Body VAll):
+(def macro-parse-args (Args Body VAll):eval:
   # V_n are the continuaton variables that store partial parsing results.
   # parse the required args or a leading :etc block (special case).
   # auxiliary args must follow the leading args.
+     #(fmt "MPA:\nBody: ~p\n" [Body])
   (case Args
     ([] `(let (paren [_Car]) ,VAll : ;Body))
     ([(block ['etc|EArgs])|Blocks]
@@ -491,8 +394,7 @@
 	  VK (genvar) VK2 (genvar)
 	  :
 	  `(let* (paren [_Car ;Heads | ,VK]) ,VAll
-		 ## test to see if i can just say (upto-block ...)
-		 {,Tail ,VK2} (serl\upto-block ,VK)
+		 {,Tail ,VK2} (upto-block ,VK)
 		 : ,(macro-arg-blocks Blocks Body VAll VK2))))
     (_ (let* {Heads Blocks} (upto-block Args)
 	     VK (genvar)
@@ -501,7 +403,7 @@
 		   : ,(macro-arg-blocks Blocks Body VAll VK))
 	     ))))
 
-(def macro-arg-blocks (Blocks Body VAll VK):
+(def macro-arg-blocks (Blocks Body VAll VK):eval:
     (let* {Blocks AuxBlocks} (lists\partition
 				 (fn ((block [(atom Type) | _]))
 				     ## raise error if type not recognized
@@ -517,10 +419,11 @@
 	  (case Blocks
 	    ([] `(let ;AuxBindings : ,VK ;Body))
 	    (_ `(let ;AuxBindings
-		     : ,(macro-arg-blocks-2 Blocks Body VK))
-	       ))))
+		  : ,(macro-arg-blocks-2 Blocks Body VK)))
+	    #~>> R (fmt "MAB -> ~p\n" [R]) R
+	     )))
 
-(def macro-arg-blocks-2 (Blocks Body VK):
+(def macro-arg-blocks-2 (Blocks Body VK):eval:
   # parse the non-auxiliary block args
   # key & etc
   (case Blocks
@@ -548,7 +451,7 @@
 		 ))
        ))))
 
-(def macro-aux-blocks (Blocks VAll):
+(def macro-aux-blocks (Blocks VAll):eval:
   # auxiliary arguments that don't consume arguments.
   (foldl (fn ((block [Type|Spec]) Bindings)
 	     (case Type
@@ -557,48 +460,170 @@
 	 Blocks))
 
 
+#\def
+(defspecial def ((atom Name) `(;Args)
+		 :tag doc Doc
+		 :tag eval Eval
+		 :etc Body) Env:
+  (fmt "def: ~p\n" [Name])
+  (let* Line (lineno)
+	Arity (length Args)
+	EvalFlag (case Eval (false false) (_ true))
+	Doc (case Doc (false "") (_ Doc))
+	DefAst {function Line Name Arity
+			 [(verl\clause Args [] Body Line Env)]}
+	EvalVarName (gensym)
+	EvalVar (var EvalVarName)
+	## Note that the it expects compiler to pass in the args in a list.
+	EvalAst (if EvalFlag (transform
+			      `(case (eval-binding ,EvalVar)
+				 ([;Args] ;Body))
+			      Env)
+		    false)
+	## TODO support multiple arities 
+	EvalFn (if EvalFlag (fn (Args Env)
+				# the environment at the time of call is passed in.
+				(scompile\eval_erl EvalAst [{EvalVarName Args}] Env ~>>
+						   {Result _} Result))
+		   {(curmod) Name})
+	:
+	#(erlpp EvalAst)
+	{10 (new-def Env functions Name
+		     {EvalFn
+		      [{ast DefAst}
+		       {doc Doc}
+		       {eval EvalFlag}
+		       {arities [Arity]}]})}
+	))
 
+
+#\defm
+(defspecial defm ((atom Name) `(;Args)
+		       :tag doc Doc
+			:etc Body) Env:
+  (fmt "defm: ~p\n" [Name])
+  (let* Doc (case Doc (false "") (_ Doc))
+	Line (lineno)
+	#the variable for the whole macro expression
+	VAllName (gensym)
+	VAll (var VAllName)
+	#the actual name to define the macro function
+	MacName (atom-cat: "$mac" Name) 
+	MacBody (macro-parse-args Args Body VAll) 
+	## the macro function interprets the erl-ast of the macro definition
+	## the macro function closes over the current  meta-environment.
+	## the macro is not visible to its own definition.
+	## ## but the macro /can/ be used recursively.
+	## functions defined after the macro are not visible.
+	## ## I think this is sensible... 
+	EvalAst (transform 
+		 `(let ,VAll (eval-binding ,VAll) :
+		       ##(io\format "VAll ~p\n" [,VAll])
+		       ,MacBody)
+		 Env)
+	EvalFn
+	(begin
+	 ##(io\format "EvalAst: \n~s\n" [(erl_pp\expr EvalAst)])
+	 (fn (Ast) 
+	     (scompile\eval_erl EvalAst [{VAllName Ast}] Env ~>>
+				{Result _} Result)
+	     ))
+	DefAst {function Line MacName 1
+			 [(verl\clause [VAll] [] [`(begin ,MacBody)] Line Env)]}
+	:
+	#(fmt "defm ok\n")
+	{10 (new-def Env macros Name
+		     {EvalFn
+		      [{ast DefAst}
+		       {arities [1]}
+		       {name MacName}
+		       {args Args} 
+		       {doc Doc}]})}))
+
+
+#\defspecial
+(defspecial defspecial ((atom Name) `(;Args) VEnv
+		       :tag doc Doc
+			:etc Body) Env :
+  (fmt "defspecial: ~p\n" [Name])
+  (let* Doc (case Doc (false "") (_ Doc))
+	Line (lineno)
+	#the variable for the whole macro expression
+	VAllName (gensym)
+	VAll (var VAllName)
+	#the variable for the environment during expansion
+	#VEnv
+	VEnvName (let (var Name) VEnv: Name) 
+	#the actual name to define the macro function
+	MacName (atom-cat: "$special" Name) 
+	MacBody (macro-parse-args Args Body VAll)
+	EvalAst (transform 
+		 `(let ,VAll (eval-binding ,VAll)
+		       ,VEnv (eval-binding ,VEnv)
+		      :,MacBody)
+		 Env)
+	EvalFn
+	(begin
+	 ##(io\format "EvalAst: \n~s\n" [(erl_pp\expr EvalAst)])
+	 (fn (Ast Env)
+	     #(fmt "expand special ~p\nAST:~p\n" [Name Ast])
+	     (let {Result _} (scompile\eval_erl EvalAst [{VAllName Ast}
+							 {VEnvName Env}]
+						Env):
+		  Result)))
+	DefAst {function Line MacName 2
+			 [(verl\clause [VAll VEnv] [] [`(begin ,MacBody)] Line Env)]}
+	: 
+	##(erlpp EvalAst)
+	## the macro definition needs to be in meta and normal env
+	#(fmt "defspecial ok\n")
+	{10 (new-def Env specials Name
+		     {EvalFn
+		      [{ast DefAst}
+		       {arities [2]}
+		       {name MacName}
+		       {args Args} 
+		       {doc Doc}]})}))
 
 
 ##################################################
 # 3. Binding Forms
 
-#\let
-(def mac-let* (`(,_ ;Form)):
-  (let {Bindings [(block Body)]} (upto-block Form):
-       (case Bindings
-	 ([] `(begin ;Body))
-	 ([Pattern Value|Bindings] `(let ,Pattern ,Value: (let* ;Bindings: ;Body))))))
 
-(def sp-let (`(let ;Es) Env):
-  (let* Line (lineno)
-	{Bindings [(block Body)]} (upto-block Es)
-	{Patterns Assignments} (let-bindings Bindings [] [])
-	Env2 (verl\binds Patterns (scompile\lexical_shadow Env vars []))
-	Assignments (map
-		     (fn ({P V}):
-			 {match (element 2 P)
-				(verl\gen_pat P Env2) # pattern generated with new bindings
-				(transform V Env)} # value evaluated with old environment
-			 )
-		     
-		     Assignments):
-	{block Line (cat Assignments (transform_each Body Env2))}))
-
-(def let-bindings (Bindings Patterns Assignments):
+(def let-bindings (Bindings Patterns Assignments):eval:
      (case Bindings
-       ([]: {(reverse Patterns) (reverse Assignments)})
-       ([Pattern Value|Bindings]:
+       ([] {(reverse Patterns) (reverse Assignments)})
+       ([Pattern Value|Bindings]
 	(let-bindings Bindings [Pattern|Patterns] [{Pattern Value}|Assignments]))))
 
-(def mac->> (`(>> ,Val ,Pattern ;Es)):
-  `(let ,Pattern ,Val: ;Es))
+#\let
+(defm let* (:etc Bindings :etc Body):
+  (case Bindings
+    ([] `(begin ;Body))
+    ([Pattern Value|Bindings] `(let ,Pattern ,Value: (let* ;Bindings: ;Body)))))
+
+(defspecial let (:etc Bindings :etc Body) Env:
+  (let* Line (lineno) 
+	{Patterns Assignments} (let-bindings Bindings [] []) 
+	Env2 (verl\binds Patterns (scompile\lexical_shadow Env vars []))
+	Assignments
+	(lsc {P V} Assignments:
+	     {match (ast-line P)
+		    (verl\gen_pat P Env2) # pattern generated with new bindings
+		    (transform V Env)} # value evaluated with old environment
+	     ) 
+	: 
+	{block Line (cat Assignments (transform_each Body Env2))}))
 
 
-# ## If E is case E_0 of Cc_1 ; ... ; Cc_k end, where E_0 is an expression and each Cc_i is a case clause then Rep(E) = {'case',LINE,Rep(E_0),[Rep(Cc_1), ..., Rep(Cc_k)]}.
+(defm >> (:etc Val Pattern Body):
+  `(let ,Pattern ,Val: ;Body))
+
+
+# If E is case E_0 of Cc_1 ; ... ; Cc_k end, where E_0 is an expression and each Cc_i is a case clause then Rep(E) = {'case',LINE,Rep(E_0),[Rep(Cc_1), ..., Rep(Cc_k)]}.
 
 #\case
-(def sp-case (`(case ,E ;Cs) Env):
+(defspecial case (:etc E Cs) Env:
   (let Line (lineno):
        {case Line
 	 (transform E Env)
@@ -613,18 +638,7 @@
 # If W is a generator P <= E, where P is a pattern and E is an expression, then Rep(W) = {b_generate,LINE,Rep(P),Rep(E)}. 
 # If W is a filter E, which is an expression, then Rep(W) = Rep(E).
 
-#\lsc
-(def sp-lsc (`(,_ ;Form) Env):
-  (let* Line (lineno)
-	{Qualifiers [(block Body)]} (upto-block Form)
-	{Env RWs} (lsc-bindings Env Qualifiers [])
-	:
-	{lc Line
-	    (transform `(begin ;Body) Env)
-	    RWs}
-	))
-
-(def lsc-bindings (Env Qs Acc):
+(def lsc-bindings (Env Qs Acc):eval:
   (case Qs
     ([] {Env (reverse Acc)})
     (['if Filter|Qs] (lsc-bindings Env Qs [(transform Filter Env)|Acc]))
@@ -635,6 +649,16 @@
 					   (transform Generator Env)}
 				 |Acc])
 	  ))))
+
+#\lsc
+(defspecial lsc (:etc Qualifiers :etc Body) Env:
+  (let* Line (lineno)
+	{Env RWs} (lsc-bindings Env Qualifiers [])
+	:
+	{lc Line
+	    (transform `(begin ;Body) Env)
+	    RWs}
+	))
 
 
 
@@ -647,9 +671,16 @@
 # (fn foo 3)
 
 
+(def fn-value (Args Es Env):eval:
+  (let L (lineno)
+       Env (scompile\lexical_shadow Env vars []):
+       {fun L
+	    {clauses [(verl\clause Args [] Es L Env)]}}))
+
+
 #\fn
-(def sp-fn (`(,_ ,Arg ;Es) Env):
-  (case Arg
+(defspecial fn (:etc Sig Es) Env:
+  (case Sig
     (`(;Args) (fn-value Args Es Env)) 
     ((integer N)
      (fn-value
@@ -666,7 +697,7 @@
       Es Env)) 
     ((atom A)
      (let* L (lineno)
-	   M (ast-mod Arg)
+	   M (ast-mod Sig)
 	   [(integer Arity)] Es
 	   FromSource (== M (curmod)):
 	   (if FromSource
@@ -680,12 +711,6 @@
 	       )))
     ))
 
-(def fn-value (Args Es Env):
-  (let L (lineno)
-       Env (scompile\lexical_shadow Env vars []):
-       {fun L
-	    {clauses [(verl\clause Args [] Es L Env)]}}))
-
 
 # %%  If E is E_m:E_0(E_1, ..., E_k), then Rep(E) = {call,LINE,{remote,LINE,Rep(E_m),Rep(E_0)},[Rep(E_1), ..., Rep(E_k)]}. 
 # (call Em\E0 ...)
@@ -693,10 +718,19 @@
 # %%  If E is E_0(E_1, ..., E_k), then Rep(E) = {call,LINE,Rep(E_0),[Rep(E_1), ..., Rep(E_k)]}.
 # (call E0 ...)
 
+(def local-call (A Args Env):eval:
+  {call (ast-line A) (transform A Env) (transform_each Args Env)})
+
+(def remote-call (M A Args Env):eval:
+  (let L (ast-line M):
+       {call L
+	     {remote L (transform M Env) (transform A Env)}
+	     (transform_each Args Env)}))
+
 #\call 
-(def sp-call (`(,_ ,Fn ;Args) Env):
+(defspecial call (:etc Fn Args) Env:
   (case Fn
-    (`{,M ,A} (remote-call M A Args Env))
+    (`{,M ,A} (remote-call M A Args Env)) 
     ((atom A)
      (let* M (ast-mod Fn)
 	   ## check to see if the atom is from the source or from macro.
@@ -713,23 +747,8 @@
 	   ))
     (_ (local-call Fn Args Args))))
 
-(def local-call (A Args Env):
-  {call (ast-line A) (transform A Env) (transform_each Args Env)})
-
-(def remote-call (M A Args Env):
-  (let L (ast-line M):
-       {call L
-	     {remote L (transform M Env) (transform A Env)}
-	     (transform_each Args Env)}))
-
 ##################################################
 # .Misc
-
-(def sp-block (`(,_Car ;[Es]) Env):
-  (transform `(ls: ;Es) Env))
-
-(def sp-brace (`(,_Car ;[Es]) Env): 
-  (transform `(tuple: ;Es) Env))
 
 # #\defstruct
 # (def sp-defstruct (`(,_ ,(atom Name) ;Fields) Env)
@@ -746,12 +765,7 @@
 ##################################################
 # .Control Forms
 
-#\if
-(def sp-if (`(if ;Body) Env):
-  (let Line (lineno):
-       {if Line (if-clauses Body [] Line Env)}))
-
-(def if-clauses (Tests Acc Line Env):
+(def if-clauses (Tests Acc Line Env):eval:
   (case Tests
     ([Guard Exp|Tests]
      (if-clauses Tests
@@ -763,8 +777,13 @@
 	       |Acc]))
     ([] (reverse Acc))))
 
+#\if
+(defspecial if (:etc Body) Env:
+  (let Line (lineno):
+       {if Line (if-clauses Body [] Line Env)}))
+
 #\toplevel
-(def sp-toplevel (`(,_ ;[Form|Forms]) Env):
+(defspecial toplevel (:etc [Form|Forms]) Env:
   (let* {Section Env} (transform Form Env)
 	Env
 	(lists\foldl
@@ -843,7 +862,7 @@
 
 #If E is E_1 Op E_2, where Op is a binary operator, then Rep(E) = {op,LINE,Op,Rep(E_1),Rep(E_2)}.
 
-(def nest-bin-op (Op [Arg1 Arg2|Args] Env):
+(def nest-bin-op (Op [Arg1 Arg2|Args] Env):eval:
   # (Op A B ...) => (Op (Op A B) C ...)
   # (- A B C ...) => (- (- A B) C ...)
   (foldl (fn (Arg Exp)
@@ -853,39 +872,34 @@
 	 {op (lineno) Op (transform Arg1 Env) (transform Arg2 Env)}
 	 Args))
 
-(def bin-op (Op [Arg1 Arg2] Env):
+(def bin-op (Op [Arg1 Arg2] Env):eval:
   {op (ast-line Arg1)
       Op
       (transform Arg1 Env)
       (transform Arg2 Env)})
 
-(def una-op (Op [Arg1] Env):
+(def una-op (Op [Arg1] Env):eval:
   {op (ast-line Arg1)
       Op
       (transform Arg1 Env)})
 
-# (def op-ast (Op E1 E2 Env):
-#   {Env {op (ast-line E1)
-# 	   Op
-# 	   (transform E1 Env ~>> {_ RE1} RE1)
-# 	   (transform E2 Env ~>> {_ RE2} RE2)}})
 
-
-(def sp-+ (`(+ ;Args) Env):
+(defspecial + (:etc Args) Env:
   (nest-bin-op + Args Env))
 
-(def sp-- (`(- ;Args) Env):
+(defspecial - (:etc Args) Env:
   (nest-bin-op - Args Env))
 
-(def sp-/ (`(/ ;Args) Env):
+(defspecial / (:etc Args) Env:
   (nest-bin-op / Args Env))
 
-(def sp-* (`(* ;Args) Env):
+(defspecial * (:etc Args) Env:
   (nest-bin-op * Args Env))
 
-(def sp-== (`(== ;Args) Env):
+(defspecial == (:etc Args) Env:
   (bin-op == Args Env))
 
-(def sp-not (`(not ;Args) Env):
+(defspecial not (:etc Args) Env:
   (una-op not Args Env))
+
 

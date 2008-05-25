@@ -17,13 +17,13 @@
 	 
 %%	 flatten/2,
 	 exports_of/1,exports_of/2,exports_of/3,
-	 imports_of/1,
+	 imports_of/1,imports_of/3,
 	 definitions_of/1,
  	 toplevel_of/1,
 	 
 	 assoc/2,
 	 assoc_put/3,assoc_cons/3,assoc_append/3,
-	 module_meta_info/2
+	 module_meta_info/2,module_meta_info/1
 	]).
 
 %% empty environment
@@ -36,39 +36,6 @@ new(ImportMod) ->
 	catch no_imports -> []
 	end,
     assoc_put(Env,[lexical],[]).
-
-
-%% %% collapse namespace
-%% flatten(Env,NSType) ->
-%%     %% fuck. This is totaly crap.
-%%     {ok,Imports}=assoc(Env,imports),
-%%     ImportBs=map(fun ({_Mod,NSs}) -> assoc(NSs,NSType) end,
-%% 		 Imports),
-%%     DefBs=assoc(Env,[definitions,NSType]),
-%%     LexicalBase=assoc(Env,[lexical_base,NSType]),
-%%     LexicalScopes=
-%% 	case assoc(Env,[lexical,NSType]) of
-%% 	    false -> []; 
-%% 	    {ok,Scopes} ->  Scopes
-%% 	end,
-%%     %% collapse according to lookup order.
-%%     Bs=lists:foldl(
-%% 	 fun (Bs,AccDict) ->
-%% 		 if Bs/=false ->
-%% 			 case Bs of
-%% 			     {ok,Val} -> Defs=Val;
-%% 			     _ -> Defs=Bs
-%% 			 end,
-%% 			 dict:merge(
-%% 			   fun (_K,Old,_New) -> Old end,
-%% 			   AccDict,
-%% 			   dict:from_list(Defs));
-%% 		    true -> AccDict
-%% 		 end
-%% 	 end,
-%% 	 dict:new(),
-%% 	 LexicalScopes++[LexicalBase,DefBs|ImportBs]),
-%%     dict:to_list(Bs).
 
 
 import(Env,Mod) ->
@@ -144,16 +111,11 @@ exports_of(Mod,NSType,Keys) ->
     end.
 
 imports_of(Mod) ->
-    case module_meta_info(Mod,[imports]) of
-	{ok,Imports} ->
-	    {ok,map(fun ({ImportMod,NSs}) -> 
-		 {ImportMod,[imports_from(ImportMod,NSType,Keys) || {NSType,Keys} <- NSs]}
-		end,
-		Imports)};
-	_ -> false
-    end.
+    module_meta_info(Mod,[imports]).
 
-imports_from(Mod,NSType,Keys) ->
+
+
+imports_of(Mod,NSType,Keys) ->
     case exports_of(Mod,NSType,Keys) of
 	{ok,Bs} -> Bs;
 	_ -> false
@@ -177,9 +139,8 @@ toplevel_of(Mod) ->
 	    _ -> []
 	end,
     %% THINK: What is the toplevel?
-    %% "Toplevel" is probably used for the shell.
-    %% I think it is the imports of module plus its own exports. 
-    [{imports,[{Mod,Exports}|Imports]}].
+    %% ANSWER: the toplevel is the imports of a module shadowed by its exported definitions
+    [{imports,Imports},{definitions,Exports}].
 
 
 
@@ -201,7 +162,7 @@ assoc_put(_AList,[],Val) ->
 assoc_put(AList,[Key|Keys],Val) -> 
     case keysearch(Key,1,AList) of
 	{value,{_Key,AList2}} when is_list(AList2) ->
-	    lists:keystore(Key,1,AList,{Key,assoc_put(AList2,Keys,Val)});
+	    lists:keystore(Key,1,AList,{Key,assoc_put(AList2,Keys,Val)}); 
 	_ -> [{Key,assoc_put([],Keys,Val)}|AList] 
     end.
 
@@ -215,14 +176,26 @@ assoc_append(AList,Keys,List) ->
 	    assoc_put(AList,Keys,List++OldList); 
 	false -> assoc_put(AList,Keys,List)
     end.
-    
+
+
+meta_module_of(Mod) ->
+    case Mod of
+	%% special cases for bootstrapping
+	verl -> verl__meta;
+	%serl -> serl__meta;
+	_ -> Mod
+    end.
+
+
 module_meta_info(Mod,Fs) when is_list(Fs) ->
-    Mod2=case Mod of
-	     verl -> verl__meta;
-	     serl -> serl__meta;
-	     _ -> Mod
-	 end,
+    Mod2=meta_module_of(Mod),
     assoc(Mod2:module_info(attributes),[serl_info|Fs]);
+
 module_meta_info(Mod,F) when is_atom(F) ->
     module_meta_info(Mod,[F]).
+
+
+module_meta_info(Mod)  ->
+    Mod2=meta_module_of(Mod),
+    assoc(Mod2:module_info(attributes),[serl_info]).
 

@@ -36,7 +36,7 @@ error(Message) ->
     error(Message,[]).
 error(Message,Args) ->
     Reason=lists:flatten(io_lib:format(Message,Args)),
-    erlang:error({serl_error,Reason}).
+    erlang:error(Reason).
 
 -define(serl_toplevel,serl_eval).
 
@@ -59,6 +59,7 @@ error(Message,Args) ->
 %%     init_state(#state{}).
 
 init_state(S) when is_record(S,state) ->
+    erase(),
     put(?lineno,S#state.lineno),
     put(?curmod,S#state.curmod),
     put(?gensym,S#state.gensym_counter),
@@ -75,15 +76,19 @@ lineno() -> get(?lineno).
 set_lineno(L) -> put(?lineno,L). 
 
 is_curmod(Mod) when is_atom(Mod) ->
-    %% whenever the module of syntax object is the module true,
+    %% whenever the module of syntax object is the pseudo module true,
     %% it behaves as though it came from source.
     (Mod==curmod()) or (Mod==true);
+%% check to see if a syntax object is appears in the current compiling module.
 is_curmod(Ast) when is_tuple(Ast)->
     AstMod=element(3,Ast),
     is_curmod(AstMod). 
 
-curmod() -> get(?curmod). 
-%% check to see if a syntax object is contained within the current compiling module.
+curmod() ->
+    case get(?curmod) of
+	undefined -> ?serl_toplevel;
+	M -> M
+    end.
 
 
 reset_gensym() -> put(?gensym,0).
@@ -121,9 +126,11 @@ toplevel_of(M) ->
 read(In,Env) -> 
     new_process(fun read_/2,[In,Env]). 
 
-read_(In,Env) -> 
-    reader:exp(In,Env,lineno()) %% {Env2,In2,Line,Ast}
-    .
+read_(In,Env) ->
+    %% returns {Env2,In2,Line,Ast}
+    %% Line is where the expression ended.
+    %% Ast is the expression read.
+    reader:exp(In,Env,lineno()).
 
 mexpand(Ast,Env) ->
     new_process(fun mexpand_/2,
@@ -177,12 +184,16 @@ local_funcall_handler(Name,Args,Env) ->
 		%% import function
 		{M,A} -> apply(M,A,Args);
 		%% defined function made available at compile time
-		%% %% Note that function call protocol is different
+		%% Note that the function at compile time expects the
+		%% its arguments in a list, as well as the environment
+		%% to lookup functions it calls. 
 		F when is_function(F) ->
 		    F(Args,Env)
 	    end;
 	%% TODO should throw undef exception.
-	_ -> error("undefined function: ~p\n",[Name])
+	_ ->
+	    %error("undefined function: ~p\n",[Name])
+	    erlang:error({undef,Name})
     end.
 
 remote_funcall_handler({M,F},Args) ->
@@ -197,16 +208,17 @@ compile(Mod,Env,Options) when is_atom(Mod) ->
     new_process(fun compile_/2,[Mod,Env],
 		#state{curmod=Mod,options=Options}).
 
-%% transforms expressions for side effect on the environment.
+%% transforms expressions for "side effect" on the environment.
+%% __bof and  __eof are pseudo forms for a language to do its language specific things.
 compile_(Mod,Env) ->
     %% TODO modify streamer to parse binary.
     In=case file:read_file(atom_to_list(Mod)++".serl") of
 	{ok,Bin} -> binary_to_list(Bin);
-	_ -> error("Cannot find source module ~p\n",[Mod])
+	_ -> error("Cannot find source: ~p\n",[Mod])
     end,
     try {0,Env2}=transform(?cast_paren([?cast_atom('__bof')]),Env),
 	{eof,Env3}=compile_loop(In,Env2,0),
-	%% at end of file, transforms the pseudo special form (__eof)
+	%% at end of file, transforms the pseudo special form (eof)
 	%% what happens is language dependent.
 	%% maybe compile to erlang, maybe compile to javascript, whatever.
 	transform(?cast_paren([?cast_atom('__eof'),normal]),Env3)
@@ -214,13 +226,10 @@ compile_(Mod,Env) ->
 	transform(?cast_paren([?cast_atom('__eof'),'after']),Env)
     end.
 
-%% I want a way to restrict toplevel forms...
-%% one easy way is for toplevel forms to return false as the transformed ast!
-%% I also want toplevel forms to come in a sequence...
-%% one way is for them to return integers counting up!
-%% haha. This is so kludgey, but works well.
-%%%% so if the returned N2 >= N1, then proceed.
-%%%% toplevels that returns the atom infinity can occur anywhere.
+%% the compiler loop transforms a sequence of toplevel forms found in a module.
+%% the toplevel forms in a module are divided into numbered sections.
+%% The numbered sections must follow each other in order.
+%% The toplevel forms would return a tuple of {<section-number> Env}
 compile_loop(In,Env,Section) -> 
     {In2,ReaderLine,Ast}=read_(In,Env), 
     case Ast of
@@ -252,10 +261,10 @@ new_process(Fun,Args,State) ->
 wait_result(Sync) ->
     receive
 	{'EXIT',Sync,{result,R}} -> R;
-	
+%% do custom serl error reporting, then rethrow the error.
 %% 	{'EXIT',Sync,{{serl_error,Reason,Trace},_}} ->
 %% 	    io:format("Error: ~p\n~p\n",[Reason,Trace]),
-%% 	    {error,Reason};
+%% 	    erlang:error(Reason);
 	
 	{'EXIT',Sync,Reason} ->
 	    io:format("Error: ~p\n",[Reason]),
@@ -265,17 +274,23 @@ wait_result(Sync) ->
 	    erlang:error(timeout)
     end.
 
+%% macroexpand(?ast_paren([Car|_])=Exp,Env) when is_tuple(Exp) ->
+%%     try case lookup_expander(Env,Car) of
+%% 	{macro,F} -> macroexpand(F(Exp),Env);
+%% 	_ -> Exp
+%% 	end
+%%     catch
+%% 	error:{serl_error,Reason,Trace} ->
+%% 	    erlang:error({serl_error,Reason,[Car|Trace]});
+%% 	error:Reason ->
+%% 	    erlang:error({serl_error,Reason,
+%% 			  [Car,erlang:get_stacktrace()]})
+%%     end;
+
 macroexpand(?ast_paren([Car|_])=Exp,Env) when is_tuple(Exp) ->
-    try case lookup_expander(Env,Car) of
+    case lookup_expander(Env,Car) of
 	{macro,F} -> macroexpand(F(Exp),Env);
 	_ -> Exp
-	end
-    catch
-	error:{serl_error,Reason,Trace} ->
-	    erlang:error({serl_error,Reason,[Car|Trace]});
-	error:Reason ->
-	    erlang:error({serl_error,Reason,
-			  [Car,erlang:get_stacktrace()]})
     end; 
 macroexpand(Exp,_Env) when is_tuple(Exp) ->
     Exp.
@@ -301,9 +316,9 @@ transform(Exp,Env) when is_tuple(Exp) ->
 %% do one expansion
 %% not tail-recursive. I'd rather have a stack for backtrace.
 do_transform(?ast_paren3(L,_M,[Car|Body])=Exp,Env) ->
-    %%io:format("T: ~p ~p\n",[L,Car]),
+    %%io:format("~p: ~p\n",[L,Car]),
     %% line tracking
-    %% %% lineno() always give the line of the closest open paren visible in source.
+    %% lineno() always give the line of the closest open paren visible in source.
     if L > 0 -> set_lineno(L);
        true -> ok %% non-source syntax objects have lineno==0.
     end, 
@@ -320,18 +335,12 @@ do_transform(?ast_paren3(L,_M,[Car|Body])=Exp,Env) ->
 		 end
 	end
     catch
-	error:{serl_error,Reason,Trace} ->
-	    erlang:error({serl_error,Reason,[Car|Trace]});
+	error:{serl_error,Reason,Stack,Trace} ->
+	    erlang:error({serl_error,Reason,Stack,[Car|Trace]});
 	error:Reason ->
-	    erlang:error({serl_error,Reason,
-			  [Car,erlang:get_stacktrace()]})
+	    erlang:error({serl_error,Reason,erlang:get_stacktrace(),[Car]})
     end.
 
-
-%% doesn't really conform to "eval in some order"
-%% for a series of expressions, transform_each extends environment from left to right.
-%%%% this doesn't catch error like:  X=1+X.
-%%%% but the erlang compiler would catch it, so let's not worry about it.
 transform_each(Es,Env) ->
     [transform(E,Env) || E <- Es].
 
@@ -345,10 +354,12 @@ map_env0(F,[E|Es],Acc,Env) ->
     map_env0(F,Es,[R|Acc],Env2).
     
 
+
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Environment
+%% Environment Lookup
 
-
+%% Lookup function objects in the environment.
 %% meta_funs are macros, specials, and reader-macros
 lookup_meta_fun(Env,Type,Key) ->
     case lookup(Env,Type,Key) of
@@ -360,8 +371,11 @@ lookup_meta_fun(Env,Type,Key) ->
 	_ -> false
     end.
 
+%% This function is used to lookup the appropriate expander for
+%% the car of an expression.
 lookup_expander(Env,Car) ->
     %% macros shadow special forms
+    %io:format("Lookup Expander: ~p\n",[Car]),
     Key=case Car of
 	?ast_atom3(_L,M,A) ->
 	    {M,A};
@@ -379,14 +393,14 @@ lookup_expander(Env,Car) ->
 		 end
     end.
 
+
 lookup(Env,NSType,{M,_F}=Key) ->
     %% note that if M is true, it is local lookup
     T=is_curmod(M),
+    %io:format("Lookup: ~p Curmod: ~p\n",[Key,T]),
     if T -> local_lookup(Env,NSType,Key);
        true -> remote_lookup(Env,NSType,Key)
     end.
-
-
 
 %% -for a symbol a$home
 %% -look up the lexical scope for {a home} or {a true}

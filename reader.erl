@@ -389,7 +389,7 @@ here_long(Tag,Acc) when is_list(Tag) ->
     case peek() of
 	%%upon starting a new line, check if it's the end tag.
 	$\n -> here_long_check(Tag,[read()|Acc]);
-	eof -> error("EOF: unexpected end of heredoc");
+	eof -> error("EOF: unexpected end of heredoc\nString:\\~s",[reverse(Acc)]);
 	_ -> here_long(Tag,[read()|Acc])
     end.
 

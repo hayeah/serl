@@ -5,14 +5,19 @@
 
 
 bootup() ->
-    dbg:tracer(),
-    dbg:p(new,[c]),
+    
+%%     dbg:tracer(),
+%%     dbg:p(new,[c]),
+    
     reload(version()).
 
 profile() ->
-    fprof:apply(v,test,[test,[],[dry,expand_only]]),
+    fprof:apply(v,test,[serl,[],[dry,expand_only]]),
     fprof:profile(),
     fprof:analyse({dest,"profile.dat"}).
+
+tenv() ->
+    env:import(env(),test).
 
 env() ->
     env:import(env:new(verl),serl).
@@ -34,7 +39,10 @@ mexpand(In) ->
     scompile:mexpand(read(In),env()).
 
 expand(In) ->
-    scompile:expand(read(In),env()).
+    expand(In,env()).
+expand(In,Env) ->
+    scompile:expand(read(In),Env).
+    
 
 expand1(In) ->
     expandn(In,1).
@@ -152,6 +160,7 @@ goto(N) ->
 
 %% hand compile the meta module for now
 recompile(VersionIncrement) ->
+    make:all([load]),
     R=compile(serl,[bin,report,meta]),
     %% I absolutely loath how Erlang makes binding in cases visible outside.
     ModBin=case env:assoc(R,[bin]) of

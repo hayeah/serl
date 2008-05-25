@@ -65,8 +65,6 @@
 
 
 ?defsp('__sp_bof',[]) ->
-    put(?output,[]),
-    %% the meta environment starts out the same as environment.
     {0,Env}.
 
 get_meta_env(Env) ->
@@ -74,14 +72,12 @@ get_meta_env(Env) ->
 put_meta_env(Env,MEnv) ->
     env:assoc_put(Env,[meta_env],MEnv).
 
-?defsp('__sp_eof',['after']) ->
-    Env,
-    cleanup();
-?defsp('__sp_eof',[normal]) ->
-    Forms=output_forms(Env), %% erlang compilable forms
-    Options=scompile:options(),
-    CO=set_opts(Options), 
-    emit(Forms,Env,CO).
+?defsp('__sp_eof',[Command]) ->
+    case Command of
+	normal -> verl:emit(serl:'output-forms'(Env),
+			    verl:set_opts(scompile:options()));
+	'after' -> verl:cleanup()
+    end.
 
 output_forms(Env) ->
     {Header,Body}=
@@ -933,3 +929,4 @@ upto_block(Es) ->
 		    end,
 		    Es),
     {UpToFirstBlock,Rest}.
+
