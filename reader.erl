@@ -65,7 +65,6 @@ set_state(Env,In,Line) ->
 %% curenv() is used only for reader macro lookup.
 %% in the future may be used to lookup readertable.
 curenv() -> get(?env).
-set_curenv(Env) -> put(?env,Env). 
     
 
 exp(In,Env,LineNo) ->
@@ -338,52 +337,59 @@ string_escape() ->
 
 
 a_reader_macro() ->
-    read(),
-    ?ast_atom(Name)=case peek() of
-	%% ${ == 123}
-	123 -> exp_dispatch(123); %% possibly a remote call.
-	_ -> a_symbol()
-    end,
+    ?ast_atom3(_L,Mod,Atom)=a_symbol(), 
     Env=curenv(),
-    case env:toplevel_lookup(Env,rmacro,Name) of
+    case scompile:lookup_meta_fun(Env,rmacros,{Mod,Atom}) of
 	{ok,F} ->
-	    {Args,Here}=reader_macro_args([]),
-	    {Env2,Ast}=F(Args,Here,Env),
-	    set_curenv(Env2),
-	    Ast;
-	_ -> error("Undefined reader macro: \n~p\n",[Name])
+	    Args=reader_macro_args(),
+	    spacen(),
+	    HereDoc=reader_macro_here(),
+	    F(Args,HereDoc);
+	false -> error("Undefined reader macro: \n~p\n",[Atom]) 
+    end.
+
+reader_macro_args() ->
+    spacen(),
+    %% $( == 40 
+    case peek() of
+	40 -> read(),
+	      reader_macro_args([]);
+	_ -> []
     end.
 
 reader_macro_args(Acc) ->
     spacen(),
+    case peek() of
+	%% $) == 41
+	41 -> read(), reverse(Acc); 
+	_ -> reader_macro_args([an_exp()|Acc])
+    end.
+
+reader_macro_here() ->
     C=peek(), 
-    %% ${ == 123
-    IsArg=(C==123),
-    IsOpen=lists:member(C,"(["),
-    IsLong=(not IsOpen) and is_symbol_char1(C),
-    if C==eof -> error("while parsing reader macro");
-       IsArg -> read(), Arg=an_exp(), char("}"),
-		reader_macro_args([Arg|Acc]);
-       IsLong -> HereTag=read_until(?spacen),
-		 %% TODO should only allow comment following a HereTag.
-		 %%%% currently just skip the line.
-		 skip_until("\n"), read(),
-		 {lists:reverse(Acc),here_long(HereTag,[])};
-       IsOpen -> 
-	    Close=case C of
-		      $( -> $);
-		      $[ -> $]
-		      end,
+    %% $( == 40
+    case lists:member(C,"{[") of
+	%% inline reader macro
+	true ->
 	    read(),
-	    {lists:reverse(Acc),here_short(Close)};
-       true -> read(), {lists:reverse(Acc),here_short(C)}
+	    Close=case C of
+		      ${ -> $};
+		      $[ -> $]
+		      end, 
+	    here_short(Close);
+	%% multiline reader macro
+	_ -> HereTag=read_until(?spacen),
+	     %% TODO should only allow comment following a HereTag.
+	     %% %% currently just skip the line.
+	     skip_until("\n"),
+	     here_long(HereTag,[])
     end.
 
 here_long(Tag,Acc) when is_list(Tag) ->
     case peek() of
 	%%upon starting a new line, check if it's the end tag.
 	$\n -> here_long_check(Tag,[read()|Acc]);
-	eof -> error("prematured end of heredoc");
+	eof -> error("EOF: unexpected end of heredoc");
 	_ -> here_long(Tag,[read()|Acc])
     end.
 
@@ -393,12 +399,19 @@ here_long_check(Tag,Acc) ->
     if Sp -> here_long_check(Tag,[read()|Acc]);
        true -> here_long_check(Tag,Tag,Acc)
     end.
+
 here_long_check(OTag,[],Acc) ->
     C=peek(),
-    Sp=member(C,?spacen),
+    Sp=member(C,[eof|?spacen]), %% the current char is a space directly after the Tag. We are done.
     if Sp -> spacen(),
-	     reverse(Acc);
-       C==eof -> reverse(Acc);
+	     %% strip white spaces on the same line as the closing tag.
+	     %% also drop the newline starting the closing tag line.
+	     [_|Acc2]=lists:dropwhile(fun (C2) ->
+					      member(C2,?space)
+				      end,
+				      Acc),
+	     reverse(Acc2);
+       %% not a match after all: HEREsomething
        true -> here_long(OTag,reverse(OTag)++Acc)
     end; 
 here_long_check(OTag,Tag,Acc) -> 
@@ -406,7 +419,7 @@ here_long_check(OTag,Tag,Acc) ->
     C2=hd(Tag),
     if C1==C2 -> read(),here_long_check(OTag,tl(Tag),Acc); 
        true ->
-	    %% collect the partial match then retry.
+	    %% collect the partial match then retry starting at next line.
 	    here_long(OTag,reverse(OTag--Tag)++Acc)
     end.
 

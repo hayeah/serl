@@ -153,10 +153,80 @@ Builtin syntax object types are
 
 h2.
 
+h1. Definition Forms
+
+h2. Function
+
+def
+
+etc - list arguments
+key - list arguments (not supported)
+
+(def (A B :etc C D):
+ ...
+ )
+
+(A B :etc C D) == (A B :etc [C|D])
+ 
+h2. Macro
+
+defm Name `(;Args)
+defspecial Name `(;Args) Env
+
+etc - block arguments
+tag - block arguments
+key - block arguments
+all - auxiliary arguments
+
+h2. Reader Macro
+
+%<atom> (<exp>*)? <here-doc>
+%<atom> <here-doc>
+
+
+The heredoc can be inline or multiline
+
+inline heredocs are delimited by {},[], or %%
+
+Multiline heredoc string must start on a line of its own. There must be spaces between the reader macro name and the start of the heredoc. The closing delimiter may be indented. Serl code can follow directly the closing.
+
+%foo(){heredoc}
+%foo{heredoc} ## the argument () may be omitted
+%foo{heredoc}
+
+%foo HERE #some comment
+here doc
+     HERE more-stuff 
+
+%foo HERE error #multiline heredoc must start on a new line.
+here doc
+     HERE
+
+defreadm Name `(;Args) Input
+
+Accepts the same Args as defm/defspecial
+
+Input is a deeplist (I think) representation of Input. 
+
+Nesting operators don't work (or make sense) in reader macro.
+
+%foo(a b c)
+
+The blank spaces on the same line as the closing HERE are stripped.
+
+%s  HERE
+abc
+d
+
+    HERE
+# => "abc\nd\n"
+
+The closing tag is the opening tag that starts a line.
+
 h1. Builtin Special Forms
 
 <pre>
-toplevel :pos Forms
+toplevel :etc Forms
 
 Forms := <exp>
 </pre>

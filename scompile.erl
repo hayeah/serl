@@ -19,7 +19,7 @@
 	 
 	 lexical_shadow/3,lexical_extend/3,
 	 get_def/3,new_def/4,
-	 lookup/3,lookup_expander/2,toplevel_lookup/3,
+	 lookup/3,lookup_meta_fun/3,lookup_expander/2,toplevel_lookup/3,
 	 lookup_imports/3,
 	 warn/1,warn/2,error/1,error/2
 	 ]).
@@ -348,6 +348,18 @@ map_env0(F,[E|Es],Acc,Env) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Environment
 
+
+%% meta_funs are macros, specials, and reader-macros
+lookup_meta_fun(Env,Type,Key) ->
+    case lookup(Env,Type,Key) of
+	{ok,Def} ->
+	    case element(1,Def) of
+		F when is_function(F) -> {ok,F};
+	        MA when is_tuple(MA) -> {ok,MA}
+	    end;
+	_ -> false
+    end.
+
 lookup_expander(Env,Car) ->
     %% macros shadow special forms
     Key=case Car of
@@ -358,21 +370,13 @@ lookup_expander(Env,Car) ->
 	A when is_atom(A) ->
 		{curmod(),A}; 
 	T when is_tuple(T) -> T
-    end,
-    case lookup(Env,macros,Key) of
-	{ok,Def} ->
-	    case element(1,Def) of
-		F when is_function(F) -> {macro,F};
-	        MA when is_tuple(MA) -> {macro,MA}
-	    end;
-	_ -> case lookup(Env,specials,Key) of
-		 {ok,Def} ->
-		     case element(1,Def) of
-			 F when is_function(F) -> {special,F};
-			 MA when is_tuple(MA) -> {special,MA}
-		     end; 
-		 _ -> false
-	     end
+	end,
+    case lookup_meta_fun(Env,macros,Key) of
+	{ok,F} -> {macro,F}; 
+	false -> case lookup_meta_fun(Env,specials,Key) of
+		     {ok,F} -> {special,F};
+		     false -> false
+		 end
     end.
 
 lookup(Env,NSType,{M,_F}=Key) ->

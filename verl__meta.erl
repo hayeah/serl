@@ -98,8 +98,9 @@
 
 	       ]},
 	      {rmacros,
-	       [
-		{'lit',{{?MOD,'__rm_lit'}}}
+	       [{'a',{{?MOD,'__rm_a'}}},
+		{'c',{{?MOD,'__rm_c'}}},
+		{'s',{{?MOD,'__rm_s'}}}
 	       ]},
 	      {functions,
 	       [{'cat',{{lists,append}}},

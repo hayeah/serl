@@ -31,8 +31,17 @@
 
 %% Serl Extension
 
-%% '__rm_lit'([],Here) ->
-%%     ?cast_string(Here).
+%% char
+'__rm_c'([],[C]) ->
+    ?cast_integer(C).
+%% atom
+'__rm_a'([],Str) ->
+    ?cast_atom(list_to_atom(Str)).
+%% string literal
+'__rm_s'([],Str) ->
+    ?cast_string(Str).
+
+
 
 %% Translate [e0 e1 ...] to a list if not handled by some other macro
 ?defsp('__sp_block',[Es]) ->
