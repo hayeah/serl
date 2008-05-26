@@ -176,7 +176,7 @@ defspecial Name `(;Args) Env
 etc - block arguments
 tag - block arguments
 key - block arguments
-all - auxiliary arguments
+all - list arguments
 
 h2. Reader Macro
 
@@ -279,7 +279,7 @@ h2. defm
 
 If the very first item is :etc, it is treated as a special case of :etc block (an argument block not preceded a ':').
 
-: is syntatically significant if specified by the macro writer. In other cases care should be taken so a macro is neutral to : (where : translates). This is the case for the special form @call@ and the macro @ls@. To write :-insensitive macros, use the :all auxiliary argument.
+: is syntatically significant if specified by the macro writer. In other cases care should be taken so a macro is neutral to : (where : translates). This is the case for the special form @call@ and the macro @ls@. To write :-insensitive macros, use :all (this is exclusive in the lambda list).
 
 
 h2. Module
