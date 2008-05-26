@@ -188,7 +188,10 @@ meta_module_of(Mod) ->
 
 
 module_meta_info(Mod,Fs) when is_list(Fs) ->
-    Mod2=meta_module_of(Mod),
+    %% THINK: what happens of MOD is not a serl module?
+    %% Or when it is not loaded?
+    %% Or when the module does not exist?
+    Mod2=meta_module_of(Mod), 
     assoc(Mod2:module_info(attributes),[serl_info|Fs]);
 
 module_meta_info(Mod,F) when is_atom(F) ->

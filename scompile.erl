@@ -179,7 +179,7 @@ eval_erl(ErlAst,Bindings,Env) ->
 local_funcall_handler(Name,Args,Env) ->
     case lookup(Env,functions,{curmod(),Name}) of
 	{ok,Def} when is_tuple(Def) -> 
-	    %%io:format("Applying ~s:~s/~p",[Mod,F,length(Args)]),
+	    %%io:format("local apply: ~p\n",[Name]),
 	    case element(1,Def) of
 		%% import function
 		{M,A} -> apply(M,A,Args);
@@ -325,10 +325,10 @@ do_transform(?ast_paren3(L,_M,[Car|Body])=Exp,Env) ->
     try case lookup_expander(Env,Car) of
 	    {special,F} -> {special,F(Exp,Env)};
 	    {macro,F} -> {macro,F(Exp)} ;
-	    _ -> case lookup_expander(Env,?cast_atom('__call')) of
+	    _ -> case lookup_expander(Env,?cast_atom('call')) of
 		     %% make sure to raise error, otherwise go into loop.
 		     {Type,_F} when Type==special;Type==macro ->
-			 R=transform(?cast_paren([?cast_atom('__call'),Car|Body]),
+			 R=transform(?cast_paren([?cast_atom('call'),Car|Body]),
 				     Env),
 			 {Type,R};
 		     _ -> error("No expander for function call.")

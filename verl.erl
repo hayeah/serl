@@ -22,15 +22,9 @@
 
 -define(defsp(Name,Args),Name(?ast_paren3(_,_Mod,[_|Args]),Env)).
 -define(defm(Name,Args),Name(?ast_paren3(_,_Mod,[_|Args]))).
--define(output,{?MODULE,output}).
--define(moutput,{?MODULE,moutput}).
 
-%% -define(atomic_literals,[integer,float,string,atom]).
-%% -define(patterns,[match,var,tuple,nil,cons,op,record,record_index]++?atomic_literals).
-%% -define(guards,[var,tuple,nil,cons,bin,op,record,record_index,record_field,call]++?atomic_literals).
 
-%% Serl Extension
-
+%% reader macros
 %% char
 '__rm_c'([],[C]) ->
     ?cast_integer(C).
@@ -40,90 +34,6 @@
 %% string literal
 '__rm_s'([],Str) ->
     ?cast_string(Str).
-
-
-
-%% Translate [e0 e1 ...] to a list if not handled by some other macro
-?defsp('__sp_block',[Es]) ->
-    transform(?cast_paren([?cast_atom(ls),?cast_block(Es)]),Env).
-
-%% Translate {e0 e1 ...} to a tuple if not handled by some other macro
-?defsp('__sp_brace',[Es]) -> 
-    transform(?cast_paren([?cast_atom(tuple),?cast_block(Es)]),Env).
-
-%% (eval-binding <var>) gets the value in eval-bindings named by <var>
-%% %% this is strictly a value expression.
-%% %% (eval-binding <var>) simply compiles to <var>, bypassing binding check.
-?defsp('__sp_eval-binding',[?ast_atom(V)]) ->
-    Env,
-    Line=lineno(),
-    ?erl_var(Line,V);
-?defsp('__sp_eval-binding',[?ast_var(V)]) ->
-    Env,
-    Line=lineno(),
-    ?erl_var(Line,V).
-
-
-?defsp('__sp_bof',[]) ->
-    {0,Env}.
-
-get_meta_env(Env) ->
-    env:assoc(Env,[meta_env]).
-put_meta_env(Env,MEnv) ->
-    env:assoc_put(Env,[meta_env],MEnv).
-
-?defsp('__sp_eof',[Command]) ->
-    case Command of
-	normal -> verl:emit(serl:'output-forms'(Env),
-			    verl:set_opts(scompile:options()));
-	'after' -> verl:cleanup()
-    end.
-
-output_forms(Env) ->
-    {Header,Body}=
-	transform(?cast_paren([?cast_atom('functions-output')]),Env),
-    [{attribute,0,module,curmod()}|Header]++Body.
-
-cleanup() ->
-    put(?output,[]),
-    put(?moutput,[]),
-    ok.
-
-%% output_forms(Env) ->
-%%     %% lazy output waits till the very end to output.
-%%     %% it receives the final compilation environment.
-%%     %% no evaluation order is gauranteed.
-    
-%%     try 
-%% 	{Header,Body}=transform(?cast_paren([?cast_atom('functions-output')]),Env),
-%% 	io:format("~p\n~p",[Header,Body])
-%%     catch
-%% 	error:R ->
-%% 	    io:format("Error ~p\n",[R])
-
-%%     end, 
-%%     lists:reverse(
-%%       [case Form of
-%% 	   Fn when is_function(Fn) ->
-%% 	       Fn(Env);
-%% 	   Ast when is_tuple(Ast) -> Ast 
-%%        end || Form <- get_output()]).
-
-
-
--define(lazyout(Env,Body), output(fun (Env) -> Body end)).
--define(lazymout(Env,Body), moutput(fun (Env) -> Body end)).
-
-
-get_output() ->
-    get(?output).
-get_moutput() ->
-    get(?moutput).
-
-output(Ast) ->
-    put(?output,[Ast|get_output()]).
-moutput(Ast) ->
-    put(?moutput,[Ast|get_moutput()]).
 
 
 %% verl's compiler options
@@ -171,8 +81,8 @@ emit(Forms,Env,CO) ->
 	  end,
 	  emit_ast(Forms,CO),
 	  emit_def(Env,CO),
-	  emit_env(Env,CO),
-	  emit_meta(Env,CO)],
+	  emit_env(Env,CO) 
+	 ],
     lists:filter(fun (Emit) -> not (Emit=={}) end,
 		 Emits). 
 
@@ -234,234 +144,25 @@ emit_def(Env,CO) ->
 	    emit_def(Env,CO#opt{def=[F]}) 
     end.
 
-
-emit_meta(Env,CO) ->
-    %% oh what the heck. Just do a quick hack to get it to work.
-    case CO#opt.meta of
-	true ->
-	    MetaMod=list_to_atom(atom_to_list(CO#opt.mod)++"__meta"),
-	    Exports=
-		case env:assoc(Env,[exports]) of
-		    {ok,NSs} ->
-			%% [{attribute,0,serl_exports,
-%% 			  erl_syntax:revert(erl_syntax:abstract(NSs))}];
-			[{attribute,0,serl_exports,NSs}]; 
-		    false -> []
-		end, 
-	    Forms=[{attribute,0,module,MetaMod}]++Exports,
-	    {meta,emit(Forms,Env,CO#opt{meta=undefined,mod=MetaMod})}; 
-	undefined -> {}
-    end.
-
-%% (def name (A1 A2 ...): E1 E2 ...)
-
-?defsp('__sp_def',[?ast_atom(Name),?ast_paren(Args),?ast_block(Es)]) ->
-    Line=lineno(),
-    Arity=length(Args),
-    Doc="Function: " ++ atom_to_list(Name),
-    case env:assoc(Env,[definitions,functions,Name]) of
-	{ok,_} -> error("Function already defined: ~p", [Name]); 
-	_ -> ok
-    end,
-    FunClause=clause(Args,[],Es,Line,Env), 
-%%     case env:assoc(Env2,[lexical_unbound,vars]) of 
-%% 	{ok,UnboundVars} -> error("Unbound vars: ~w",[UnboundVars]);
-%% 	_ -> ok
-%%     end,
-    Ast={function,Line, Name, Arity, [FunClause]},
-    NewEnv=env:assoc_put(Env,[definitions,functions,Name],
-			 {{curmod(),Name},
-			  [{ast,Ast},
-			   {doc,Doc},
-			   {arities,[Arity]}]
-			 }),
-    output(Ast),
-    {?def_sec,NewEnv}.
-
 def_info(Env,NSType,Name,Prop) ->
     case env:assoc(Env,[definitions,NSType,Name]) of
-	{ok,Def} ->
-	    case env:assoc(element(2,Def),Prop) of
-		{ok,Val} -> Val;
-		_ -> error("Unknown property ~p of function ~p",[Prop,Name])
-	    end;
-	_ -> error("Function undefined: ~p",[Name])
+       {ok,Def} ->
+           case env:assoc(element(2,Def),Prop) of
+               {ok,Val} -> Val;
+               _ -> error("Unknown property ~p of function ~p",[Prop,Name])
+           end;
+       _ -> error("Function undefined: ~p",[Name])
     end. 
 
-%% (compile-for expand run: <form>*) 
-%%%% the forms must be toplevel forms for the same section
-
-%% ?defsp('__sp_compile_for',Es) ->
-%%     [?ast_block(As),?ast_block(Forms)] = to_blocks(Es),
-%%     Times=ordset:from_list([A || ?ast_atom(A) <- As]),
-%%     %% if compiling for both expand and run times, expand-time forms are compiled first.
-%%     %% This order is an implementation detail.
-%%     compile_for(Times,Forms,Env).
-
-%% compile_for([run],Forms,Env) ->
-%%     compile_for(run,Forms,Env);
-%% compile_for([expand],Forms,Env) ->
-%%     compile_for(expand,Forms,Env);
-%% compile_for([expand,run],Forms,Env) ->
-%%     %% forms for expand and run times must agree to the section they are in.
-%%     {Env2,S1}=compile_for(expand,Forms,Env),
-%%     {Env3,S2}=compile_for(run,Forms,Env2), 
-%%     if S1==S2 -> {Env3,S1}; 
-%%        true -> error("compile-for: expand and runtime forms belong to different compile sections")
-%%     end;
-%% compile_for(run,Forms,Env) ->
-%%     {Env2,Rs}=transform_each(Forms,Env),
-%%     Section=hd(Rs),
-%%     lists:foreach(
-%%       fun (I) ->
-%% 	      if I==Section -> true;
-%% 		 true -> error("compile-for: not all forms are toplevel from the same section")
-%% 	      end
-%%       end,
-%%       Rs),
-%%     {Env2,Section};
-%% compile_for(expand,Forms,Env) ->
-%%     MEnv=get_meta_env(Env),
-%%     {MEnv2,Rs}=transform_each(Forms,MEnv),
-%%     Section=hd(Rs),
-%%     lists:foreach(
-%%       fun (I) ->
-%% 	      if I==Section -> true;
-%% 		 true -> error("compile-for: not all forms are toplevel from the same section")
-%% 	      end
-%%       end,
-%%       Rs),
-%%     {put_meta_env(Env,MEnv2),Section}.
-
-
-
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% 4.1 Module declarations and forms
-%
-%% A module declaration consists of a sequence of forms that are either function declarations or attributes.
-%
+%% 4.3 Pattern
+%%
+%% If Ps is a sequence of patterns P_1, ..., P_k, then Rep(Ps) = [Rep(P_1), ..., Rep(P_k)]. Such sequences occur as the list of arguments to a function or fun.
+%%
+%% Individual patterns are represented as follows: 
+%%  If P is an atomic literal L, then Rep(P) = Rep(L).
 
-%%  If D is a module declaration consisting of the forms F_1, ..., F_k, then Rep(D) = [Rep(F_1), ..., Rep(F_k)].
-
-%%  If F is an attribute -module(Mod), then Rep(F) = {attribute,LINE,module,Mod}.
-
-?defsp('__sp_module',[?ast_atom(Mod)]) ->
-    Line=lineno(),
-    T=is_curmod(Mod),
-    if T -> ok;
-       true -> error("Module name mismatch: ~p",[Mod])
-    end,
-    output({attribute,Line,module,Mod}),
-    {?module_sec,Env}.
-    
-%% %%  If F is an attribute -export([Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,export,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}.
-
-%% (export a b)
-?defsp('__sp_export',Atoms) ->
-    Line=lineno(),
-    Mod=curmod(),
-    Names=[Name || ?ast_atom3(_,_,Name) <- Atoms],
-    ?lazyout(Env2,export_attribute(Names,Line,Env2)),
-    {?header_sec,
-     env:assoc_append(
-       Env,
-       [exports,functions],
-       [{Name,{Mod,Name}} || Name <- Names])}.
-
-%% (export a b c)
-export_attribute(Names,Line,Env) ->
-    Exports=
-	[begin
-	     {Name,def_info(Env,functions,Name,arities)}
-	 end 
-	 || Name <- Names],
-    {attribute,Line,export,
-     [{Name,Arity} ||
-	 {Name,Arities} <- Exports,
-	 Arity <- Arities]}.
-
-
-%% %%  If F is an attribute -import(Mod,[Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,import,{Mod,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}}.
-%% (import mod a b (c alias-of-c))
-%% (import :all) %% not supported for verl
-%% only import functions
-%% compile-time error if the same name from different imports.
-
-%% erl-spec pg120:
-%% for an imported foo, all calls in the module calls the imported foo.
-%% is foo is exported, it is the defined foo that is exported.
-
-%% (import mod a b c)
-?defsp('__sp_import',[?ast_atom(Mod)|Fs]) ->
-    Imports=ordsets:from_list([A || ?ast_atom(A) <- Fs]),
-    %% check for conflicts
-    lists:foreach(
-      fun (F) ->
-	      case scompile:toplevel_lookup(Env,functions,F) of
-		  {ok,{Mod2,F2}} -> error("Conflicting import ~p:~p with ~p:~p",
-					  [Mod,F,Mod2,F2]);
-		  _ -> ok
-	      end
-      end,
-      Imports),
-    Env2=try env:import(Env,Mod,functions,Imports)
-	 catch no_imports ->
-		 env:assoc_put(
-		   Env,
-		   [imports,Mod,functions],
-		   [{F,{Mod,F}} || F <- Imports]) 
-	 end,
-    {?header_sec,Env2}.
-    
-    
-
-%% %% %%  If F is a wild attribute -A(T), then Rep(F) = {attribute,LINE,A,T}. 
-%% %% '__mac_wild'([wild|_]) ->
-%% %%     error("wild attribute not supported").
-
-%% %%  If F is a function declaration Name Fc_1 ; ... ; Name Fc_k, where each Fc_i is a function clause with a pattern sequence of the same length Arity, then Rep(F) = {function,LINE,Name,Arity,[Rep(Fc_1), ...,Rep(Fc_k)]}.
-
-%% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% %% 4.2 Atomic literals
-%% %
-%% %% There are five kinds of atomic literals, which are represented in the same way in patterns, expressions and guards:
-%% %%%% HY: Hmmm... I count only four kinds...
-
-%% %%  If L is an integer or character literal, then Rep(L) = {integer,LINE,L}.
-
-?defsp('__sp_integer',[I]) ->
-    Env,
-    Line=lineno(),
-    ?erl_integer(Line,I).
-
-%% %%  If L is a float literal, then Rep(L) = {float,LINE,L}. 
-%% '__sp_float'([L,F]) ->
-%%     ?erl_float(L,F).
-
-%%  If L is a string literal consisting of the characters C_1, ..., C_k, then Rep(L) = {string,LINE,[C_1, ..., C_k]}.
-?defsp('__sp_string',[S]) ->
-    Env,
-    Line=lineno(),
-    ?erl_string(Line,S).
-
-%%  If L is an atom literal, then Rep(L) = {atom,LINE,L}. 
-?defsp('__sp_atom',[A]) ->
-    Env,
-    Line=lineno(),
-    ?erl_atom(Line,A).
-
-%% %% Note that negative integer and float literals do not occur as such; they are parsed as an application of the unary negation operator.
-
-%% %% %%atomic_literal({i_string,_Line,_S}) -> error("Interpolated string not supported.").
-
-%% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% %% 4.3 Pattern
-%% %%
-%% %% If Ps is a sequence of patterns P_1, ..., P_k, then Rep(Ps) = [Rep(P_1), ..., Rep(P_k)]. Such sequences occur as the list of arguments to a function or fun.
-%% %%
-%% %% Individual patterns are represented as follows: 
-%% %%  If P is an atomic literal L, then Rep(P) = Rep(L).
+%% code here is ugly as sin.
 
 patterns(Patterns,Env) -> 
     %% first pass generates the bindings 
@@ -504,8 +205,10 @@ bind(?ast_brace(Es),Env) ->
 bind(?ast_paren([?ast_atom(Car)|Es])=P,Env) ->
     case Car of
 	nil -> Env;
-	cons -> [H,T]=Es,
-		bindmac(H,bindmac(T,Env));
+	cons -> case Es of
+		    [H,T] -> bindmac(H,bindmac(T,Env));
+		    [] -> Env
+		end;
 	tuple -> binds(Es,Env);
 	'=' -> binds(Es,Env);
 	_  -> error("Invalid pattern\n~.4p.",[P])
@@ -534,10 +237,13 @@ gen_pat(?ast_brace(Es),Env) ->
 gen_pat(?ast_paren([?ast_atom(Car)|Es])=P,Env) ->
     case Car of
 	nil -> transform(P,Env);
-	cons -> [H,T]=Es,
-		RH=gen_pat(H,Env),
-		RT=gen_pat(T,Env),
-		{cons,lineno(),RH,RT};
+	cons -> case Es of
+		    [H,T] ->
+			RH=gen_pat(H,Env),
+			RT=gen_pat(T,Env),
+			{cons,lineno(),RH,RT};
+		    [] -> {nil,lineno()}
+		end;
 	tuple ->
 	    [?ast_block(Elements)]=Es,
 	    Rs=gen_pats(Elements,Env),
@@ -600,46 +306,10 @@ gen_pat_glist(Type,[Es,L,M],Env) ->
     gen_pat(mk_ast(Type,Es,L,M), Env).
 
 
-%% %% %%  If P is a variable pattern V, then Rep(P) = {var,LINE,A}, where A is an atom with a printname consisting of the same characters as V. 
-%% %% %%  If P is a universal pattern _, then Rep(P) = {var,LINE,'_'}.
-
-
-%% %%  If E is P = E_0, then Rep(E) = {match,LINE,Rep(P),Rep(E_0)}.
-%% ?defsp('__sp_=',[P,E]) ->
-%%     Line=lineno(),
-%%     %% erlang spec 6.10 pg74
-%%     {Env1,RE} = transform(E,Env),
-%%     %% '=' never declares bindings
-%%     {Env2,RP} = gen_pat(P,Env1),
-%%     {Env2,{match,Line,RP,RE}}.
-
-?defsp('__sp_let',Es) ->
-    Line=lineno(),
-    [?ast_block(Bindings),?ast_block(Body)]=to_blocks(Es), 
-    {Patterns,Assignments}=let_bindings(Bindings,[],[]),
-    Env2=binds(Patterns,scompile:lexical_shadow(Env,vars,[])), %% create new scope
-    RAssignments=
-	[begin
-	     L=element(2,P), 
-	     RP=gen_pat(P,Env2), %% use new bindings
-	     RV=transform(V,Env),  %% value evaluated in original scope
-	     {match,L,RP,RV}
-	 end
-	 || {P,V} <- Assignments],
-    RBody=transform_each(Body,Env2), %% body in new scope
-    {block,Line,RAssignments++RBody}. 
-
-let_bindings([],Patterns,Assignments) ->
-    {lists:reverse(Patterns),lists:reverse(Assignments)};
-let_bindings([Pattern,Value|Bindings],Patterns,Assignments) ->
-    let_bindings(Bindings,[Pattern|Patterns],[{Pattern,Value}|Assignments]). 
-
-?defm('__mac_>>',[V,P|Es]) ->
-    ?cast_paren([?cast_atom('let'),
-		 P,V,
-		 ?cast_block(Es)]).
-
+%%  If P is a variable pattern V, then Rep(P) = {var,LINE,A}, where A is an atom with a printname consisting of the same characters as V. 
+%%  If P is a universal pattern _, then Rep(P) = {var,LINE,'_'}.
 %%  If E is a variable V, then Rep(E) = {var,LINE,A}, where A is an atom with a printname consisting of the same characters as V.
+
 %%HY: It's silly to call variables variables when they don't vary... I call them bindings.
 
 '__sp_var'(?ast_paren([?ast_atom3(Line,M,_),V]),Env) ->
@@ -653,119 +323,14 @@ let_bindings([Pattern,Value|Bindings],Patterns,Assignments) ->
     end.
 
 
-%% %%  If E is a tuple skeleton {E_1, ..., E_k}, then Rep(E) = {tuple,LINE,[Rep(E_1), ..., Rep(E_k)]}.
-
-?defsp('__sp_tuple',[?ast_block(Es)]) ->
-    Line=lineno(),
-    %% doesn't respect "eval in some order". See transform_each in scompile.erl
-    {tuple,Line,transform_each(Es,Env)}.
-
-%% %%  If E is [], then Rep(E) = {nil,LINE}.
-
-?defsp('__sp_nil',[]) ->
-    Env,
-    Line=lineno(),
-    {nil,Line}.
-
-?defm('__mac_ls',[]) ->
-    ?cast_paren([?cast_atom(nil)]); 
-?defm('__mac_ls',[?ast_block(Conses)]) ->
-    'mk_list*'(Conses,?cast_paren([?cast_atom(nil)]));
-?defm('__mac_ls',[?ast_block(Conses),?ast_block([Tail])]) ->
-    'mk_list*'(Conses,Tail). 
-
-'mk_list*'(Conses,Tail) ->
-    lists:foldr(
-      fun (H,T) ->
-	      ?cast_paren([?cast_atom(cons),H,T])
-      end,
-      Tail,
-      Conses).
-
-%% %%  If E is a cons skeleton [E_h | E_t], then Rep(E) = {cons,LINE,Rep(E_h),Rep(E_t)}.
-
-?defsp('__sp_cons',[Eh,Et]) ->
-    Line=lineno(),
-    REh=transform(Eh,Env),
-    REt=transform(Et,Env),
-    {cons,Line,REh,REt}.
-
-%% %%  If E is case E_0 of Cc_1 ; ... ; Cc_k end, where E_0 is an expression and each Cc_i is a case clause then Rep(E) = {'case',LINE,Rep(E_0),[Rep(Cc_1), ..., Rep(Cc_k)]}.
-%% <case-expr> := (case <exp> <case-clause>+)
-%% <case-clause> := (<pattern>: <form>+) | (<pattern> when <guard>: <form>+)
-
-?defsp('__sp_case',[E|Cs]) ->
-    Line=lineno(),
-    {'case',Line, transform(E,Env),
-     [case_clause(C,Env) || C <- Cs]}.
-
-%% If E is begin B end, where B is a body, then Rep(E) = {block,LINE,Rep(B)}.
-?defsp('__sp_begin',Es) ->
-    Line=lineno(),
-    REs=transform_each(Es,Env),
-    {block,Line,REs}.
-
-%%  If E is E_m:E_0(E_1, ..., E_k), then Rep(E) = {call,LINE,{remote,LINE,Rep(E_m),Rep(E_0)},[Rep(E_1), ..., Rep(E_k)]}. 
-?defsp('__sp_call',[?ast_brace([M,F])|Es]) ->
-    Line=lineno(),
-    RM=transform(M,Env),
-    RF=transform(F,Env),
-    REs=transform_each(Es,Env),
-    {call,Line,{remote,Line,RM,RF},REs};
-
-%%  If E is E_0(E_1, ..., E_k), then Rep(E) = {call,LINE,Rep(E_0),[Rep(E_1), ..., Rep(E_k)]}.
-?defsp('__sp_call',[?ast_atom3(_L,M,F)|Es]=E) ->
-    Line=lineno(),
-    %% For hygiene, test to see if the symbol came from another module.
-    IsRemote=(M/=curmod()),
-    if IsRemote ->
-	    transform(?cast_paren([?cast_atom('__call')|
-				   [?cast_brace([?cast_atom(M),?cast_atom(F)])|Es]]),
-		      Env);
-       true ->
-	    case lookup(Env,functions,{M,F}) of 
-		{ok,{{M2,Fn}}} ->
-		    %% call to imported function
-		    transform(?cast_paren([?cast_atom('__call')|
-					   [?cast_brace([?cast_atom(M2),?cast_atom(Fn)])|Es]]),
-			      Env); 
-		{ok,_Fn} ->
-		    %% call to lexical or defined module function
-		    REs=transform_each(Es,Env),
-		    {call,Line,?erl_atom(Line,F),REs}; 
-		_ -> %% call to (not yet defined) module function 
-		    make_call(E,Env) 
-	    end
-    end;
-?defsp('__sp_call',E) ->
-    make_call(E,Env).
-
-make_call([E0|Es],Env) ->
-    L=lineno(),
-    RE0=transform(E0,Env),
-    REs=transform_each(Es,Env),
-    {call,L,RE0,REs}.
-
-?defsp('__sp_fn',[?ast_paren(Ps)|Es]) ->
-    L=lineno(),
-    {'fun',L,
-     {'clauses', [clause(Ps,[],Es,L,Env)]}}.
-
 %% 4.5 Clauses
 
 %% erlang's guarded clauses take guard-sequences
-
-%% serl's guarded clauses just take one guard (a list of guard-tests):
-%% (Pat when <guard-test>+: <form>+)
-%% use (or <guard-test>+) to express guard-sequence
 
 %% bindings made in serl's clauses are not visible outside.
 
 %% There are function clauses, if clauses, case clauses and catch clauses. 
 %% A clause C is one of the following alternatives:
-
-case_clause(?ast_paren3(L,_,[P|Es]),Env) ->
-    clause([P],[],Es,L,Env). 
 
 clause(Ps,G,Es,Line,Env) ->
     %% A <guard> is a list of <guard-test>
@@ -891,42 +456,3 @@ mk_ast_pat(Type,E) ->
 ?defasts_mac('__mac_parens','__paren'). 
 ?defasts_mac('__mac_braces','__brace').
 ?defasts_mac('__mac_blocks','__block').
-
-    
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Utility Functions
-  
-    
-%% a common idiom is a list of blocks seperated by ':' (foo a b c d: e f g h: i j k l)
-%% this functions return a list of blocks.
-
-%% this is somewhat problematic
-%% no [] is allowed in the first list of items
-%% (foo [a b] c d: e f g) would fail, perhaps surprisingly.
-%%%% at least it surprised me.
-%%
-
-to_blocks(Es) ->
-    {FirstBlock,Blocks}=
-	lists:splitwith(fun (E) ->
-			 case E of
-			     ?ast_block(_) -> false;
-			     _ -> true
-			 end
-		    end,
-		    Es),
-    [?cast_block(FirstBlock)|Blocks].
-
-
-upto_block(Es) ->
-    {UpToFirstBlock,Rest}=
-	lists:splitwith(fun (E) ->
-			 case E of
-			     ?ast_block(_) -> false;
-			     _ -> true
-			 end
-		    end,
-		    Es),
-    {UpToFirstBlock,Rest}.
-

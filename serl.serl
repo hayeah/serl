@@ -5,7 +5,7 @@
 (import scompile
 	error
 	lineno
-	curmod
+	curmod is_curmod
 	transform
 	transform_each
 	map_env0
@@ -47,24 +47,30 @@
   )
  (specials
   %a{__eof} %a{__bof}
-  %a{__block} %a{__brace} 
+  %a{__block} %a{__brace}
+  %a{__integer} %a{__float} %a{__string} %a{__atom}
+  module
   def defm defspecial
   functions-import functions-export functions-output
   #macros-import
   macros-export macros-output
   #specials-import
   specials-export specials-output
+  eval-binding
   let lsc
   fn call 
   case if
-  toplevel
+  do toplevel
+  tuple cons
   + - * / ==
   not
   )
  (macros
   export-from import-from
-  export import
-  let*
+  export import 
+  let* >>
+  begin
+  ls
   ))
 
 
@@ -91,7 +97,7 @@
        ))
 
 (def atom-cat (Vs):eval:
-  ## perhaps name it catom??
+     ## perhaps name it catom?? 
   (foldl
    (fn (V Acc)
        (let Str (if (erlang\is_integer V) (erlang\integer_to_list V)
@@ -139,6 +145,8 @@
 ##################################################
 # .Pseudo Forms
 
+(def cleanup ():eval:
+     ok)
 
 (defspecial %a{__bof} () Env:
   {0 Env})
@@ -147,13 +155,7 @@
   (case Command
     (normal (verl\emit (output-forms Env) Env
 		       (verl\set_opts (scompile\options))))
-    (after (verl\cleanup))))
-
-(defspecial %a{__block} (:etc [Es]) Env:
-  (transform `(ls: ;Es) Env))
-
-(defspecial %a{__brace} (:etc [Es]) Env: 
-  (transform `(tuple: ;Es) Env))
+    (after (cleanup))))
 
 (def output-forms (Env):eval:
   ## do output for each NS types
@@ -177,6 +179,28 @@
 		  ))))
 
 
+
+#\asts
+
+# the payload of the ast is passed in.
+(defspecial %a{__block} (Es) Env:
+  (transform `(ls: ;Es) Env))
+
+(defspecial %a{__brace} (Es) Env: 
+  (transform `(tuple: ;Es) Env))
+
+(defspecial %a{__integer} (V) _Env:
+  {integer (lineno) V})
+
+(defspecial %a{__float} (V) _Env:
+  {float (lineno) V})
+
+(defspecial %a{__string} (V) _Env:
+  {string (lineno) V})
+
+(defspecial %a{__atom} (V) _Env:
+  {atom (lineno) V})
+
 ##################################################
 # 1. Environment
 #
@@ -187,6 +211,10 @@
 
 # (import-from mod (macros ...) (functions ...))
 
+(defspecial module (Mod) Env:
+  (case (is_curmod Mod)
+    (true {1 Env})
+    (false (error "Module name mismatch: ~p" [Mod])))) 
 
 (def export-defs (Env Type Names):eval:
   (env\assoc_append Env [exports Type] Names))
@@ -278,8 +306,7 @@
 
 #If F is an attribute -export([Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,export,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}.
 
-(defspecial functions-export (:etc Names) Env:
-  (fmt "fun-export: ~p\n" [Names])
+(defspecial functions-export (:etc Names) Env: 
   {2 (export-defs Env functions Names)})
 
 (defspecial functions-output (Info) Env:
@@ -380,6 +407,8 @@
 ##################################################
 # .Definitions
 
+(def split-tail (Lst):eval:
+  (reverse Lst ~>> [Tail|RHeads] {(reverse RHeads) Tail}))
 
 (def macro-parse-args (Args Body VAll):eval:
   # V_n are the continuaton variables that store partial parsing results.
@@ -389,13 +418,17 @@
   (case Args
     ([] `(let (paren [_Car]) ,VAll : ;Body))
     ([(block ['etc|EArgs])|Blocks]
-     (let {Heads Tail} (reverse EArgs ~>> [Tail|RHeads]
-				{(reverse RHeads) Tail})
+     (let {Heads Tail} (split-tail EArgs)
 	  VK (genvar) VK2 (genvar)
 	  :
 	  `(let* (paren [_Car ;Heads | ,VK]) ,VAll
 		 {,Tail ,VK2} (upto-block ,VK)
 		 : ,(macro-arg-blocks Blocks Body VAll VK2))))
+    ([(block ['all|Args])]
+     (let {Heads Tail} (split-tail Args):
+	  `(let (paren [_ ;Heads | ,Tail]) ,VAll:
+		;Body)
+	  ))
     (_ (let* {Heads Blocks} (upto-block Args)
 	     VK (genvar)
 	     :
@@ -410,14 +443,14 @@
 				     (case Type
 				       (etc true)
 				       (tag true)
-				       (all false)
+				       ##(aux false)
 				       (_ (error "Unrecognized macro argument block: ~p"
 						 [Type]))))
 				 Blocks) 
 	  AuxBindings (macro-aux-blocks AuxBlocks VAll)
 	  :
 	  (case Blocks
-	    ([] `(let ;AuxBindings : ,VK ;Body))
+	    ([] `(let ;AuxBindings : ,(macro-arg-end Body VK)))
 	    (_ `(let ;AuxBindings
 		  : ,(macro-arg-blocks-2 Blocks Body VK)))
 	    #~>> R (fmt "MAB -> ~p\n" [R]) R
@@ -427,8 +460,7 @@
   # parse the non-auxiliary block args
   # key & etc
   (case Blocks
-    ([] `(case ,VK
-	   ([] ;Body)))
+    ([] (macro-arg-end Body VK))
     ([(block [(atom Type)|Args])|Blocks]
      (case Type
        (etc (let VK2 (genvar)
@@ -451,14 +483,23 @@
 		 ))
        ))))
 
-(def macro-aux-blocks (Blocks VAll):eval:
+(def macro-aux-blocks (Blocks _VAll):eval:
+     (case Blocks
+       ([] [])
+       (_ (error "No auxiliary argument supported yet") ))
   # auxiliary arguments that don't consume arguments.
-  (foldl (fn ((block [Type|Spec]) Bindings)
-	     (case Type
-	       ('all [(>> Spec [AllArg] AllArg) VAll | Bindings])))
-	 []
-	 Blocks))
+     
+#      (foldl (fn ((block [Type|Spec]) Bindings)
+# 	     (case Type
+# 	       ('all [(>> Spec [AllArg] AllArg) VAll | Bindings])))
+# 	 []
+# 	 Blocks) 
+  )
 
+(def macro-arg-end (Body VK):eval:
+     `(case ,VK
+	([] ;Body)
+	(_  (erlang\error {macro-arg "Leftover arguments."}))))
 
 #\def
 (defspecial def ((atom Name) `(;Args)
@@ -587,8 +628,13 @@
 
 
 ##################################################
-# 3. Binding Forms
+# .Binding Forms
 
+(defspecial eval-binding (V) _Env: 
+    (let L (lineno):
+	 (case V
+	   ((atom A) {var L A})
+	   ((var A) {var L A}))))
 
 (def let-bindings (Bindings Patterns Assignments):eval:
      (case Bindings
@@ -596,12 +642,13 @@
        ([Pattern Value|Bindings]
 	(let-bindings Bindings [Pattern|Patterns] [{Pattern Value}|Assignments]))))
 
-#\let
+#\let*
 (defm let* (:etc Bindings :etc Body):
   (case Bindings
     ([] `(begin ;Body))
     ([Pattern Value|Bindings] `(let ,Pattern ,Value: (let* ;Bindings: ;Body)))))
 
+#\let 
 (defspecial let (:etc Bindings :etc Body) Env:
   (let* Line (lineno) 
 	{Patterns Assignments} (let-bindings Bindings [] []) 
@@ -615,7 +662,7 @@
 	: 
 	{block Line (cat Assignments (transform_each Body Env2))}))
 
-
+#\>>
 (defm >> (:etc Val Pattern Body):
   `(let ,Pattern ,Val: ;Body))
 
@@ -718,6 +765,7 @@
 # %%  If E is E_0(E_1, ..., E_k), then Rep(E) = {call,LINE,Rep(E_0),[Rep(E_1), ..., Rep(E_k)]}.
 # (call E0 ...)
 
+
 (def local-call (A Args Env):eval:
   {call (ast-line A) (transform A Env) (transform_each Args Env)})
 
@@ -727,8 +775,8 @@
 	     {remote L (transform M Env) (transform A Env)}
 	     (transform_each Args Env)}))
 
-#\call 
-(defspecial call (:etc Fn Args) Env:
+#\call
+(defspecial call (:all Fn Args) Env: 
   (case Fn
     (`{,M ,A} (remote-call M A Args Env)) 
     ((atom A)
@@ -740,15 +788,12 @@
 		 ## atom is associated with import
 		 ({ok {{M A}}} (remote-call (atom M) (atom A) Args Env))
 		 ## atom is assumed to be local call
-		 (R (io\format "Result: ~p\n Env: ~p\n" [R Env])
-		    (local-call Fn Args Env)))
+		 (_ (local-call (atom A) Args Env)))
 	       ## atom is not from the source, so interpret as remote
-	       (remote-call (atom M) Fn Args Env))
+	       (remote-call (atom M) (atom A) Args Env))
 	   ))
-    (_ (local-call Fn Args Args))))
+    (_ (local-call Fn Args Env))))
 
-##################################################
-# .Misc
 
 # #\defstruct
 # (def sp-defstruct (`(,_ ,(atom Name) ;Fields) Env)
@@ -782,8 +827,20 @@
   (let Line (lineno):
        {if Line (if-clauses Body [] Line Env)}))
 
+#If E is begin B end, where B is a body, then Rep(E) = {block,LINE,Rep(B)}.
+
+#\do
+(defspecial do (:all Es) Env:
+  (let L (lineno):
+       {block L (transform_each Es Env)}))
+
+#\begin
+(defm begin (:all Es):
+  `(do ;Es))
+
+
 #\toplevel
-(defspecial toplevel (:etc [Form|Forms]) Env:
+(defspecial toplevel (:all [Form|Forms]) Env:
   (let* {Section Env} (transform Form Env)
 	Env
 	(lists\foldl
@@ -903,3 +960,33 @@
   (una-op not Args Env))
 
 
+
+##################################################
+# .Data Types
+#
+# should probably be at the end, otherwise makes compilation slow.
+
+(defspecial tuple ((block Es)) Env:
+  (let L (lineno):
+       {tuple L (transform_each Es Env)}))
+
+(def list-of (Heads Tail):eval:
+     (foldr (fn (H T) `(cons ,H ,T))
+	    Tail Heads))
+
+(defm ls (:all Es):
+      (case Es
+	([(block Heads) (block [Tail])]
+	 (list-of Heads Tail))
+	([(block Heads)]
+	 (list-of Heads '(cons)))
+	([] '(cons))))
+
+(defspecial cons (:all Es) Env:
+  (let L (lineno):
+       (case Es
+	 ([] {nil L})
+	 ([Head Tail]
+	  {cons L
+		(transform Head Env)
+		(transform Tail Env)}))))
