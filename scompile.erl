@@ -251,7 +251,8 @@ new_process(Fun,Args) ->
 new_process(Fun,Args,State) ->
     process_flag(trap_exit, true),
     Sync=spawn_link(
-	   fun () -> init_state(State), 
+	   fun () -> init_state(State),
+		     %% maybe the thrown error keeps
 		     R=apply(Fun,Args),
 		     exit({result,R})
 	   end),

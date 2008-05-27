@@ -157,6 +157,23 @@ After pattern, delimited by pairs of ':' is the guard sequence. A guard is a ser
 (if false a true b) ## => b
 (if false a false b c) ## => c
 
+* try
+
+The 'try' form is pretty much like Erlang's 'try'. Any of the :of, :catch, and :after segment may be omitted. Guards may be included in as in 'case'. To specify the class of the exception, use a ':' to set apart the first two elements of a catch clause from the rest of the clause.
+
+(try <exp*>
+ [[:of <case-clause>*]]
+ [[:catch (Reason <exp>*) (Class Reason: <exp>*)]]
+ [[:after <exp>*]]
+ )
+
+
+(try (foo)
+ :of (a 1) (b 2)
+ :try (oops bad) (error A:(is_atom A): {very-bad A})
+ :after (cleanup))
+
+
 
 * def/defm/defspecial/defrm
 
@@ -234,7 +251,7 @@ Because ':' separate a sexp into segments, parsing is made much easier for macro
 (defspecial try (:etc Es
                  :tag of Os
 		 :tag try Ts
-		 :tag finally Fs
+		 :tag after Fs
 		 )
  ...
  )
@@ -242,21 +259,21 @@ Because ':' separate a sexp into segments, parsing is made much easier for macro
 # a full try form
 (try (foo) (bar)
  :of (a 1) (b 2)
- :catch (error\oops "darn")
- :finally (cleanup))
+ :catch (oops "darn")
+ :after (cleanup))
 
 # the tagged segments may be ommitted
 (try (foo) (bar)
  :of (a 1) (b 2)
- :finally (cleanup))
+ :after (cleanup))
 
 (try (foo) (bar)
  :of (a 1) (b 2)
- :catch (error\oops "darn")
+ :catch (oops "darn")
  )
 
 (try (foo) (bar)
- :catch (error\oops "darn")
+ :catch (oops "darn")
  )
 
 
