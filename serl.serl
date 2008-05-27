@@ -64,6 +64,7 @@
   case if
   do toplevel
   try receive
+  bin
   tuple cons
   + - * / ==
   not
@@ -810,6 +811,71 @@
 	    RWs}
 	))
 
+
+
+# If E is a binary constructor <<V_1:Size_1/TSL_1, ..., V_k:Size_k/TSL_k>>, then Rep(E) = {bin,LINE,[{bin_element,LINE,Rep(V_1),Rep(Size_1),Rep(TSL_1)}, ..., {bin_element,LINE,Rep(V_k),Rep(Size_k),Rep(TSL_k)}]}. For Rep(TSL), see below. An omitted Size is represented by default. An omitted TSL (type specifier list) is represented by default.
+
+# A type specifier list TSL for a binary element is a sequence of type specifiers TS_1 - ... - TS_k. Rep(TSL) = [Rep(TS_1), ..., Rep(TS_k)]. 
+
+# When TS is a type specifier for a binary element, then: 
+# If TS is an atom A, Rep(TS) = A. 
+# If TS is a couple A:Value where A is an atom and Value is an integer, Rep(TS) = {A, Value}.
+
+
+(def bin-element (Seg Env):eval:
+   (case Seg
+     ((paren Seg)
+      (let* {Heads TypeSpecs} (upto-block Seg) 
+	    {Value Size} (case Heads
+			   ([Value Size]
+			    {(bin-value Value Env)
+			     (bin-size Size Env)})
+			   ([Value]
+			    {(bin-value Value Env)
+			     default}))
+	    TypeSpecs (case TypeSpecs
+			([] default)
+			([(block Ts)]
+			 (lsc T Ts:
+			      (case T
+				((atom T) T)
+				(`(unit ,(integer Unit))
+				 {unit Unit})
+				))))
+	    :
+	    [{bin_element Value Size TypeSpecs}]
+	    ))
+     (_ [{bin_element (bin-value Seg Env) default default}])
+     ))
+
+(def bin-value (V Env):eval:
+   (transform (do (case V
+		    ((var _) true)
+		    ((integer _) true)
+		    ((float _) true)
+		    ((string _) true)
+		    (_ (error "Invalid bin value (want var,integer,float,string).")))
+		  V)
+	      Env))
+
+(def bin-size (V Env):eval:
+   (transform (do (case V
+		    ((integer _) true)
+		    (_ (error "Invalid bin size (want integer).")))
+		  V)
+	      Env))
+
+(defspecial bin (:etc Segs) Env:
+   (let L (lineno):
+	{bin L (lsc Seg Segs: (bin-element Seg Env))}))
+
+
+
+# If E is a binary comprehension <<E_0 || W_1, ..., W_k>>, where each W_i is a generator or a filter, then Rep(E) = {bc,LINE,Rep(E_0),[Rep(W_1), ..., Rep(W_k)]}. For Rep(W), see below.
+
+# If W is a generator P <= E, where P is a pattern and E is an expression, then Rep(W) = {b_generate,LINE,Rep(P),Rep(E)}. 
+
+# If W is a filter E, which is an expression, then Rep(W) = Rep(E).
 
 
 # If E is fun Fc_1 ; ... ; Fc_k end where each Fc_i is a function clause then Rep(E) = {'fun',LINE,{clauses,[Rep(Fc_1), ..., Rep(Fc_k)]}}.

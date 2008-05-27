@@ -185,6 +185,33 @@ The 'try' form is pretty much like Erlang's 'try'. Any of the :of, :catch, and :
 (receive (a ...) (b ...)
  :after 1000 timeout)
 
+* bin
+
+Bitstring. 
+
+(bin <bin-seg>*)
+
+<bin-seg>
+  := Value |
+     (Value Size) |
+     (Value: TypeSpecifier ...) |
+     (Value Size: TypeSpecifier ...)
+
+Value must be a variable, integer, float, or string.
+
+TypeSpecifiers are the following,
+
+Type= integer | float | binary | bytes | bitstring | bits 
+Signedness= signed | unsigned 
+Endianness= big | little | native 
+Unit= (unit IntegerLiteral)
+
+Refer to 6.12 of Erlang Reference Manual
+
+* binc
+
+bitstring comprehension. not yet implemented.
+
 
 
 * def/defm/defspecial/defrm
