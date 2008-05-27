@@ -261,6 +261,8 @@ h4. Export
 
 All user defined namespaces should export only definitions.
 
+The environment is looked up in the order of lexical, definitions, imports, base.
+
 h1. Builtin Macros
 
 

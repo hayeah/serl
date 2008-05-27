@@ -210,7 +210,7 @@ bind(?ast_paren([?ast_atom(Car)|Es])=P,Env) ->
 		    [] -> Env
 		end;
 	tuple -> binds(Es,Env);
-	'=' -> binds(Es,Env);
+	'==' -> binds(Es,Env);
 	_  -> error("Invalid pattern\n~.4p.",[P])
     end;
 bind(P,_) ->
@@ -248,7 +248,7 @@ gen_pat(?ast_paren([?ast_atom(Car)|Es])=P,Env) ->
 	    [?ast_block(Elements)]=Es,
 	    Rs=gen_pats(Elements,Env),
 	    {tuple,lineno(),Rs};
-	'=' ->
+	'==' ->
 	    [Last|Rest]=lists:reverse(Es),
 	    lists:foldl(
 	      fun (E,Acc) ->

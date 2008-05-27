@@ -52,7 +52,10 @@
 error(Message) ->
     error(Message,[]).
 error(Message,Args) ->
-    scompile:error(Message++"\nRemaining Input:\n~p\n\n",Args++[residue()]).
+    scompile:error(Message++"\n~p:Remaining Input:\n~p\n\n",
+		   Args++[lineno(),
+			  streamer:read_until("\n")++
+			  streamer:read_until("\n")]).
 
 get_state() ->
     {curenv(), streamer:get_port(), lineno()}.

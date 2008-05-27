@@ -89,23 +89,38 @@ In fact, you might call an imported function with undefined arity by mistake.
 -Note that it has only one function clause.
 
 
+
+
 * case
 
 (case Exp
   (<pattern> <exp>*)+
   )
 
--Case doesn't support guards.
--Bindings are lexically scoped, and not visible outside of the case form, in contrast to Erlang's case.
+(case Exp
+  (<pattern> :<test>*: ... : <exp>*)+
+  )
 
-(case b
- (a 1)
- (b 2)) ## => 2
+
+Bindings are lexically scoped, and not visible outside of the case form, in contrast to Erlang's case.
 
 ## patterns always create new bindings.
 (let A a:
   (case {foo A}
     (A A))) ## => {foo a}
+
+After pattern, delimited by pairs of ':' is the guard sequence. A guard is a series of tests.
+
+(case A
+ ## matches if A is an integer and an atom (never).
+ (A :(is_atom A)(is_integer I): ...)
+ ## matches if A is either an integer or an atom.
+ (A :(is_atom A):(is_integer I): ...) 
+ ## matches if L is a list
+ (L :(is_list L): ...)
+ ## universal pattern.
+ (_ ...)
+ )
 
 
 * let
@@ -125,11 +140,11 @@ In fact, you might call an imported function with undefined arity by mistake.
 * lsc
 
 (lsc <pattern> <generator> ...: A) ## List comprehension.
-(lsc ... :if <filter> ...: A) ## with filter
+(lsc ... if <filter> ...: A) ## with filter
 
 
 (lsc A [a b c] B [1 2 3]: {A B}) # => [{a 1} ... {b 1} ... {c 1}]
-(lsc I [1 a 2 b] :if (is_integer I): [I]) # => [[1] [2]]
+(lsc I [1 a 2 b] if (is_integer I): [I]) # => [[1] [2]]
 
 
 * if
