@@ -63,6 +63,7 @@
   fn call 
   case if
   do toplevel
+  try receive
   tuple cons
   + - * / ==
   not
@@ -168,18 +169,23 @@
 ##################################################
 # .Pseudo Forms
 
-(def cleanup ():eval:
+(def cleanup ():eval: 
+     (ets\delete serl-info)
      ok)
 
 (defspecial %a{__bof} () Env:
+  (ets\new serl-info [named_table])
   {0 Env})
 
 (defspecial %a{__eof} (Command) Env:
   (case Command
     (normal (let R (verl\emit (output-forms Env) Env
-			(verl\set_opts (scompile\options))):
+			      (verl\set_opts (scompile\options))):
+		 ##(erlang\write Env)
+		 ##(io\write Env)
+		 (fmt "group leader:~p\n" [(erlang\group_leader)])
+		 (fmt "ETS: ~p\n" [(ets\info serl-info)])
 		 (fmt "memory: ~p\n" [(erlang\process_info (self) memory)])
-		 #(fmt "Env: ~p\n" [Env])
 		 #(erlang\display Env)
 		 R
 		 ))
@@ -264,16 +270,15 @@
 # 	  ))
 
 
-(def new-def (Env NSType Name Def):eval:
-  (let Defined (env\assoc Env [definitions NSType Name]):
-       (if Defined (error "%s already defined in %s" [Name NSType])
-	   (env\assoc_put Env [definitions NSType Name] Def)
-	   )))
+(def new-def (Env NSType Name Def Info):eval:
+  (case (ets\insert_new serl-info {{definitions NSType Name} Info})
+    (false (error "%s already defined in %s" [Name NSType]))
+    (_ (env\assoc_put Env [definitions NSType Name] Def))))
 
-(def def-info (Env NSType Name Key):eval:
+(def def-info (_Env NSType Name Key):eval:
   # caller of this function should check its result
-  (case (env\assoc Env [definitions NSType Name])
-    ({ok Def} (proplists\lookup Key (erlang\element 2 Def) ~case
+  (case (ets\match serl-info {{definitions NSType Name} %a{$1}})
+    ([[Info]] (proplists\lookup Key Info ~case
 				(none false)
 				({_ R} {ok R})))
     (_ false)))
@@ -555,14 +560,14 @@
 				(scompile\eval_erl EvalAst [{EvalVarName Args}] Env ~>>
 						   {Result _} Result))
 		   {(curmod) Name})
+	Info [{ast DefAst}
+	      {doc Doc}
+	      {eval EvalFlag}
+	      {arities [Arity]}]
 	:
 	#(erlpp EvalAst)
 	{10 (new-def Env functions Name
-		     {EvalFn
-		      [{ast DefAst}
-		       {doc Doc}
-		       {eval EvalFlag}
-		       {arities [Arity]}]})}
+		     {EvalFn} Info)}
 	))
 
 
@@ -599,15 +604,15 @@
 	     ))
 	DefAst {function Line MacName 1
 			 [(verl\clause [VAll] [] [`(begin ,MacBody)] Line Env)]}
+	Info [{ast DefAst}
+	      {arities [1]}
+	      {name MacName}
+	      {args Args} 
+	      {doc Doc}]
 	:
 	#(fmt "defm ok\n")
 	{10 (new-def Env macros Name
-		     {EvalFn
-		      [{ast DefAst}
-		       {arities [1]}
-		       {name MacName}
-		       {args Args} 
-		       {doc Doc}]})}))
+		     {EvalFn} Info)}))
 
 
 #\defspecial
@@ -642,17 +647,17 @@
 		  Result)))
 	DefAst {function Line MacName 2
 			 [(verl\clause [VAll VEnv] [] [`(begin ,MacBody)] Line Env)]}
+	Info [{ast DefAst}
+	      {arities [2]}
+	      {name MacName}
+	      {args Args} 
+	      {doc Doc}]
 	: 
 	##(erlpp EvalAst)
 	## the macro definition needs to be in meta and normal env
 	#(fmt "defspecial ok\n")
 	{10 (new-def Env specials Name
-		     {EvalFn
-		      [{ast DefAst}
-		       {arities [2]}
-		       {name MacName}
-		       {args Args} 
-		       {doc Doc}]})}))
+		     {EvalFn} Info)}))
 
 
 ##################################################
@@ -713,22 +718,27 @@
 # # If C is a catch clause P when Gs -> B where P is a pattern, Gs is a guard sequence and B is a body, then Rep(C) = {clause,LINE,[Rep({throw,P,_})],Rep(Gs),Rep(B)}. 
 # # If C is a catch clause X : P when Gs -> B where X is an atomic literal or a variable pattern, P is a pattern, Gs is a guard sequence and B is a body, then Rep(C) = {clause,LINE,[Rep({X,P,_})],Rep(Gs),Rep(B)}.
 
-# (def catch-clause (`(;Es) Env):eval:
-#      (let {Heads Blocks} (upto-block Es)
-# 	  L (lineno):
-# 	  (case Blocks
-# 	    ([] (let [P|B] Heads:
-# 		     (clause `{throw ,P} [] B Env)))
-# 	    (_ (let {Gs B} (split-tail Blocks):
-# 		    (case Heads
-# 		      ([X P]
-# 		       (case X
-# 			 ((atom X) ok)
-# 			 ((var X) ok)
-# 			 (_ (error "The class of a catch clause should be an atom or a var."))
-# 			 (clause `{,X ,P} Gs B Env))
-# 		       ([P] (clause `{throw ,P} Gs B Env))))))
-# 	    )))
+(def catch-clause (`(;Es) Env):eval:
+     (let {Heads Blocks} (upto-block Es)
+	  #L (lineno)
+	  :
+	  (case Blocks
+	    ## (<pattern> <exp>*)
+	    ([] (let [P|B] Heads:
+		     (clause [`{throw ,P _}] [] B Env)))
+	    ##( ... : ... )
+	    (_ (let {Gs (block B)} (split-tail Blocks):
+		    (case Heads
+		      ##( <class> <pattern> : ...)
+		      ([X P]
+		       (case X
+			 ((atom _) ok)
+			 ((var _) ok)
+			 (_ (error "The class of a catch clause should be an atom or a var.")))
+		       (clause [`{,X ,P _}] Gs B Env))
+		      ##(<pattern> : ...)
+		      ([P] (clause [`{throw ,P _}] Gs B Env))))))
+	    ))
 
 
 # # If E is try B catch Tc_1 ; ... ; Tc_k end, where B is a body and each Tc_i is a catch clause then Rep(E) = {'try',LINE,Rep(B),[],[Rep(Tc_1), ..., Rep(Tc_k)],[]}. 
@@ -738,20 +748,34 @@
 # # If E is try B catch Tc_1 ; ... ; Tc_k after A end, where B and A are bodies and each Tc_i is a catch clause then Rep(E) = {'try',LINE,Rep(B),[],[Rep(Tc_1), ..., Rep(Tc_k)],Rep(A)}. 
 # # If E is try B of Cc_1 ; ... ; Cc_k catch Tc_1 ; ... ; Tc_n after A end, where B and A are a bodies, each Cc_i is a case clause and each Tc_j is a catch clause then Rep(E) = {'try',LINE,Rep(B),[Rep(Cc_1), ..., Rep(Cc_k)],[Rep(Tc_1), ..., Rep(Tc_n)],Rep(A)}.
 
-# #\try
-# (defspecial try (:etc B
-#                  :tag of (Cs [])
-# 		 :tag catch (Ts [])
-# 		 :tag after (A [])
-# 		  ) Env:
-#   (let L (lineno):
-#        {try L (transform_each B Env)
-# 	    (lsc `(,P ;GBody) Cs: (guarded-clause [P] GBody Env))
-# 	    (lsc T Ts: (catch-clause T Env))
-# 	    (transform_each A Env)
-# 	    })
-#   )
+#\try
+(defspecial try (:etc B
+                 :tag of (Cs [])
+		 :tag catch (Ts [])
+		 :tag after (A [])
+		  ) Env:
+  (let L (lineno):
+       {try L (transform_each B Env)
+	    (lsc `(,P ;GBody) Cs: (guarded-clause [P] GBody Env))
+	    (lsc T Ts: (catch-clause T Env))
+	    (transform_each A Env)
+	    }))
 
+# If E is receive Cc_1 ; ... ; Cc_k end, where each Cc_i is a case clause then Rep(E) = {'receive',LINE,[Rep(Cc_1), ..., Rep(Cc_k)]}. 
+# If E is receive Cc_1 ; ... ; Cc_k after E_0 -> B_t end, where each Cc_i is a case clause, E_0 is an expression and B_t is a body, then Rep(E) = {'receive',LINE,[Rep(Cc_1), ..., Rep(Cc_k)],Rep(E_0),Rep(B_t)}.
+
+#\receive
+(defspecial receive (:etc Cs :tag after (After [])) Env:
+    (let L (lineno)
+	 Cs (lsc `(,P ;GBody) Cs:
+		 (guarded-clause [P] GBody Env))
+	 :
+	 (case After
+	   ([] {receive L Cs})
+	   ([Time|Es]
+	    {receive L Cs
+		     (transform Time Env)
+		     (transform_each Es Env)}))))
 
 
 
