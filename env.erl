@@ -18,6 +18,7 @@
 %%	 flatten/2,
 	 exports_of/1,exports_of/2,exports_of/3,
 	 imports_of/1,imports_of/3,
+	 base_of/1,
 	 definitions_of/1,
  	 toplevel_of/1,
 	 
@@ -30,13 +31,13 @@
 new() ->
     [].
 
-%% an environment with initial import.
-new(ImportMod) ->
-    Env=try import(new(),ImportMod)
-	catch no_imports -> []
-	end,
-    assoc_put(Env,[lexical],[]).
-
+%% an environment with base definitions.
+%% modules that come first shadow those that come after.
+new(Mod) ->
+    {ok,Base}=base_of(Mod),
+    [{base,Base},
+     {lexical,[]},
+     {imports,[]}]. 
 
 import(Env,Mod) ->
     case exports_of(Mod) of
@@ -117,20 +118,36 @@ imports_of(Mod) ->
 
 imports_of(Mod,NSType,Keys) ->
     case exports_of(Mod,NSType,Keys) of
-	{ok,Bs} -> Bs;
-	_ -> false
+	false -> false;
+	Val -> Val
     end.
 
 definitions_of(Mod) ->
     case module_meta_info(Mod,[definitions]) of
-	{ok,AllDefs} -> AllDefs;
-	_ -> []
+	false -> false; 
+	Val -> Val
     end.
 
+base_of(Mod) ->
+    case module_meta_info(Mod,[base]) of
+	{ok,Mods} -> {ok,[{M,case exports_of(M) of
+				 {ok,Defs} -> Defs;
+				 _ -> error("None existing base module.")
+			     end}
+			  || M <- Mods]}; 
+	_ -> false
+    end.
+	    
+    
 toplevel_of(Mod) ->
+    Base=
+	case base_of(Mod) of
+	    {ok,V0} -> V0;
+	    _ -> []
+	end,
     Imports=
 	case imports_of(Mod) of
-	    {ok,V} -> V;
+	    {ok,V1} -> V1;
 	    _ -> []
 	end,
     Exports=
@@ -140,7 +157,7 @@ toplevel_of(Mod) ->
 	end,
     %% THINK: What is the toplevel?
     %% ANSWER: the toplevel is the imports of a module shadowed by its exported definitions
-    [{imports,Imports},{definitions,Exports}].
+    [{base,Base},{imports,Imports},{definitions,Exports}].
 
 
 
@@ -191,8 +208,11 @@ module_meta_info(Mod,Fs) when is_list(Fs) ->
     %% THINK: what happens of MOD is not a serl module?
     %% Or when it is not loaded?
     %% Or when the module does not exist?
-    Mod2=meta_module_of(Mod), 
-    assoc(Mod2:module_info(attributes),[serl_info|Fs]);
+    Mod2=meta_module_of(Mod),
+    case code:ensure_loaded(Mod2) of
+	{module,_} -> assoc(Mod2:module_info(attributes),[serl_info|Fs]);
+	_ -> false
+    end;
 
 module_meta_info(Mod,F) when is_atom(F) ->
     module_meta_info(Mod,[F]).
@@ -200,5 +220,8 @@ module_meta_info(Mod,F) when is_atom(F) ->
 
 module_meta_info(Mod)  ->
     Mod2=meta_module_of(Mod),
-    assoc(Mod2:module_info(attributes),[serl_info]).
+    case code:ensure_loaded(Mod2) of
+	{module,_} -> assoc(Mod2:module_info(attributes),[serl_info]);
+	_ -> false
+    end.
 

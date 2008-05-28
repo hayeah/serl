@@ -88,7 +88,8 @@ gen_glist({'ls*',Conses,T}) ->
 gen_glist({cat,L}) ->
     ?ast_paren2(
        0,
-       [?cast_atom('cat'),?cast_block([gen_code(I) || I <- L])]).
+       %%[?ast_atom3(lineno(),list,'append'),?cast_block([gen_code(I) || I <- L])]
+      [?cast_atom(cat),?cast_block([gen_code(I) || I <- L])]).
 
 
 expand(Exp) ->

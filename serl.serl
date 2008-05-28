@@ -22,7 +22,6 @@
 	foreach
 	)
 
-
 ## verl's meta-module doesn't support import.
 ### this is a special case
 # (import verl clause) 
@@ -85,6 +84,16 @@
   === /==
   and or xor orelse andalso
   not))
+
+
+
+# (def cat (L1 :opt L2):
+#   (case L2
+#     (false (lists\append L1))
+#     (_ (lists\append L1 L2))))
+
+# (def fmt (Str Args):
+#   (io\format Str Args))
 
 ##################################################
 # .Helper
@@ -212,9 +221,12 @@
 	       {(env\new) [] []}
 	       Types
 	       ~>> {Info Headers Bodies}
-		(let Info (env\assoc_put Info [imports]
-					 (env\assoc Env [imports]
-						    ~>> {ok Imports} Imports)):
+		(let* Info (env\assoc_put Info [imports]
+					  (env\assoc Env [imports]
+						     ~>> {ok Imports} Imports))
+		      Info (env\assoc_put Info [base]
+					  (env\assoc Env [base] ~>> {ok Base}
+						     (lsc {M _Defs} Base: M))):
 		  (lists\flatten [{attribute 0 module (curmod)}
 				  {attribute 0 serl true}
 				  {attribute 0 serl_info Info}
@@ -1044,7 +1056,8 @@
 	     {remote L (transform M Env) (transform A Env)}
 	     (transform_each Args Env)}))
 
-#\call
+# #\call
+
 (defspecial call (:all Fn Args) Env: 
   (case Fn
     (`{,M ,A} (remote-call M A Args Env)) 
@@ -1053,7 +1066,7 @@
 	   ## check to see if the atom is from the source or from macro.
 	   FromSource (== M (curmod)): 
 	   (if FromSource
-	       (case (scompile\lookup_imports Env functions A)
+	       (case (scompile\external_lookup Env functions A)
 		 ## atom is associated with import
 		 ({ok {{M A}}} (remote-call (atom M) (atom A) Args Env))
 		 ## atom is assumed to be local call

@@ -19,7 +19,8 @@
 	 
 	 lexical_shadow/3,lexical_extend/3,
 	 get_def/3,new_def/4,
-	 lookup/3,lookup_meta_fun/3,lookup_expander/2,toplevel_lookup/3,
+	 lookup/3,lookup_meta_fun/3,lookup_expander/2,
+	 toplevel_lookup/3,external_lookup/3,
 	 lookup_imports/3,
 	 warn/1,warn/2,error/1,error/2
 	 ]).
@@ -432,9 +433,16 @@ remote_lookup(Env,NSType,{M,A}) ->
 
 toplevel_lookup(Env,NSType,A) ->
     case lookup_definitions(Env,NSType,A) of 
-	false -> lookup_imports(Env,NSType,A); 
+	false -> external_lookup(Env,NSType,A);
 	Val -> Val
     end.
+
+external_lookup(Env,NSType,A) ->
+    case lookup_imports(Env,NSType,A) of
+	false -> lookup_base(Env,NSType,A);
+	Val -> Val
+    end.
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Lexical Scoping
@@ -511,13 +519,19 @@ lookup_definitions(Env,NSType,Key) ->
 
 lookup_imports(Env,NSType,Key) ->
     case assoc(Env,[imports]) of
-	{ok,Imports} -> lookup_imports_(Imports,NSType,Key);
+	{ok,Imports} -> lookup_envs(Imports,NSType,Key);
 	_ -> false
     end.
 
-lookup_imports_([],_,_) -> false;
-lookup_imports_([{_Mod,NSs}|Imports],NSType,Key) ->
+lookup_base(Env,NSType,Key) ->
+    case assoc(Env,[base]) of
+	{ok,Base} -> lookup_envs(Base,NSType,Key);
+	_ -> false
+    end.
+    
+lookup_envs([],_,_) -> false;
+lookup_envs([{_Mod,NSs}|Envs],NSType,Key) ->
     case assoc(NSs,[NSType,Key]) of
-	false -> lookup_imports_(Imports,NSType,Key);
+	false -> lookup_envs(Envs,NSType,Key);
 	V -> V
     end.

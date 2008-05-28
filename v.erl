@@ -16,12 +16,8 @@ profile() ->
     fprof:profile(),
     fprof:analyse({dest,"profile.dat"}).
 
-tenv() ->
-    env:import(env(),test).
-
 env() ->
-    env:import(env:new(verl),serl).
-
+    env:new(serl). 
 %% env() ->
 %%     env:new(verl). 
 

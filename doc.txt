@@ -236,6 +236,8 @@ All @Forms@ are compiled as toplevel forms. The @Forms@ should belong to the sam
 
 h3. Environment
 
+base module is stored in module-info as a symbol. It's assumed that everything is imported.
+
 <pre>
 import-from Module :pos Specs
 export-from :pos Specs
