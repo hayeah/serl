@@ -116,22 +116,22 @@ compile(Mod,Options) ->
 %% backward  # rollback by n cycles
 
 t() ->
-    test(serl).
+    test(serl,[],[bootstrap]).
 
 t(Defs) ->
-    test(serl,Defs).
+    test(serl,Defs,[bootstrap]).
 
 t(Defs,Options) ->
-    test(serl,Defs,Options).
+    test(serl,Defs,[bootstrap|Options]).
 
-tt() ->
-    test(test).
+%% tt() ->
+%%     test(test).
 
-tt(Defs) ->
-    test(test,Defs).
+%% tt(Defs) ->
+%%     test(test,Defs).
 
-tt(Defs,Options) ->
-    test(test,Defs,Options).
+%% tt(Defs,Options) ->
+%%     test(test,Defs,Options).
 
 
 version() ->
@@ -152,6 +152,16 @@ r(N) ->
      back(N),
      r().
 
+rt() ->
+    %% do a bootstrap cycle.
+    r(),
+    t().
+
+rt(N) ->
+    %% do a bootstrap cycle.
+    r(N),
+    t().
+
 next() ->
     %% step to next version
     recompile(1).
@@ -168,7 +178,8 @@ goto(N) ->
 
 recompile(VersionIncrement) ->
     make:all([load]),
-    R=compile(serl,[bin,report,meta]),
+    R=compile(serl,[bin,report,bootstrap]),
+    %R=compile(serl,[bin,report]),
     %% I absolutely loath how Erlang makes binding in cases visible outside.
     ModBin=case env:assoc(R,[bin]) of
 	       {ok,[_,Bin|_]} -> Bin

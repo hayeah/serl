@@ -71,6 +71,11 @@
   ls
   ))
 
+## export this so it's usable by future bootstraps.
+## this is a piece of ad hocery.
+(export-from
+ (macros def-ops))
+
 (export-from
  (specials
   + - * / ++ --

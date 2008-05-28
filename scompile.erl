@@ -44,6 +44,7 @@ error(Message,Args) ->
 	{curmod=?serl_toplevel,
 	 lineno=1,
 	 gensym_counter=0,
+	 bootstrap=false,
 	 options=[]
 	}).
 
@@ -52,6 +53,7 @@ error(Message,Args) ->
 -define(curmod,{?MODULE,'curmod'}).
 -define(gensym,{?MODULE,'gensym_counter'}).
 -define(options,{?MODULE,'options'}).
+-define(bootstrap,{?MODULE,bootstrap}).
 -define(toplevel_cache(M),{?MODULE,{toplevel_env_cache,M}}).
 
 %% init_state() ->
@@ -63,6 +65,7 @@ init_state(S) when is_record(S,state) ->
     put(?lineno,S#state.lineno),
     put(?curmod,S#state.curmod),
     put(?gensym,S#state.gensym_counter),
+    put(?bootstrap,S#state.bootstrap),
     put(?options,S#state.options).
 
 %% not sure if get_state is ever useful
@@ -113,6 +116,10 @@ options() ->
     
 set_options(Opts) ->
     put(?options,Opts).
+
+
+bootstrap() -> get(?bootstrap).
+%set_bootstrap(V) -> put(?bootstrap,V). 
 
 toplevel_of(M) ->
     case get(?toplevel_cache(M)) of
@@ -205,8 +212,12 @@ compile(Mod,Env) when is_atom(Mod) ->
     compile(Mod,Env,[]).
 
 compile(Mod,Env,Options) when is_atom(Mod) ->
+    %% FIX Ugly kludge for bootstrapping.
+    %% It makes definitions unavailable at compile time.
     new_process(fun compile_/2,[Mod,Env],
-		#state{curmod=Mod,options=Options}).
+		#state{bootstrap=lists:member(bootstrap,Options),
+		       curmod=Mod,
+		       options=Options}).
 
 %% transforms expressions for "side effect" on the environment.
 %% __bof and  __eof are pseudo forms for a language to do its language specific things.
@@ -493,7 +504,10 @@ lookup_scope({Mod,Key}=K,[{{BMod,BKey},Val}|Bs]) ->
     end.
     
 lookup_definitions(Env,NSType,Key) ->
-    assoc(Env,[definitions,NSType,Key]).
+    case bootstrap() of
+	true -> false;
+	_ -> assoc(Env,[definitions,NSType,Key])
+    end.
 
 lookup_imports(Env,NSType,Key) ->
     case assoc(Env,[imports]) of
