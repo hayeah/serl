@@ -124,14 +124,14 @@ t(Defs) ->
 t(Defs,Options) ->
     test(serl,Defs,[bootstrap|Options]).
 
-%% tt() ->
-%%     test(test).
+tt() ->
+    test(test).
 
-%% tt(Defs) ->
-%%     test(test,Defs).
+tt(Defs) ->
+    test(test,Defs).
 
-%% tt(Defs,Options) ->
-%%     test(test,Defs,Options).
+tt(Defs,Options) ->
+    test(test,Defs,Options).
 
 
 version() ->

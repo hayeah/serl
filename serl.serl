@@ -411,19 +411,23 @@
 					   (_ (error "~p: Exporting ~p undefined: ~p"
 						     [Line Type Name])))
 				 }]}})))
+	Defs (lsc Name FNames :
+		  {Name (def-info Env Type Name asts ~case
+				  ({ok Arity-Ast*} Arity-Ast*)
+				  (false (error "no asts in def-info??")))})
 	:
-	##(fmt "Info: ~p\n" [Info])
 	{Info
 	 ##export attributes
 	 (lsc {Line Name} Exports
-	      Arity (def-info Env Type Name arities ~>>
-			      {ok Arities} Arities):
-	      {attribute Line export
-			 [{Name Arity}]})
+	      {Arity _Ast} (lists\keysearch Name 1 Defs ~>>
+					    {value {_Name R}} R):
+	      {attribute Line export [{Name Arity}]}
+	      )
 	 ##definitions
-	 (lsc Name FNames:
-	      (def-info Env Type Name ast ~case
-			({ok Ast} Ast)))
+	 (lsc Name FNames
+	      {_Arity Ast} (lists\keysearch Name 1 Defs ~>>
+					    {value {_Name R}} R):
+	      Ast)
 	 }))
 
 (def output-meta-fun (Info Env Type):eval:
@@ -562,40 +566,109 @@
 	([] ;Body)
 	(_  (erlang\error {macro-arg "Leftover arguments."}))))
 
+# returns list of [{Args Body} ...]
+(def fun-args (Name Args Body):eval:
+  (let {RequiredArgs Blocks} (upto-block Args):
+       (case Blocks
+	 ([]
+	  [{RequiredArgs `(begin ;Body)}])
+	 ##( ... :opt ...)
+	 ([(block ['opt | OptArgs])]
+	  (fun-args-opts Name RequiredArgs OptArgs Body))
+	 (_
+	  (error "def block args not yet supported")
+	  #(fun-args-blocks Name RequiredArgs Blocks Body)
+	  ))))
+
+(def fun-args-opts (Name Reqs Opts Body):eval:
+     (let Opts (lsc Opt Opts:
+		    (case Opt
+		      (`(,Arg ,Init) [Arg Init])
+		      (Arg [Arg 'false])))
+	  :
+	  (fun-args-opt-rec Name Reqs [] Opts Body [])))
+
+
+# (def foo (A B :opt (C c) (D d)): ...)
+#
+# (foo A B)
+#  (let C c D d: (foo A B C D))
+# (foo A B C)
+#  (let D d: (foo A B C D))
+# (foo A B C D)
+#   body
+#
+# damn! I need flet
+(def fun-args-opt-rec (Name Reqs OptsBound OptsUnbound Body Acc):eval:
+  (case OptsUnbound
+    ([]
+     [{(cat Reqs (lsc [Arg _] (reverse OptsBound): Arg))
+       `(begin ;Body)}
+      |Acc])
+    ([OU|OUs]
+     ## fugly
+     (fun-args-opt-rec
+      Name Reqs [OU|OptsBound] OUs Body
+      [{(cat Reqs (lsc [Arg _] (reverse OptsBound): Arg))
+	`(let* ;(cat OptsUnbound):
+	   (,Name ;Reqs
+		  ;(lsc [Arg|_] OptsBound: Arg)
+		  ;(lsc [Arg|_] OptsUnbound: Arg)))}
+       
+	|Acc]
+      ))))
+
+#(def fun-args-blocks ():e)
+
+
+# (def fun-args-blocks (Name Reqs Blocks Body):eval:
+#   ()
+#   )
+
+
 #\def
 (defspecial def ((atom Name) `(;Args)
 		 :tag doc Doc
 		 :tag eval Eval
 		 :etc Body) Env:
   (fmt "def: ~p\n" [Name])
+  ##(fmt "args: ~p\n" [Args])
+  ##(fmt "def arities:\n~p\n" [(fun-args FName Args Body)])
   (let* Line (lineno)
-	Arity (length Args)
+	FName (atom Name)
 	EvalFlag (case Eval (false false) (_ true))
 	Doc (case Doc (false "") (_ Doc))
-	DefAst {function Line Name Arity
-			 [(verl\clause Args [] Body Line Env)]}
+	Mod (curmod)
+	FClauses (fun-args FName Args Body) ## [{Args Body} ...], where Body is a single expression.
 	EvalVarName (gensym)
 	EvalVar (var EvalVarName)
 	## Note that the it expects compiler to pass in the args in a list.
+	## So variable arity works.
 	EvalAst (if EvalFlag (transform
 			      `(case (eval-binding ,EvalVar)
-				 ([;Args] ;Body))
+				 ;(lsc {Args Body} FClauses:
+				       `([;Args] ,Body)))
 			      Env)
 		    false)
-	## TODO support multiple arities 
+			## TODO support multiple arities 
 	EvalFn (if EvalFlag (fn (Args Env)
-				# the environment at the time of call is passed in.
+				## the environment at the time of call is passed in.
 				(scompile\eval_erl EvalAst [{EvalVarName Args}] Env ~>>
 						   {Result _} Result))
-		   {(curmod) Name})
-	Info [{ast DefAst}
+		   {Mod Name})
+	Arity-Ast*
+	(lsc {Args Body} FClauses:
+	     (let* Arity (length Args) 
+		   Ast {function Line Name Arity
+				 [(verl\clause Args [] [Body] Line Env)]}: 
+		   {Arity Ast}))
+	Info [{asts Arity-Ast*}
 	      {doc Doc}
-	      {eval EvalFlag}
-	      {arities [Arity]}]
-	:
+	      {eval EvalFlag}]
+	: 
 	#(erlpp EvalAst)
 	{10 (new-def Env functions Name
-		     {EvalFn} Info)}
+		     {EvalFn} Info) }
 	))
 
 

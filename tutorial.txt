@@ -417,7 +417,7 @@ In order of how frequently they should be used.
 (def bar ():eval:
    ...)
 
-Common-lisp styled lambda list is planned. For a rough idea I'd do something like,
+Common Lisp style lambda list is supported. In particular,
 
 (def bar (A :key (k1 K1) (k2 K2)
      	    :etc L)
@@ -437,6 +437,18 @@ Notice that bar is just a function with 3 arguments, the last 2 of which are lis
 (baz :k1 1
      :a b c d
      :k2 2)
+
+Keyword arguments not yet supported.
+
+:key and :etc both expect a list of arguments, and as such, they not idiomatic Erlang. In idiomatic Erlang, functions of different arities are often used to implement optional arguments. Serl's :opt arguments for def expresses this idiom:
+
+(def foo (A B :opt (C {B A}) (D C)):
+ ...)
+
+
+foo takes two required arguments, and 2 optional arguments. Notice that the init form of the optional arguments may refer to bindings made previously.
+ 
+
 
 ** Macros **
 
