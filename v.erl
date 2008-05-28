@@ -135,7 +135,14 @@ tt(Defs,Options) ->
 
 
 version() ->
-    length(filelib:wildcard("bootstrap/*.beam"))-1.
+    Fs=filelib:wildcard("bootstrap/*.beam"),
+    Versions=[begin
+		  Name=filename:basename(F,".beam"),
+		  {ok,[R],_}=io_lib:fread("~d",Name),
+		  R
+	      end || F <- Fs],
+    [V|_]=lists:reverse(lists:sort(Versions)),
+    V.
 
 r() ->
     recompile(0).
@@ -158,7 +165,7 @@ back(N) ->
 goto(N) ->
     reload(N).
 
-%% hand compile the meta module for now
+
 recompile(VersionIncrement) ->
     make:all([load]),
     R=compile(serl,[bin,report,meta]),
@@ -166,82 +173,19 @@ recompile(VersionIncrement) ->
     ModBin=case env:assoc(R,[bin]) of
 	       {ok,[_,Bin|_]} -> Bin
 	   end,
-    
-%%     MetaBin=case env:assoc(R,[meta,bin]) of
-%% 	       {ok,[_,Bin2|_]} -> Bin2
-%% 	    end,
-    
-    %% ehh... should probably at the filenames to figure out version numbers. But I don't want to figure out erlang regex.
-    %% So, never delete from the directory.
     Version=version()+VersionIncrement,
     ModPath="bootstrap/"++integer_to_list(Version)++".beam",
-    %MetaModPath="bootstrap/"++integer_to_list(Version)++"__meta.beam",
     file:write_file(ModPath,ModBin),
-    %file:write_file(MetaModPath,MetaBin),
     compile:file(serl__meta),
     reload(Version).
     
 reload(Version) ->
     ModPath="bootstrap/"++integer_to_list(Version)++".beam",
-    %MetaModPath="bootstrap/"++integer_to_list(Version)++"__meta.beam",
     ModBin=case file:read_file(ModPath) of
 	       {ok,Bin} -> Bin
-	   end,
-    %% MetaModBin=case file:read_file(MetaModPath) of
-%% 		    {ok,Bin2} -> Bin2
-%% 	       end,
-    
+	   end,    
     code:purge(serl),
     code:purge(serl__meta),
     {Version,
      code:load_binary(serl,"",ModBin),
      code:load_file(serl__meta)}.
-
-
-%% recompile(VersionIncrement) ->
-%%     R=compile(serl,[bin,report,meta]),
-%%     %% I absolutely loath how Erlang makes binding in cases visible outside.
-%%     ModBin=case env:assoc(R,[bin]) of
-%% 	       {ok,[_,Bin|_]} -> Bin
-%% 	   end,
-%%     MetaBin=case env:assoc(R,[meta,bin]) of
-%% 	       {ok,[_,Bin2|_]} -> Bin2
-%% 	    end,
-%%     %% ehh... should probably at the filenames to figure out version numbers. But I don't want to figure out erlang regex.
-%%     %% So, never delete from the directory.
-%%     Version=version()+VersionIncrement,
-%%     ModPath="bootstrap/"++integer_to_list(Version)++".beam",
-%%     MetaModPath="bootstrap/"++integer_to_list(Version)++"__meta.beam",
-%%     file:write_file(ModPath,ModBin),
-%%     file:write_file(MetaModPath,MetaBin),
-%%     reload(Version).
-    
-%% reload(Version) ->
-%%     ModPath="bootstrap/"++integer_to_list(Version)++".beam",
-%%     MetaModPath="bootstrap/"++integer_to_list(Version)++"__meta.beam",
-%%     ModBin=case file:read_file(ModPath) of
-%% 	       {ok,Bin} -> Bin
-%% 	   end,
-%%     MetaModBin=case file:read_file(MetaModPath) of
-%% 		    {ok,Bin2} -> Bin2
-%% 	       end,
-%%     code:purge(serl),
-%%     code:purge(serl_meta),
-%%     {Version,
-%%      code:load_binary(serl,"",ModBin),
-%%      code:load_binary(serl__meta,"",MetaModBin)}.
-
-
-%% c(Mod) ->
-%%     %% refresh the unstable version
-%%     Bin=compile(Mod,[bin]),
-%%     code:purge(serl_new),
-%%     code:load_binary(serl_new,"",Bin).    
-
-%% cv() ->
-%%     R1=c(verl2),
-%%     compile:file("verl2__meta"),
-%%     code:purge(verl2__meta),
-%%     R2=code:load_file(verl2__meta), 
-%%     {R1,R2}. 
-

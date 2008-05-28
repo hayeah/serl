@@ -317,7 +317,7 @@ gen_pat_glist(Type,[Es,L,M],Env) ->
 	'_' -> ?erl_var(Line,'_');
 	_ -> case lookup(Env,vars,{M,V}) of
 		 {ok,Alias} -> ?erl_var(Line,Alias); 
-		 false -> {unbound_var,Line,M,V}
+		 false -> ?erl_var(Line,V)
 			    %{env:assoc_cons(Env,[lexical_unbound,vars],V),}
 	     end
     end.

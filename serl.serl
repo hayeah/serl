@@ -22,10 +22,6 @@
 	foreach
 	)
 
-(import erlang
-	length
-	self
-	)
 
 ## verl's meta-module doesn't support import.
 ### this is a special case
@@ -191,10 +187,10 @@
 			      (verl\set_opts (scompile\options))):
 		 ##(erlang\write Env)
 		 ##(io\write Env)
-		 (fmt "group leader:~p\n" [(erlang\group_leader)])
-		 (fmt "ETS: ~p\n" [(ets\info serl-info)])
-		 (fmt "memory: ~p\n" [(erlang\process_info (self) memory)])
-		 #(erlang\display Env)
+		 ##(fmt "group leader:~p\n" [(erlang\group_leader)])
+		 ##(fmt "ETS: ~p\n" [(ets\info serl-info)])
+		 ##(fmt "memory: ~p\n" [(erlang\process_info (self) memory)])
+		 ##(erlang\display Env)
 		 R
 		 ))
     (after (cleanup))))
@@ -242,6 +238,25 @@
 
 (defspecial %a{__atom} (V) _Env:
   {atom (lineno) V})
+
+# (defspecial %a{__var} (V) Env:
+#   (let L (lineno):
+#        (case V
+# 	 (%a{_}
+# 	    {var L %a{_}})
+# 	 (_ (case (scompile\lookup ())))))
+#   )
+
+# '__sp_var'(?ast_paren([?ast_atom3(Line,M,_),V]),Env) ->
+#     case V of
+# 	'_' -> ?erl_var(Line,'_');
+# 	_ -> case lookup(Env,vars,{M,V}) of
+# 		 {ok,Alias} -> ?erl_var(Line,Alias); 
+# 		 false -> {unbound_var,Line,M,V}
+# 			    %{env:assoc_cons(Env,[lexical_unbound,vars],V),}
+# 	     end
+#     end.
+
 
 ##################################################
 # 1. Environment
@@ -373,7 +388,7 @@
 
 (def output-fun (Info Env Type):eval:
   ## used so far by functions
-     (fmt "output: ~p\n" [Type])
+     ##(fmt "output: ~p\n" [Type])
   (let* FNames (lsc {Name _} (get-defs Env Type):
 		    Name)
 	Exports (lsc Export (get-exports Env Type): 
@@ -409,7 +424,7 @@
 (def output-meta-fun (Info Env Type):eval:
   ## shared by exports,specials
   ## only the exported defs need actually be output
-     (fmt "output-meta: ~p\n" [Type])
+     ##(fmt "output-meta: ~p\n" [Type])
   (let* Exports (lsc Export (get-exports Env Type):
 		     {(ast-line Export) (ast-data Export)})
 	{Headers Bodies}

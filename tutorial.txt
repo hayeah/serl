@@ -417,7 +417,7 @@ In order of how frequently they should be used.
 (def bar ():eval:
    ...)
 
-Nothing surprising here. Common-lisp styled lambda list is planned. For a rough idea I'd do something like,
+Common-lisp styled lambda list is planned. For a rough idea I'd do something like,
 
 (def bar (A :key (k1 K1) (k2 K2)
      	    :etc L)
