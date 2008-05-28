@@ -451,7 +451,7 @@
 (def macro-parse-args (Args Body VAll):eval:
   # V_n are the continuaton variables that store partial parsing results.
   # parse the required args or a leading :etc block (special case).
-  # auxiliary args must follow the leading args.
+  # auxiliary args must come after the leading args.
      #(fmt "MPA:\nBody: ~p\n" [Body])
   (case Args
     ([] `(let (paren [_Car]) ,VAll : ;Body))

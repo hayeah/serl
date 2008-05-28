@@ -47,6 +47,19 @@ The car of a parenthetical expression could be a function, a macro, or a special
 
 Here are some toplevel forms. Currently the default global function namespace is empty (so you have to import those BIFs!). In a proper release I'd like to collect call statistics to determine which bindings to include in the default compile time environment.
 
+* BIFs
+
+All the BIFs that are imported by default by Erlang are imported by default. (This may change later.)
+
+Three additional imports:
+
+cat == lists:append  
+fmt == io:format
+send == erlang:send
+
+These may be removed in the future. I'd like suggestions on what to include in the toplevel. Maybe base the decision on call statistics.
+
+
 
 * import/export
 
@@ -174,7 +187,7 @@ The 'try' form is pretty much like Erlang's 'try'. Any of the :of, :catch, and :
  :after (cleanup))
 
 
-* receive
+* receive / send
 
 (receive <case-clause>*
  [[:after <integer> <exp>*]])
@@ -184,6 +197,8 @@ The 'try' form is pretty much like Erlang's 'try'. Any of the :of, :catch, and :
 
 (receive (a ...) (b ...)
  :after 1000 timeout)
+
+(send Pid Msg)
 
 * bin
 
