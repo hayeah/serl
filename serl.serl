@@ -66,8 +66,6 @@
   try receive
   bin
   tuple cons
-  + - * / ==
-  not
   )
  (macros
   export-from import-from
@@ -77,6 +75,15 @@
   ls
   ))
 
+(export-from
+ (specials
+  + - * / ++ --
+  == /= =< < >= >
+  div rem
+  bnot band bor bxor bsl bsr
+  === /==
+  and or xor orelse andalso
+  not))
 
 ##################################################
 # .Helper
@@ -1065,25 +1072,6 @@
 # or 	logical or 
 # xor 	logical xor
 
-# (def-ops
-#     (binary-nested + - * /)
-#     (binary == /= =< < >= >) 
-#   (binary div rem bnot band bor bxor bsl bsr)
-#   #(binary === /==) # defined separately
-#   (unary not and or xor))
-
-# (def-ops
-#     :binary-nested
-#     + - * /
-#     :binary
-#      == /= =< < >= >
-#      div rem
-#      bnot band bor bxor bsl bsr
-#      # === /== # defined separately
-#      :unary
-#       not and or xor
-#   )
-
 #If E is Op E_0, where Op is a unary operator, then Rep(E) = {op,LINE,Op,Rep(E_0)}.
 
 #If E is E_1 Op E_2, where Op is a binary operator, then Rep(E) = {op,LINE,Op,Rep(E_1),Rep(E_2)}.
@@ -1109,24 +1097,41 @@
       Op
       (transform Arg1 Env)})
 
+(defm def-ops (:etc Specs):
+  `(toplevel
+    ;(lsc `(,(atom Type) ;Names) Specs:
+	  (case Type
+	    (binary-nested
+	     `(toplevel
+	       ;(lsc Op Names:
+		     `(defspecial ,Op (:etc Args) Env:
+			(nest-bin-op ,Op Args Env)))))
+	    (binary
+	     `(toplevel
+	       ;(lsc Op Names:
+		     `(defspecial ,Op (:etc Args) Env:
+			(bin-op ,Op Args Env)))))
+	    (unary
+	     `(toplevel
+	       ;(lsc Op Names:
+		     `(defspecial ,Op (:etc Args) Env:
+			(una-op ,Op Args Env)))))
+	    ))))
 
-(defspecial + (:etc Args) Env:
-  (nest-bin-op + Args Env))
+(def-ops
+  (binary-nested + - * / ++ --)
+  (binary == /= =< < >= >) 
+  (binary div rem bnot band bor bxor bsl bsr)
+  (binary-nested and or xor orelse andalso)
+  (unary not))
 
-(defspecial - (:etc Args) Env:
-  (nest-bin-op - Args Env))
+## ===, /== defined separately, because they are named differently.
 
-(defspecial / (:etc Args) Env:
-  (nest-bin-op / Args Env))
+(defspecial === (:etc Args) Env:
+  (nest-bin-op %a{=:=} Args Env))
 
-(defspecial * (:etc Args) Env:
-  (nest-bin-op * Args Env))
-
-(defspecial == (:etc Args) Env:
-  (bin-op == Args Env))
-
-(defspecial not (:etc Args) Env:
-  (una-op not Args Env))
+(defspecial /== (:etc Args) Env:
+  (nest-bin-op %a{=/=} Args Env))
 
 
 

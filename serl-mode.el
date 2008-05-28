@@ -79,7 +79,7 @@
 		       serl-atom-re
 		       "\\)")
 	       2 font-lock-function-name-face)
-	 (cons (concat "\\("
+	 (cons (concat "(\\("
 		       (regexp-opt
 			'("def"
 			  "defm"

@@ -212,7 +212,21 @@ Refer to 6.12 of Erlang Reference Manual
 
 bitstring comprehension. not yet implemented.
 
+* unary / binary operators
 
+Operators are (unfortunately) implemented as macros.
+
+(def-ops
+  (binary-nested + - * / ++ --)
+  (binary == /= =< < >= >) 
+  (binary div rem bnot band bor bxor bsl bsr)
+  (binary-nested and or xor orelse andalso)
+  (unary not))
+
+If it makes sense, operators could be nested, as in
+
+(Op A B ...) => (Op (Op A B) C ...)
+(- A B C ...) => (- (- A B) C ...)
 
 * def/defm/defspecial/defrm
 
