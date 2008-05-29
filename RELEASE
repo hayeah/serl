@@ -14,7 +14,7 @@ foo => atom
 (bar .cdr .car)   => (car (cdr (bar)))
 
 
-Serl is mostly implemented in itself. I've found, so far, that the apparent syntatic complexity doesn't make metaprogramming with Common-Lisp style macro any harder. The syntatic extensions are designed such that they are pattern matchable, and that they are all "list-like". So even though Serl look a bit more complex, the macro programmer still works primarily with list.
+Serl is mostly implemented in itself. I've found, so far, that the apparent syntatic complexity doesn't make metaprogramming with Common-Lisp style macro any harder. The syntatic extensions are designed such that they are pattern matchable, and that they are all "list-like". So even though Serl looks a bit more complex, the macro programmer still works primarily with lists.
 
 Pattern matching is a godsend.
 
@@ -23,7 +23,7 @@ Pattern matching is a godsend.
 --import/export of macros and special forms.
 --special forms are just macros that takes the compiling environment as an extra argument. Serl defines itself with special forms.
 
--symbol capturing avoidance that works similar as package in common-lisp.
+-avoids unintentional capturing in similar way as common-lisp's package.
 
 -Syntax objects.
 --Quotation and quasiquotation are used only to build syntax objects.
@@ -37,10 +37,10 @@ Pattern matching is a godsend.
 -syntatically consistent reader macro based on heredoc.
 
 
-Read tutorial.txt for more. This is my first Erlang project. The error reporting is lousy at the moment. There's is a mysterious problem that sends the shell into a loop from time to time, but doesn't seem to be happening right now (Robert Virding is helping me with it).
+Read tutorial.txt for more. This is my first Erlang project. The error reporting is lousy at the moment. There is a mysterious problem that sends the shell into a loop from time to time, but doesn't seem to be happening right now (Robert Virding is helping me with it).
 
 
-Here's a simple set of unit-testing macros, in 40 LOC, so you get a feel what Serl looks like. Not exactly beautiful, but it is an appropriately sized chunk of code.
+Here's a simple set of unit-testing macros, in 40 LOC, so you get a feel what Serl is like. Not exactly beautiful Serl, but it is an appropriately sized chunk of code.
 
 
 

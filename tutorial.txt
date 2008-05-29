@@ -45,47 +45,51 @@ The car of a parenthetical expression could be a function, a macro, or a special
 ==================================================
 = Forms
 
-Here are some toplevel forms. Currently the default global function namespace is empty (so you have to import those BIFs!). In a proper release I'd like to collect call statistics to determine which bindings to include in the default compile time environment.
+Here are some toplevel forms. Currently the default global function namespace contains the BIFs. In a proper release I'd like to collect call statistics to determine which bindings to include in the default compile time environment.
 
-* BIFs
 
-All the BIFs that are imported by default by Erlang are imported by default. (This may change later.)
-
-Three additional imports:
+There are three additional imports:
 
 cat == lists:append  
 fmt == io:format
 send == erlang:send
 
-These may be removed in the future. I'd like suggestions on what to include in the toplevel. Maybe base the decision on call statistics.
+These may be removed in the future.
 
 
 
 * import/export
 
-Serl supports arbitrary namespaces. The generic is a macro that translates to import declarations specific to namespaces.
+Serl supports arbitrary namespaces. 'import-from' is a macro that translates to import declarations specific to each namespaces.
 
 (import-from (<NS-Type> <atom> <atom>*)* ) ## ==
 (toplevel
  (<NS-Type>-import <atom> <atom>*)*)
+ 
 
+Example,
+ 
 (import-from (functions mod1 ...) (macros mod2 ...) ...) ## ==
 (toplevel
  (functions-import mod1 ...)
  (macros-import mod2 ...))
+ 
 
 Export follows the same convention,
 
 (export-from (<NS-Type> <atom>*)* )
 
-Two macros are defined for in/export functions,
+
+Two macros are defined for in/export of functions,
 
 (import ...)
 (export ...)
 
+
 Function imports (unlike Erlang) ignore arity information.
 
 (import list append) ## imports both append/1 and append/2
+
 
 In fact, you might call an imported function with undefined arity by mistake.
 
@@ -99,9 +103,8 @@ In fact, you might call an imported function with undefined arity by mistake.
 
 (fn (A) <exp>+) ## fun (A) -> ... end
 
--Note that it has only one function clause.
 
-
+Note that it has only one function clause.
 
 
 * case
@@ -122,6 +125,7 @@ Bindings are lexically scoped, and not visible outside of the case form, in cont
   (case {foo A}
     (A A))) ## => {foo a}
 
+    
 After pattern, delimited by pairs of ':' is the guard sequence. A guard is a series of tests.
 
 (case A
@@ -170,6 +174,7 @@ After pattern, delimited by pairs of ':' is the guard sequence. A guard is a ser
 (if false a true b) ## => b
 (if false a false b c) ## => c
 
+
 * try
 
 The 'try' form is pretty much like Erlang's 'try'. Any of the :of, :catch, and :after segment may be omitted. Guards may be included in as in 'case'. To specify the class of the exception, use a ':' to set apart the first two elements of a catch clause from the rest of the clause.
@@ -183,7 +188,9 @@ The 'try' form is pretty much like Erlang's 'try'. Any of the :of, :catch, and :
 
 (try (foo)
  :of (a 1) (b 2)
- :try (oops bad) (error A:(is_atom A): {very-bad A})
+ :try
+   (oops bad)
+   (error A:(is_atom A): {very-bad A})
  :after (cleanup))
 
 
@@ -226,6 +233,7 @@ Refer to 6.12 of Erlang Reference Manual
 * binc
 
 bitstring comprehension. not yet implemented.
+
 
 * unary / binary operators
 
@@ -284,7 +292,7 @@ In Serl, we could write instead,
 
 (foo .car .car)
 
-Which translates at read time to (car (car (foo))) Informally, the nesting operators ~ and . wraps the expressions that precede it in a sexp, then put that either in the first position (.) or the last position (~) of the following expression.
+Which translates at read time to (car (car (foo))) Informally, the nesting operators ~ and . wraps the expressions that precede it in a sexp, then embed that either in the last position (.) or the first position (~) of the following expression.
 
 (foo a b .if (test)) ## => (if (test) (foo a b))
 
@@ -292,7 +300,7 @@ Which translates at read time to (car (car (foo))) Informally, the nesting opera
 ## =>
 (case (foo) (a 1) (b 2))
 
-Multiple . and ~ can appear in the same sexp. They are read/processed left to right, with each operator collecting expressions until meeting the next operator, or the closing parenthesis.
+Multiple . and ~ can appear in the same sexp. They are read and processed left to right, with each operator collecting expressions until meeting the next operator, or the closing parenthesis.
 
 (foo a b .if (test) ~case (a 1) (b 2))
 
@@ -309,12 +317,12 @@ In a function call, the collected elements simply translate to a list,
 (append: [1 2 3] [4 5 6] [7 8 9]) # =>
 (append [[1 2 3] [4 5 6] [7 8 9]])
 
-In a macro or a special form, ':' can be a syntatically significant delimiter (if the macro writer decides for ':' to be syntatically significant). So let and lsc, for example, use ':' as a syntax marker to separate the bindings and the body.
+In a macro or a special form, ':' can be a syntatically significant delimiter (only if the macro writer decides for ':' to be syntatically significant). Both let and lsc, for example, use ':' as a syntax marker to separate the bindings from the body.
 
 (let ... : ...)
 (lsc ... : ...)
 
-Because ':' separate a sexp into segments, parsing is made much easier for macro writers. The special form 'try' is implemented with the argument spec,
+Because ':' separates a sexp into segments, parsing is made much easier for macro writers. The special form 'try' is implemented with the argument spec,
 
 (defspecial try (:etc Es
                  :tag of Os
@@ -345,7 +353,7 @@ Because ':' separate a sexp into segments, parsing is made much easier for macro
  )
 
 
-Note the difference between ':' used in a function call and ':' used in a macro/special. In the first case, it is just a syntaic sugar for list, and in the latter, it could be used as a syntatic marker. This duality gives function call and macro/special forms a consistent syntax.
+There is a difference between ':' used in a function call and ':' used in a macro/special. In the first case, it is just a syntaic sugar for list, and in the latter, it could be used as a syntatic marker. This duality gives function call and macro/special forms a consistent syntax.
 
 In Serl, a name may have both a macro/special and a function binding. The macro/special binding always "win" at compile time. For example, 'ls' (vis. #'list in lisp) is defined both as a macro and a function.
 
@@ -360,11 +368,11 @@ The function 'ls' exists so you can refer to its value at runtime. It (presumabl
 (map (fn ls 1) [a b]) ## => [[a] [b]]
 (apply (fn ls 2) [[a] [d e f]]) ## => [a d e f]
 
-In (ls: a b c), ':' is a syntax marker, but it looks like the function call (ls [a b c]), so when 'ls' has consistent syntax when used for its function or macro definition.
+In (ls: a b c), ':' is a syntax marker, but it looks like the function call (ls [a b c]), so 'ls' has consistent syntax when used for its function or macro definition.
 
 ASIDE:
 
-I am not entirely sure if allowing binding to both macro/special and function would be confusing, but so far it hasn't bitten me yet, and it's a convenient for partial evaluation, when you can generate effecient code when the arguments are known, or fallback to function call.
+I am not entirely sure if allowing binding to both macro/special and function would be confusing, but so far it hasn't bitten me yet, and it's a convenient for partial evaluation, to generate effecient code when the arguments are known, or fallback to function call.
 
 This is useful for defining Erlang records. You might transform the code into tuple access if the field names are known at compile time,
 
@@ -386,12 +394,16 @@ FOOTNOTE:
 Not saying this is recommended, but you can if you think it's the clearest way to express your intent. In the reader, ':' collects its elements before '~' and '.' collect theirs, so the ':' elements always appear as a single argument in a form.
 
 (bar ~gaz :a b :c d .zar 1 2 :3 4 5) ## =>
-(gaz (gaz) :a b :c d .zar 1 2 : 3 4 5) ## =>
-(zar 1 2 :3 4 5 ?) ## => where ?== (gaz (gaz) :a b :c d)
+(gaz (bar) :a b :c d .zar 1 2 : 3 4 5) ## =>
+(zar 1 2 :3 4 5 ?)
+## => where '?' == (gaz (gaz) :a b :c d), but it is not
+## part of the preceding :-segment.
+##
+## If zar is a function, the above is:
+## (zar 1 2 [3 4 5] (gaz (bar) :a b :c d))
 
-Note in the very last form, ? doesn't belong the the previous ':' segment. It's not collected along with 3,4,5.
 
-This is a lot of explanation that makes it seem more complicated than it actually is. It's like quasiquoting, in that it would take a lot of time to /really/ explain it, but most of the time you do very simple things with it. The implementation is 50 lines of non-hairy code in the reader, if that soothes your nerve about the syntatical complexity.
+This is a lot of explanation that makes it seem more complicated than it actually is. It's like quasiquoting, in that it would take a lot of time to explain, but most of the time it's used to do very simple things. The implementation is 50 lines of non-hairy code in the reader.
 
 ==================================================
 = Definition
@@ -440,15 +452,14 @@ Notice that bar is just a function with 3 arguments, the last 2 of which are lis
 
 :key and :etc arguments not yet implemented.
 
-:key and :etc both expect a list of arguments, and as such, they are not idiomatic Erlang. In idiomatic Erlang, functions of different arities are often used to implement optional arguments. Serl's :opt arguments for def expresses this idiom:
+:key and :etc both expect a list of arguments, and as such, they are not idiomatic Erlang. In Erlang, functions of different arities are often used to implement optional arguments. Serl's :opt arguments for def expresses this idiom:
 
 (def foo (A B :opt (C {B A}) (D C)):
  ...)
 
 
-foo takes two required arguments, and 2 optional arguments with optional init forms. An optional argument defaults to false. Notice that the init form of the optional arguments may refer to bindings made previously.
+foo takes two required arguments, and 2 optional arguments with optional init forms. An optional argument defaults to false. The init form of the optional arguments may refer to bindings made previously.
  
-
 
 ** Macros **
 
@@ -459,12 +470,14 @@ line -- line where the AST appeared
 mod -- module of the AST (protection against unintentional capturing.)
 data --  the payload of the AST.
 
+
 Four accessors are defined,
 
 (ast-tag S)
 (ast-line S)
 (ast-mod S)
 (ast-data S)
+
 
 Quotation is /always/ used to produce ASTs. The AST types are,
 
@@ -479,9 +492,11 @@ paren 	  '()	      (paren [])
 block 	  '[]	      (block [])
 brace 	  '{}	      (brace 9)
 
-The AST macros are used for constructing ASTs. (atom A) is not expressible with quotation. AST macros are pattern matchable, so they may be used for deconstructing ASTs.
 
-(let (atom A) 'a: A) ## => a  ## a the atom, not the AST
+The AST macros are used for constructing ASTs. (atom A) is not expressible with quotation. AST macros are pattern matchable, so they may be used for destructuring ASTs.
+
+(let (atom A) 'a: A) ## => a
+## a the atom destrctured from the atom syntax object.
 
 
 The last three are generalized list types, into which you can splice in list of ASTs.
@@ -494,13 +509,15 @@ Think of splice-unquote as lisp's `(a b . ,c), but with the dot moved on top of 
 
 `(a b {;['c 'd]} [;['e 'f]]) == '(a b {c d} [e f])
 
-Since ASTs are really just tuples, they are pattern matchable. In particular, a splice-unquote is matchable if it appears at the end of a generalized list.
+
+A splice-unquote is matchable if it appears at the end of a generalized list.
 
 (let `(,A ;B) '(a b c d): {A B}) ## => {'a ['b 'c 'd]}
 
 The matching could be nested,
 
 (let `(,A {B ;C}) '(a {b c d}): {A B C}) ## => {'a 'b ['c 'd]}
+
 
 Often you'd want to match AST of a type (let's say atom ast),
 
@@ -528,35 +545,32 @@ Fancy lambda list is implemented for defm. The lambda list specifies how the mac
  
 (bar a b :c d :e f) ## => {{e a b} {f c d} {g e f}}
 
-':tag' specifies an optional ':' segment that may or may not appear in the macro body. Sequence of ':tag's has to appear (if they do) in the order as specified in the arglist. If a tag segment doesn't appear, its associated binding binds to 'false'.
+':tag' specifies an optional ':' segment that may or may not appear in the macro body. Sequence of ':tag's has to appear (if they do) in the order as specified in the arglist. If a tag segment doesn't appear, its associated binding defaults to [].
 
-(defm tag (:tag a A :tag b B):
-  `{,(case A
-       (false 'no-a)
-       (_ `{a-tag ;A}))
-    ,(case B
-       (false 'no-b)
-       (_ `{b-tag ;B}))})
+(defm tag (:tag a A :tag b (B ['no-b])):
+  `{,{tag-a ;A}
+    ,{tag-b ;B}})
 
 (tag :a 1 2 3 :b a b c)	## => {{a-tag 1 2 3} {b-tag a b c}}
-(tag :a 1 2 3)	        ## => {{a-tag 1 2 3} no-b}
-(tag :b a b c)		## => {no-a {b-tag a b c}} 
-(tag)			## => {no-a no-b}
+(tag :a 1 2 3)	        ## => {{tag-a 1 2 3} {tag-b no-b}} 
+(tag :b a b c)		## => {{tag-a} {tag-b a b c}} 
+(tag)			## => {{tag-a} {tag-b no-b}}
 (tag :b a b c :a 1 2 3) ## => error: left over arguments
 
-The last one gives error because tag doesn't expect any more arguments after the tag 'b'.
+The last one gives error because tag doesn't expect any more arguments after the tag 'b'. In other words, the tagged segments must come in the order as they appeared in the lambda-list.
 
 
 Both ':tag' and ':etc' use ':' as syntatic marker for parsing.
-(tag :a 1 2 3 :b a b c) is syntatically speaking a macro called with two segments of arguments. ':tag' and ':etc' parse segments.
+(tag :a 1 2 3 :b a b c) is syntatically speaking a macro called with two segments of arguments. ':tag' and ':etc' parse these segments.
 
 Sometimes (e.g. ls) you'd rather not ':' be syntatically significant, to allow user to switch between (ls: a b c) and (ls [a b c]). In this case, you'd want the macro arguments in a single list, rather than having been separated into ':'-segments. For this purpose, use the special ':all' argument. (If you use :all, you can't use :tag or :etc).
 
 The signature of 'ls' is
+
 (defm ls (:all Es): ...)
 
 
-Now, if we have macros, we have hygienic problems. Serl avoids non-intentional capture in a similar way as common lisp. The bindings established in a module is capturable only by symbols in the same module (unless made capturable). Within the same module, (genvar) and (with-genvar ...) should be used.
+If we have macros, we have hygienic problems. Serl avoids non-intentional capture in a similar way as common lisp. The bindings established in a module is capturable only by symbols in the same module (unless made capturable). Within the same module, (genvar) and (with-genvar ...) should be used.
 
 (genvar) ## returns a fresh variable for that module
 (with-genvar X Y: ...) ## binds X and Y to two genvars
@@ -567,7 +581,7 @@ A defined macro is visible to subsequent definitions.
 
 ** Specials **
 
-Special forms (used to implemented def, let, case, etc) are exactly like macros, except they return the transformed erlang ast, rather than a serl ast.
+Special forms (used to implemented def, let, case, etc.) are exactly like macros, except they return the transformed Erlang ast, rather than a serl ast.
 
 They take the compiling environment as an extra argument. Here's a simple example,
 
@@ -575,7 +589,7 @@ They take the compiling environment as an extra argument. Here's a simple exampl
   (let L (lineno):
        {block L (transform_each Es Env)}))
 
-In binding forms like let, the Env is extended before passing to the recursive transformation.
+This example does nothing to the environment. In binding forms like let, the Env would be extended before passing to the recursive transformations.
 
 The arglist of defspecial is the same as defm. Here's the spec for 'def'. 
 
@@ -601,7 +615,7 @@ A reader macro invokation starts with '%', like
 
 Note that the argument list to reader macro may be omitted if there are none. The heredoc can be inline or multiline. Inline heredocs are delimited by the pairs {},[], or %%
 
-Multiline heredoc string must start on a line of its own. There must be spaces between the reader macro name and the start of a multiline heredoc. The closing delimiter may be indented. Serl code can follow directly the closing.
+Multiline heredoc string must start on a line of its own. There must be spaces between the reader macro name and the start of a multiline heredoc. The closing delimiter may be indented. Serl expression can appear on the same line directly after the closing heredoc tag.
 
 %foo(){heredoc}
 %foo{heredoc} ## the argument () may be omitted
@@ -624,3 +638,4 @@ The predefined reader macros are,
 A defined reader macro is visible to subsequent definitions.
 
 Definition of new reader macros isn't supported yet, but would work like defm and defspecial.
+
