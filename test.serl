@@ -1,0 +1,192 @@
+
+(module test)
+
+(export opt-args
+	#test1
+	test-all
+	test-case
+	test-if
+	test-try
+	)
+
+(import lists
+	map reverse)
+
+(import scompile
+	transform
+	transform_each
+	lineno
+	curmod
+	)
+
+(import serl
+	erl-ast-of)
+
+#(export-from (macros etc tag) (specials foo))
+
+(defm deftest (:all Name Forms):
+  `(def ,Name ():
+     (let R (cat [;Forms]):
+	  (io\nl)
+	  R)))
+
+(defm assert (:all Es):
+  `(assert-equal ;(lsc E Es:
+		       `(true ,E))))
+
+(defm assert-equal (:all Es):
+  `[;(lsc `(,V ;Body) Es:
+	  (let L (integer (ast-line V))
+	       Body `(do ;Body)
+	       :
+	       `{,L
+		 (try (case ,Body
+			(,V (fmt "."))
+			(R (fmt "\n~p:Expected ~p, got ~p\n"
+				[,L ,V R])
+			   ## `(... ',E ...) is broken
+			   (printer\p (%a{__quote} ,Body))
+			   failed))
+		      :catch
+		      (Class Exception:
+			     (fmt "\n~p:Exception ~p\\~p\n" [,L Class Exception])
+			     (printer\p (%a{__quote} ,Body))
+			     failed))})
+	  )])
+
+(defm assert-error (:all Forms):
+  `[;(lsc `(;Es) Forms:
+	  (let* {Heads [(block Body)]} (upto-block Es)
+		L (integer (ast-line (hd Heads))):
+		`(try (begin ;Body)
+		       (fmt "\n~p:Expected to fail." [,L])
+		      {,L failed}
+		  :catch
+		   (;Heads: (fmt ".")
+			    {,L ok})
+		   (C R: (fmt "\n~p:Unexpected failure: ~p\\~p" [,L C R])
+		      {,L failed}))
+		)
+	  )])
+
+
+# (deftest test-foo
+#   :up do something
+#   :down do something else
+#   :assert
+#   (== (foo) (bar))
+  
+#   :assert-not
+#   :assert-error
+#     )
+
+(deftest test-all
+  (test-if)
+  (test-case)
+  (test-try)
+  )
+
+(deftest test-if
+    (assert-equal
+     (1 (if true 1 2))
+     (2 (if false 1 2))
+     (3 (if false 1 false 2 3))) 
+  (assert-error
+   (error if_clause: (if false 1)))
+  )
+
+(deftest test-case
+    (assert-equal
+     (1 (case a (a 1) (b 2)))
+     (b (case 1
+	  (A:(is_atom A): a)
+	  (A:(is_integer A): b)))
+     (1 (case 1
+	  (A:(is_atom A):(is_integer A): A)))
+     )
+  (assert-error
+   (error {case_clause _}: (case 1 (a a) (b b)))))
+
+(deftest test-try
+    (assert-equal
+     (c (try a b c))
+     (3 (try a b c :of (a 1) (b 2) (c 3)))
+     (oops (try (+ 1 a) :catch (error badarith: oops)))
+     ({oops ok}
+      {(try (put test-try not-ok) (+ 1 a)
+	    :catch (error badarith: oops)
+	    :after (put test-try ok))
+       (get test-try)}))
+  (assert-error
+   (error badarith: (try (+ 1 a) :catch (error foo: oops))))
+    )
+
+
+
+# (def opt-args (A :opt (B {A}) (C [B])):
+#   {A B C})
+
+# (def opt-args (A :opt B C):
+#   {A B C})
+
+
+# (def catch-clause (`(;Es) Env):eval:
+#      {Es Env}
+#      X Y Z
+#      )
+
+# (def rands () :eval:
+#      (to-integers [(random\uniform 100) (random\uniform 100) (random\uniform 100)]))
+
+# (def to-integers (Ints) :eval:
+#   (lsc I Ints: (integer I)))
+
+# # (defm bar (A :pos B):
+# #   `{mac-bar ,A [;(reverse B)]
+# # 	    ;(lsc I (rands): (integer I))})
+
+# # (defm bar (A B):
+# #   `{mac-bar ,A ,B
+# # 	    #[;B]
+# # 	    ;(lsc I (rands): (integer I))
+# # 	    })
+
+
+
+# # (defm bar (A B):
+# #   `{bar ,A ,B})
+
+# # the first :etc block doesn't require a ':'
+
+# (defm etc (:etc A B :etc E F G):
+#   `{{etc-1 ,A ;B} {etc-2 ,E ,F ;G}
+#     ;(rands)})
+
+# (defm tag (:tag a A :tag b B :etc C):
+#   `{,(case A
+#        (false 'no-a)
+#        (_ `{a-tag ;A}))
+#     ,(case B
+#        (false 'no-b)
+#        (_ `{b-tag ;B}))
+#      {part-c ;C}})
+
+# (defm tag-default (:tag a (A ['default-a])):
+#   `{;A})
+
+# (defm mac-all (:all A B):
+#   `{{a ,A} ;B})
+
+
+# (def test1 ():
+#   (tag :a 1 2 3 :b a b c :x y z)
+#   (tag :a 1 2 3 :x y z)
+#   (tag :b a b c :x y z)
+#   (tag :x y z)
+#   (tag:)
+#   (tag-default: a not-default-a)
+#   (tag-default)
+#   (etc 1 2 3 4
+#        :a b c d e)
+#   (mac-all a b c d e)
+#   )

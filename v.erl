@@ -102,6 +102,9 @@ compile(Mod) ->
 compile(Mod,Options) ->
     scompile:compile(Mod,env(),Options).
 
+c(Mod) ->
+    compile(Mod,[load,report]).
+
 %% verl     ## base
 %% serl     ## stable
 %% serl_new ## unstable

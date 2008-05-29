@@ -40,6 +40,7 @@
 -record(opt,
 	{bin, %% if true, do not output .beam
 	 dry,
+	 load, %% load the compiled .beam
 	 expand_only, %% expansion only
 	 ast, %% the erlang ast
 	 def, %% pick out the definitions of defs
@@ -53,6 +54,7 @@
 set_opts(Options) ->
     #opt{bin=lookup_opt(Options,bin),
 	 dry=lookup_opt(Options,dry),
+	 load=lookup_opt(Options,load),
 	 expand_only=lookup_opt(Options,expand_only),
 	 ast=lookup_opt(Options,ast),
 	 def=lookup_opt(Options,def),
@@ -95,7 +97,12 @@ emit_bin(Forms,CO) ->
 	ok -> if CO#opt.bin==true -> {bin,[Mod,Bin,Warnings]};
 		 CO#opt.dry==true -> {dry,[Warnings,Errors]};
 		 true -> write_beam(Mod,Bin),
-		      {beam,Mod}
+			 if CO#opt.load==true ->
+				 code:purge(Mod),
+				 code:load_file(Mod);
+			    true -> ok
+			 end,
+			 {beam,Mod}
 	      end 
     end.
 

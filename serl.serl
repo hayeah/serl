@@ -36,8 +36,9 @@
 
 (export-from
  (functions
+  erl-ast-of
   ast-tag ast-line ast-mod ast-data
-  upto-block
+  upto-block split-tail 
   atom-cat
   erlpp		     ## TODO: remove when eval-only is implemented
   output-forms	     ## TODO: remove later when verl is removed.
@@ -98,6 +99,9 @@
 ##################################################
 # .Helper
 
+
+(def erl-ast-of (Term):
+  (erl_syntax\revert (erl_syntax\abstract Term)))
 
 (def ast-tag (Ast):eval: (erlang\element 1 Ast))
 (def ast-line (Ast):eval: (erlang\element 2 Ast))
