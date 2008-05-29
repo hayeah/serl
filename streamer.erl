@@ -1,5 +1,4 @@
 -module(streamer).
--include_lib("eunit/include/eunit.hrl").
 
 % port of Oleg Kiselyov's stream parsing utilities:
 % http://okmij.org/ftp/Scheme/parsing.html
@@ -233,14 +232,14 @@ check_prefix(StrT,I,J,K,N) ->
 %%     set_port(In),
 %%     Fun().
 
-stream_test_() ->
-[
-?_assert(begin set_port("ab"), (char("ab")==$a) and (read() == $b) end),
-?_assert(begin set_port("ba"), (char("ab")==$b) and (read() == $a) end),
-?_assert(1==1)
+%% stream_test_() ->
+%% [
+%% ?_assert(begin set_port("ab"), (char("ab")==$a) and (read() == $b) end),
+%% ?_assert(begin set_port("ba"), (char("ab")==$b) and (read() == $a) end),
+%% ?_assert(1==1)
 
 
-].
+%% ].
 
 %% tests() ->
 %%     do_tests([{test_char,"abcd"},

@@ -1,0 +1,100 @@
+==================================================
+= Serl 0.1
+
+Serl is a S-exp based frontend designed for Erlang. If you like Scheme, you might want to try LFE, but if you like Common-Lisp and its comparative hairyness, Serl might be for you.
+
+Against Lisp's syntatic purity I have sinned. Serl's syntax is inspired by Lisp, Erlang, and Ruby (thus transitively Perl (*gasp*)). That Serl rhymes with Perl is perhaps more than an unfortunate accident.
+
+X => variable
+{} => tuple
+[] => list
+foo => atom
+## And the Perlish part,
+(foo .if (test))  =>  (if (test) (foo))
+(bar .cdr .car)   => (car (cdr (bar)))
+
+
+Serl is mostly implemented in itself. I've found, so far, that the apparent syntatic complexity doesn't make metaprogramming with Common-Lisp style macro any harder. The syntatic extensions are designed such that they are pattern matchable, and that they are all "list-like". So even though Serl look a bit more complex, the macro programmer still works primarily with list.
+
+Pattern matching is a godsend.
+
+
+-support for aribtrary namespaces.
+--import/export of macros and special forms.
+--special forms are just macros that takes the compiling environment as an extra argument. Serl defines itself with special forms.
+
+-symbol capturing avoidance that works similar as package in common-lisp.
+
+-Syntax objects.
+--Quotation and quasiquotation are used only to build syntax objects.
+-macroexpansion in pattern.
+--so named patterns are possible.
+-syntax objects are pattern matchable.
+
+-fancy lambda-list as in common-lisp.
+--but unlike common-lisp, &option, &rest, and &key don't interfere with each other.
+
+-syntatically consistent reader macro based on heredoc.
+
+
+Read tutorial.txt for more. This is my first Erlang project. The error reporting is lousy at the moment. There's is a mysterious problem that sends the shell into a loop from time to time, but doesn't seem to be happening right now (Robert Virding is helping me with it).
+
+
+Here's a simple set of unit-testing macros, in 40 LOC, so you get a feel what Serl looks like. Not exactly beautiful, but it is an appropriately sized chunk of code.
+
+
+
+(defm deftest (:all Name Forms):
+  `(def ,Name ():
+     (let Rs (cat [;Forms]):
+	  (io\nl)
+	  Rs)))
+
+(defm assert (:all Es):
+  `(assert-equal ;(lsc E Es:
+		       `(true ,E))))
+
+(defm assert-equal (:all Es):
+  `[;(lsc `(,V ;Body) Es:
+	  (let L (integer (ast-line V))
+	       Body `(do ;Body)
+	       :
+	       `{,L
+		 (try (case ,Body
+			(,V (fmt "."))
+			(R (fmt "X\n~p:Expected ~p, got ~p\n"
+				[,L ,V R])
+			   ## `(... ',E ...) is broken
+			   (printer\p (%a{__quote} ,Body))
+			   failed))
+		      :catch
+		      (Class Exception:
+			     (fmt "X\n~p:Exception ~p\\~p\n" [,L Class Exception])
+			     (printer\p (%a{__quote} ,Body))
+			     failed))})
+	  )])
+
+(defm assert-error (:all Forms):
+  `[;(lsc `(;Es) Forms:
+	  (let* {Heads [(block Body)]} (upto-block Es)
+		L (integer (ast-line (hd Heads))):
+		`(try (begin ;Body) 
+		      (fmt "X\n~p:Expected to fail." [,L])
+		      {,L failed}
+		  :catch
+		   (;Heads: (fmt ".")
+			    {,L ok})
+		   (C R: (fmt "X\n~p:Unexpected failure: ~p\\~p" [,L C R])
+		      {,L failed}))
+		)
+	  )])
+
+
+(deftest test-if
+    (assert-equal
+     (1 (if true 1 2))
+     (2 (if false 1 2))
+     (3 (if false 1 false 2 3))) 
+  (assert-error
+   (error if_clause: (if false 1)))
+  )

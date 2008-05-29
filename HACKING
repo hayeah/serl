@@ -1,0 +1,111 @@
+To start:
+
+> erl
+
+> l(v).
+> v:bootup().
+> v:t(). %% test compiles serl.serl
+
+%% look at serl.serl to get some idea of what the syntax looks like.
+
+> v:expand("<exp>"). % reads an <exp>
+> v:expand("<exp>"). % expands an <exp>
+> v:eval("<exp>").   % evals an <exp>
+
+> v:tt(). %% test compiles test.serl
+
+%% make changes to serl.serl
+
+> v:r().  %% compile a new image with current image.
+> v:t().  %% see if the new image self compiles
+
+%% if something went wrong, and serl no longer self compiles
+
+> v:r(N). %% compile a new image with old image Nth version back.
+
+
+
+
+* v.erl
+
+-This is the bootstrapper to aid development.
+
+v:bootup() %% just reload the latest version.
+v:r() %% recompiles serl.serl with current image.
+v:r(N) %% recompiles serl.serl with image Nth previous version.
+v:t() %% do a dry run of compiling serl.serl 
+v:next() %% roll to next version
+make:all([load]) %% recompile the supporting *.erl files.
+
+-generally you start development on a working image, v:r() updates the image as you make changes to the files. If you messed up the image, v:r(1) use the previous working image to recompile. After you are satisfied with the current developing image, go forward with v:next(), then commit.
+
+-It is often convenient to create test.serl to test compile.
+
+v:tt() %% test compiles test.serl
+v:tt(all) %% print out the equivalent erlang code
+
+* ast.hrl
+
+-This defines the ast types:
+
+atom: atom
+var: Var
+integer: 123
+float: 3.14159
+string: "abc"
+brace: {a b c}
+block: [c b a]
+paren: (x y z)
+
+Each ast type is a 4-tuple. The elements are:
+
+1. tag
+2. line
+3. module
+4. payload
+
+A set of erlang macros are available to construct/pattern-match the ASTs.
+
+
+
+* verl.erl 
+  serl.serl
+
+-These two are the files that define serl itself.
+-Most are forms are now defined in serl.serl.
+
+
+** verl__meta.erl
+-verl__meta.erl is a supporting module that fakes the compile environment for verl. So it can pretend as though it is a serl module. This is hardwired, and not pretty.
+
+
+
+* scompile.erl
+
+do_transform
+
+-This function expands an expression recursively with the expander of its car.
+-An expander is either a special or macro.
+-If no expander is found for the car, it is a function call.
+
+
+
+compile_loop
+
+-This is the loop that goes through the forms in a file.
+-The toplevel forms "side-effects" the environment.
+-The toplevel forms are divided into sections.
+
+
+lookup
+
+-lookups the binding of an atom.
+-In order of: lexical, definition, import
+
+* env.erl
+
+-Environment is a nested association list.
+-The key is a path into the tree.
+
+env:module_meta_info(Mod)  %% see the compiling environment of Mod
+env:module_meta_info(serl) %% this is the compiling environment of serl.

@@ -1,0 +1,76 @@
+Download
+
+This release is for the merely curious. Inscrutable error messages would prevent anyone except those familiar with the transformer (me) to use it for serious work. 
+
+Because Serl is bootstrapped by itself, it needs its compiled image to run (which is at iteration 29 at the moment). I don't have any idea how to version control compiled images. Suggestions welcomed.
+
+==================================================
+To start:
+
+> tar -xzf serl.tgz
+> cd serl
+> erl
+> make:all([load]).
+> v:bootup().  %% loads image
+> v:t().       %% test compiles serl.serl
+> v:c(test).   %% compile unit tests
+> test:'test-all'().  %% run tests.
+
+
+
+To use:
+
+> v:c(Mod).    %% compiles and loads Mod.serl
+> v:expand("<exp>"). % reads an <exp>
+> v:expand("<exp>"). % expands an <exp>
+> v:eval("<exp>").   % evals an <exp>
+
+%% see the toplevel bindings of a serl module:
+
+> env:toplevel_of(Mod).
+
+
+
+To hack:
+
+%% make changes to serl.serl
+
+> v:r().  %% compile a new image with current image.
+> v:t().  %% see if the new image self compiles
+
+%% if something went wrong, and serl no longer self compiles
+
+> v:r(N). %% compile a new image with old image Nth version back.
+
+
+
+==================================================
+Documentation:
+
+* tutorial.txt
+
+You should start here. An informal description of Serl.
+
+
+* doc.txt
+
+work in progress
+
+
+* test.serl
+
+-unit test cases
+-a simple unit testing "framework"
+
+> v:c(test).
+> test:'test-all'().  %% run the tests
+
+
+* serl.serl
+
+More examples.
+
+
+==================================================
+
+Questions, comments, and/or suggestions welcomed.
