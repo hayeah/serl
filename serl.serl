@@ -553,7 +553,7 @@
        (tag (let* [Tag TagSpec] Args
 		  {TagArg Default} (case TagSpec
 				     (`(,Arg ,Val) {Arg Val})
-				     (Arg {Arg 'false}))
+				     (Arg {Arg '[]}))
 		  VK2 (genvar) 
 		  :
 		  `(let {,TagArg ,VK2} (case ,VK
@@ -643,7 +643,7 @@
 
 
 #\def
-(defspecial def ((atom Name) `(;Args)
+(defspecial def ((== FName (atom Name)) `(;Args)
 		 :tag doc Doc
 		 :tag eval Eval
 		 :etc Body) Env:
@@ -651,7 +651,6 @@
   ##(fmt "args: ~p\n" [Args])
   ##(fmt "def arities:\n~p\n" [(fun-args FName Args Body)])
   (let* Line (lineno)
-	FName (atom Name)
 	EvalFlag (case Eval (false false) (_ true))
 	Doc (case Doc (false "") (_ Doc))
 	Mod (curmod)

@@ -1,13 +1,14 @@
 
 (module test)
 
-(export opt-args
-	#test1
-	test-all
-	test-case
-	test-if
-	test-try
-	)
+(export
+ test-all
+ test-case
+ test-if
+ test-try
+ test-def
+ test-defm
+ )
 
 (import lists
 	map reverse)
@@ -24,11 +25,25 @@
 
 #(export-from (macros etc tag) (specials foo))
 
+# (defm deftest (:all Name Forms):
+#   `(def ,Name ():
+#      (let Rs (cat [;Forms]):
+# 	  (io\nl)
+# 	  (let {Ys Ns} (lists\partition
+# 			(fn (R) (case R
+# 				  ({_ ok} true)
+# 				  ({_ failed} false)))
+# 			Rs):
+# 	       (fmt "========================")
+# 	       (fmt "~p\n" [Ns])
+# 	       (fmt "Succeeded: ~B\nFailed: ~B\n" [(length Ys) (length Ns)])
+# 	       ))))
+
 (defm deftest (:all Name Forms):
   `(def ,Name ():
-     (let R (cat [;Forms]):
+     (let Rs (cat [;Forms]):
 	  (io\nl)
-	  R)))
+	  Rs)))
 
 (defm assert (:all Es):
   `(assert-equal ;(lsc E Es:
@@ -42,14 +57,14 @@
 	       `{,L
 		 (try (case ,Body
 			(,V (fmt "."))
-			(R (fmt "\n~p:Expected ~p, got ~p\n"
+			(R (fmt "X\n~p:Expected ~p, got ~p\n"
 				[,L ,V R])
 			   ## `(... ',E ...) is broken
 			   (printer\p (%a{__quote} ,Body))
 			   failed))
 		      :catch
 		      (Class Exception:
-			     (fmt "\n~p:Exception ~p\\~p\n" [,L Class Exception])
+			     (fmt "X\n~p:Exception ~p\\~p\n" [,L Class Exception])
 			     (printer\p (%a{__quote} ,Body))
 			     failed))})
 	  )])
@@ -58,13 +73,13 @@
   `[;(lsc `(;Es) Forms:
 	  (let* {Heads [(block Body)]} (upto-block Es)
 		L (integer (ast-line (hd Heads))):
-		`(try (begin ;Body)
-		       (fmt "\n~p:Expected to fail." [,L])
+		`(try (begin ;Body) 
+		      (fmt "X\n~p:Expected to fail." [,L])
 		      {,L failed}
 		  :catch
 		   (;Heads: (fmt ".")
 			    {,L ok})
-		   (C R: (fmt "\n~p:Unexpected failure: ~p\\~p" [,L C R])
+		   (C R: (fmt "X\n~p:Unexpected failure: ~p\\~p" [,L C R])
 		      {,L failed}))
 		)
 	  )])
@@ -84,6 +99,8 @@
   (test-if)
   (test-case)
   (test-try)
+  (test-def)
+  (test-defm)
   )
 
 (deftest test-if
@@ -111,82 +128,87 @@
     (assert-equal
      (c (try a b c))
      (3 (try a b c :of (a 1) (b 2) (c 3)))
+     (ok (try (throw foo) :catch (foo ok)))
      (oops (try (+ 1 a) :catch (error badarith: oops)))
      ({oops ok}
       {(try (put test-try not-ok) (+ 1 a)
 	    :catch (error badarith: oops)
 	    :after (put test-try ok))
-       (get test-try)}))
+       (get test-try)})
+     ({2 foo} (try (throw foo)
+		   :catch
+		   (R:(is-integer R): {1 R})
+		   (R:(is-atom R): {2 R})
+		   ))
+     ({1 1} (try (throw 1)
+		   :catch
+		   (R:(is-integer R): {1 R})
+		   (R:(is-atom R): {2 R})
+		   ))
+     ) 
   (assert-error
    (error badarith: (try (+ 1 a) :catch (error foo: oops))))
     )
 
 
+(def fa (A B): {A B})
+(def fb (A :opt (B {A}) (C [B])):
+  {A B C})
+(def fc ():eval: '{fc})
+(defm fcm (): (fc))
+(def fd (A :opt B C):
+  {A B C})
 
-# (def opt-args (A :opt (B {A}) (C [B])):
-#   {A B C})
-
-# (def opt-args (A :opt B C):
-#   {A B C})
-
-
-# (def catch-clause (`(;Es) Env):eval:
-#      {Es Env}
-#      X Y Z
-#      )
-
-# (def rands () :eval:
-#      (to-integers [(random\uniform 100) (random\uniform 100) (random\uniform 100)]))
-
-# (def to-integers (Ints) :eval:
-#   (lsc I Ints: (integer I)))
-
-# # (defm bar (A :pos B):
-# #   `{mac-bar ,A [;(reverse B)]
-# # 	    ;(lsc I (rands): (integer I))})
-
-# # (defm bar (A B):
-# #   `{mac-bar ,A ,B
-# # 	    #[;B]
-# # 	    ;(lsc I (rands): (integer I))
-# # 	    })
+(deftest test-def
+    (assert-equal
+     ({a b} (fa a b))
+     ({a {a} [{a}]} (fb a))
+     ({a b [b]} (fb a b))
+     ({a b c} (fb a b c))
+     ({a false false} (fd a))
+     ({a b false} (fd a b))
+     ({a b c} (fd a b c))
+     ({fc} (fcm))
+     ))
 
 
-
-# # (defm bar (A B):
-# #   `{bar ,A ,B})
-
-# # the first :etc block doesn't require a ':'
-
-# (defm etc (:etc A B :etc E F G):
-#   `{{etc-1 ,A ;B} {etc-2 ,E ,F ;G}
-#     ;(rands)})
-
-# (defm tag (:tag a A :tag b B :etc C):
-#   `{,(case A
-#        (false 'no-a)
-#        (_ `{a-tag ;A}))
-#     ,(case B
-#        (false 'no-b)
-#        (_ `{b-tag ;B}))
-#      {part-c ;C}})
-
-# (defm tag-default (:tag a (A ['default-a])):
-#   `{;A})
+(defm ma (A B): `{,A ,B})
+(defm mb (A B :etc C D): `{,A ,B {,C ;D}})
+(defm mc (A B :etc C D :etc E): `{,A ,B {,C ;D} {;E}})
+(defm md (:tag a A :tag b (B ['no-b]) :etc C):
+  `{{a-tag ;A}
+    {b-tag ;B}
+    ;C})
+(defm me (:tag a A):
+  `{;A})
 
 # (defm mac-all (:all A B):
 #   `{{a ,A} ;B})
 
 
-# (def test1 ():
-#   (tag :a 1 2 3 :b a b c :x y z)
-#   (tag :a 1 2 3 :x y z)
-#   (tag :b a b c :x y z)
-#   (tag :x y z)
-#   (tag:)
-#   (tag-default: a not-default-a)
-#   (tag-default)
-#   (etc 1 2 3 4
-#        :a b c d e)
-#   (mac-all a b c d e)
-#   )
+(deftest test-defm
+    (assert-equal
+     ({a b} (ma a b))
+     ({a b {c}} (mb a b: c))
+     ({a b {c d e}} (mb a b: c d e))
+     ({a b {c d e} {e f g}} (mc a b: c d e: e f g))
+     ({{a-tag 1 2 3} {b-tag a b c} x y z}
+      (md :a 1 2 3 :b a b c :x y z))
+     ({{a-tag 1 2 3} {b-tag no-b} x y z}
+      (md :a 1 2 3 :x y z))
+     ({{a-tag} {b-tag a b c} x y z}
+      (md :b a b c :x y z))
+     ({{a-tag} {b-tag no-b} x y z}
+      (md :x y z)) 
+     ({{a-tag} {b-tag no-b}}
+      (md:))
+     ({} (me))
+     ({b c} (me :a b c))
+     )
+  
+#   (assert-error
+#    ({a b} (ma a))
+#    )
+  
+  )
+
