@@ -280,7 +280,7 @@ The outter A is shadowed.
 ==================================================
 = Nesting Operators (aka gratuitous(?) syntax)
 
-One presumptuous feature is Serl's nesting operators for sexp. (How dare I sully sexp's austere beauty, and have I not learned from long history of failure to add syntax to sexp?) I tried to design the nesting operators so they don't intefere with metaprogramming. The ':' operator arguably makes metaprogramming easier than classic lisp.
+One presumptuous feature is Serl's nesting operators for sexp. (How dare I sully sexp's austere beauty, and have I not learned from long history of failures in adding syntax to sexp?) I tried to design the nesting operators so they don't intefere with metaprogramming. The ':' operator arguably makes metaprogramming easier than classic lisp.
 
 There are three nesting operators for sexp that should be tastefully underused. They are great for simple transformations of values, while avoiding excessive nesting of sexp.
 
@@ -387,9 +387,9 @@ FOOTNOTE:
 
 (*) ':' binds tighter than '~' and '.'. This allows you to say,
 
-(foo ~try :catch (error\foo oops) .if (test))
+(foo ~try :catch (error foo: oops) .if (test))
 ## =>
-(if (test) (try (foo) :catch (error\foo oops)))
+(if (test) (try (foo) :catch (error foo: oops)))
 
 Not saying this is recommended, but you can if you think it's the clearest way to express your intent. In the reader, ':' collects its elements before '~' and '.' collect theirs, so the ':' elements always appear as a single argument in a form.
 
@@ -403,7 +403,7 @@ Not saying this is recommended, but you can if you think it's the clearest way t
 ## (zar 1 2 [3 4 5] (gaz (bar) :a b :c d))
 
 
-This is a lot of explanation that makes it seem more complicated than it actually is. It's like quasiquoting, in that it would take a lot of time to explain, but most of the time it's used to do very simple things. The implementation is 50 lines of non-hairy code in the reader.
+This is a lot of explanation that makes it seem more complicated than it actually is. It's like quasiquoting, in that it would take a lot of time to explain (in words), but most of the time it's used to do very simple things. The implementation is 50 lines of non-hairy code in the reader.
 
 ==================================================
 = Definition
@@ -522,7 +522,7 @@ The matching could be nested,
 Often you'd want to match AST of a type (let's say atom ast),
 
 (let `(,(atom A)) '(a): A) ## => a
-(let `(,(atom b)) '(a): A) ## => #match failure
+(let `(,(atom b)) '(a): blah) ## => #match failure
 
 
 Now for macro definition,
@@ -623,7 +623,7 @@ Multiline heredoc string must start on a line of its own. There must be spaces b
 
 %foo HERE #some comment
 here doc
-     HERE # => "here doc"
+     HERE another-expression-is-ok-here
 
 %foo HERE error #multiline heredoc must start on a new line.
 here doc

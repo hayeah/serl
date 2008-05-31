@@ -11,7 +11,7 @@
 
 
 %% symbol chars: [a-zA-Z0-9_+_*/\]
--define(spacen,"\t\s\n").
+-define(spacen,"\t\s\n\r").
 -define(space,"\t\s").
 -define(nesting_chars,".~:").
 -define(quoting_chars,";,'`").
