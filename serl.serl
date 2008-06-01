@@ -199,16 +199,58 @@
   (ets\new serl-info [named_table])
   {0 Env})
 
+(def pr-f-defs (Fs):
+  (case Fs
+    ([] (fmt "done\n"))
+    ([F|Fs]
+     (fmt "Size:~p\n" [(term-to-binary F .size)])
+     (pr-f-defs Fs))
+    ))
+
 (defspecial %a{__eof} (Command) Env:
   (case Command
     (normal (let R (verl\emit (output-forms Env) Env
 			      (verl\set_opts (scompile\options))):
-		 ##(erlang\write Env)
+		 ##(erlang\write (scompile\env))
 		 ##(io\write Env)
 		 ##(fmt "group leader:~p\n" [(erlang\group_leader)])
 		 ##(fmt "ETS: ~p\n" [(ets\info serl-info)])
 		 ##(fmt "memory: ~p\n" [(erlang\process_info (self) memory)])
-		 ##(erlang\display Env)
+		 ##(fmt "Env size: ~p\n" [(term-to-binary (scompile\env) .size)])
+		 ##(fmt "Env: ~p\n" [Env])
+
+# 		 (let* Env (scompile\env) #Env #(scompile\env)
+# 		       Fs (env\assoc Env [definitions functions] ~>>{ok R} R)
+# 		       Ms (env\assoc Env [definitions macros] ~>>{ok R} R)
+# 		       Ss (env\assoc Env [definitions specials] ~>>{ok R} R)
+# 		       Base (env\assoc Env [base])
+# 		       Imports (env\assoc Env [imports])
+# 		      :
+# 		      (fmt "base:~p\n" [Base])
+# 		      (fmt "imports:~p\n" [Imports])
+
+# 		      ## 43
+# # 		      (fmt "fs:~p\n" [(length Fs)])
+#  		      ##(fmt "fs:~p\n" [(lists\nth Fs (length Fs ./ 2 .trunc))])
+# 		      (pr-f-defs (reverse Fs))
+		      
+# # 		      (fmt "fs:~p\n" [(lists\last Fs .term-to-binary . size)])
+
+# # 		      ## 10
+# # 		      ##(fmt "ms:~p\n" [(length Ms)])
+# # 		      ##(fmt "ms:~p\n" [(lists\nth Ms (length Ms ./ 2 .trunc))])
+
+# # 		      ## 10 
+# # 		      ##(fmt "ss:~p\n" [(length Ss)])
+# # 		      ##(fmt "ss:~p\n" [(lists\nth Ss (length Ss ./ 2 .trunc))])
+# # 		      (fmt "size-of-fn:~p\n" [(term-to-binary (hd Fs) .size)])
+# # 		      (fmt "1 fn:~p\n" [(hd Fs)])
+		      
+# 		      )
+		 
+# 		 (erlang\display (scompile\env))
+# 		 (erlang\display [(term-to-binary (scompile\env) .size)])
+		 
 		 R
 		 ))
     (after (cleanup))))
@@ -295,9 +337,11 @@
     (false (error "Module name mismatch: ~p" [Mod])))) 
 
 (def export-defs (Env Type Names):eval:
-  (env\assoc_append Env [exports Type] Names))
+  (let Env (env\assoc_append Env [exports Type] Names):
+       (scompile\set_env Env)
+       Env))
 
-(def get-exports (Env Type):eval:
+(def get-exports (Env Type):eval: 
   (env\assoc Env [exports Type] ~case
 	     ({ok Names} Names)
 	     (_ [])))
@@ -317,7 +361,8 @@
 (def new-def (Env NSType Name Def Info):eval:
   (case (ets\insert_new serl-info {{definitions NSType Name} Info})
     (false (error "%s already defined in %s" [Name NSType]))
-    (_ (env\assoc_put Env [definitions NSType Name] Def))))
+    (_ (scompile\set_env (env\assoc_put Env [definitions NSType Name] Def))
+       (env\assoc_put Env [definitions NSType Name] Def))))
 
 (def def-info (_Env NSType Name Key):eval:
   # caller of this function should check its result
@@ -374,7 +419,9 @@
 		      (_ ok)))
 		Names)
        ##TODO allow importing functions from not yet loaded modules
-       {2 (env\import Env Mod functions Names)}
+       (let Env (env\import Env Mod functions Names):
+	    (scompile\set_env Env)
+	    {2 Env})
        ))
 
 #\export
@@ -714,7 +761,7 @@
 	EvalFn
 	(begin
 	 ##(io\format "EvalAst: \n~s\n" [(erl_pp\expr EvalAst)])
-	 (fn (Ast) 
+	 (fn (Ast Env) 
 	     (scompile\eval_erl EvalAst [{VAllName Ast}] Env ~>>
 				{Result _} Result)
 	     ))

@@ -3,12 +3,12 @@
 -compile(export_all).
 %-import(verl,[serlenv/1]).
 
+b() ->
+    bootup().
 
-bootup() ->
-    
-%%     dbg:tracer(),
-%%     dbg:p(new,[c]),
-    
+bootup() -> 
+    dbg:tracer(),
+    dbg:p(new,[c]),
     reload(version()).
 
 profile() ->

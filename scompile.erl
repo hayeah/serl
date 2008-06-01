@@ -3,6 +3,7 @@
 
 -export([lineno/0,
 	 curmod/0,is_curmod/1,
+	 env/0,set_env/1,
 	 gensym/0, gensym/1, genvar/0, genvar/1,
 	 reset_gensym/0, %% for debug purposes 
 	 options/0,set_options/1,
@@ -46,6 +47,7 @@ error(Message,Args) ->
 	 lineno=1,
 	 gensym_counter=0,
 	 bootstrap=false,
+	 env,
 	 options=[]
 	}).
 
@@ -55,6 +57,7 @@ error(Message,Args) ->
 -define(gensym,{?MODULE,'gensym_counter'}).
 -define(options,{?MODULE,'options'}).
 -define(bootstrap,{?MODULE,bootstrap}).
+-define(env,{?MODULE,env}).
 -define(toplevel_cache(M),{?MODULE,{toplevel_env_cache,M}}).
 
 %% init_state() ->
@@ -67,6 +70,7 @@ init_state(S) when is_record(S,state) ->
     put(?curmod,S#state.curmod),
     put(?gensym,S#state.gensym_counter),
     put(?bootstrap,S#state.bootstrap),
+    put(?env,S#state.env),
     put(?options,S#state.options).
 
 %% not sure if get_state is ever useful
@@ -120,7 +124,12 @@ set_options(Opts) ->
 
 
 bootstrap() -> get(?bootstrap).
-%set_bootstrap(V) -> put(?bootstrap,V). 
+%set_bootstrap(V) -> put(?bootstrap,V).
+
+env() ->
+    get(?env).
+set_env(Env) ->
+    put(?env,Env).
 
 toplevel_of(M) ->
     case get(?toplevel_cache(M)) of
@@ -302,7 +311,11 @@ wait_result(Sync) ->
 
 macroexpand(?ast_paren([Car|_])=Exp,Env) when is_tuple(Exp) ->
     case lookup_expander(Env,Car) of
-	{macro,F} -> macroexpand(F(Exp),Env);
+	{macro,F} -> case F of
+			 {M,A} -> R=apply(M,A,[Exp]);
+			 _ when is_function(F) -> R=F(Exp,Env) 
+		     end,
+		     macroexpand(R,Env);
 	_ -> Exp
     end; 
 macroexpand(Exp,_Env) when is_tuple(Exp) ->
@@ -337,7 +350,11 @@ do_transform(?ast_paren3(L,_M,[Car|Body])=Exp,Env) ->
     end, 
     try case lookup_expander(Env,Car) of
 	    {special,F} -> {special,F(Exp,Env)};
-	    {macro,F} -> {macro,F(Exp)} ;
+	    {macro,F} -> case F of
+			     {M,A} -> R=apply(M,A,[Exp]);
+			     _ when is_function(F) -> R=F(Exp,Env)
+			 end,
+			 {macro,R};
 	    _ -> case lookup_expander(Env,?cast_atom('call')) of
 		     %% make sure to raise error, otherwise go into loop.
 		     {Type,_F} when Type==special;Type==macro ->
@@ -512,6 +529,7 @@ lookup_scope({Mod,Key}=K,[{{BMod,BKey},Val}|Bs]) ->
     end.
     
 lookup_definitions(Env,NSType,Key) ->
+    %io:format("bootstrap: ~p\n",[bootstrap()]),
     case bootstrap() of
 	true -> false;
 	_ -> assoc(Env,[definitions,NSType,Key])
