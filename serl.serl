@@ -1,4 +1,6 @@
 ## make sure I can change the AST representation whenver I feel like it.
+## verl's meta-module doesn't support import.
+
 
 (module serl)
 
@@ -21,11 +23,6 @@
 	member
 	foreach
 	)
-
-## verl's meta-module doesn't support import.
-### this is a special case
-# (import verl clause) 
-#(importm verl ...)
 
 # (export ast-tag ast-line ast-mod ast-data
 # 	upto-block
@@ -227,9 +224,9 @@
      (ets\delete serl-info)
      ok)
 
-(defspecial %a{__bof} () Env:
+(defspecial %a{__bof} () _Env:
   (ets\new serl-info [named_table])
-  {0 Env})
+  0)
 
 (def pr-f-defs (Fs):
   (case Fs
@@ -243,46 +240,10 @@
   (case Command
     (normal (let R (verl\emit (output-forms Env) Env
 			      (verl\set_opts (scompile\options))):
-		 ##(erlang\write (scompile\env))
-		 ##(io\write Env)
-		 ##(fmt "group leader:~p\n" [(erlang\group_leader)])
 		 ##(fmt "ETS: ~p\n" [(ets\info serl-info)])
 		 ##(fmt "memory: ~p\n" [(erlang\process_info (self) memory)])
 		 ##(fmt "Env size: ~p\n" [(term-to-binary (scompile\env) .size)])
 		 ##(fmt "Env: ~p\n" [Env])
-
-# 		 (let* Env (scompile\env) #Env #(scompile\env)
-# 		       Fs (env\assoc Env [definitions functions] ~>>{ok R} R)
-# 		       Ms (env\assoc Env [definitions macros] ~>>{ok R} R)
-# 		       Ss (env\assoc Env [definitions specials] ~>>{ok R} R)
-# 		       Base (env\assoc Env [base])
-# 		       Imports (env\assoc Env [imports])
-# 		      :
-# 		      (fmt "base:~p\n" [Base])
-# 		      (fmt "imports:~p\n" [Imports])
-
-# 		      ## 43
-# # 		      (fmt "fs:~p\n" [(length Fs)])
-#  		      ##(fmt "fs:~p\n" [(lists\nth Fs (length Fs ./ 2 .trunc))])
-# 		      (pr-f-defs (reverse Fs))
-		      
-# # 		      (fmt "fs:~p\n" [(lists\last Fs .term-to-binary . size)])
-
-# # 		      ## 10
-# # 		      ##(fmt "ms:~p\n" [(length Ms)])
-# # 		      ##(fmt "ms:~p\n" [(lists\nth Ms (length Ms ./ 2 .trunc))])
-
-# # 		      ## 10 
-# # 		      ##(fmt "ss:~p\n" [(length Ss)])
-# # 		      ##(fmt "ss:~p\n" [(lists\nth Ss (length Ss ./ 2 .trunc))])
-# # 		      (fmt "size-of-fn:~p\n" [(term-to-binary (hd Fs) .size)])
-# # 		      (fmt "1 fn:~p\n" [(hd Fs)])
-		      
-# 		      )
-		 
-# 		 (erlang\display (scompile\env))
-# 		 (erlang\display [(term-to-binary (scompile\env) .size)])
-		 
 		 R
 		 ))
     (after (cleanup))))
@@ -360,9 +321,9 @@
 
 # (import-from mod (macros ...) (functions ...))
 
-(defspecial module (Mod) Env:
+(defspecial module (Mod) _Env:
   (case (is_curmod Mod)
-    (true {1 Env})
+    (true 1)
     (false (error "Module name mismatch: ~p" [Mod])))) 
 
 (def export-defs (Env Type Names):eval:
@@ -390,8 +351,9 @@
 (def new-def (Env NSType Name Def Info):eval:
   (case (ets\insert_new serl-info {{definitions NSType Name} Info})
     (false (error "%s already defined in %s" [Name NSType]))
-    (_ (scompile\set_env (env\assoc_put Env [definitions NSType Name] Def))
-       (env\assoc_put Env [definitions NSType Name] Def))))
+    (_ (let Env (env\assoc_put Env [definitions NSType Name] Def):
+	    (scompile\set_env Env)
+	    Env))))
 
 (def def-info (_Env NSType Name Key):eval:
   # caller of this function should check its result
@@ -450,7 +412,7 @@
        ##TODO allow importing functions from not yet loaded modules
        (let Env (env\import Env Mod functions Names):
 	    (scompile\set_env Env)
-	    {2 Env})
+	    2)
        ))
 
 #\export
@@ -460,7 +422,8 @@
 #If F is an attribute -export([Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,export,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}.
 
 (defspecial functions-export (:etc Names) Env: 
-  {2 (export-defs Env functions Names)})
+  (export-defs Env functions Names)
+  2)
 
 (defspecial functions-output (Info) Env:
   (output-fun Info Env functions))
@@ -468,7 +431,8 @@
 
 
 (defspecial macros-export (:etc Names) Env:
-  {2 (export-defs Env macros Names)})
+  (export-defs Env macros Names)
+  2)
 
 (defspecial macros-output (Info) Env:
   (output-meta-fun Info Env macros))
@@ -476,7 +440,8 @@
 
 
 (defspecial specials-export (:etc Names) Env:
-  {2 (export-defs Env specials Names)})
+  (export-defs Env specials Names)
+  2)
 
 (defspecial specials-output (Info) Env:
   (output-meta-fun Info Env specials))
@@ -758,8 +723,9 @@
 	      {eval EvalFlag}]
 	: 
 	#(erlpp EvalAst)
-	{10 (new-def Env functions Name
-		     {EvalFn} Info) }
+	(new-def Env functions Name
+		     {EvalFn} Info)
+	10
 	))
 
 
@@ -803,8 +769,9 @@
 	      {doc Doc}]
 	:
 	#(fmt "defm ok\n")
-	{10 (new-def Env macros Name
-		     {EvalFn} Info)}))
+	(new-def Env macros Name
+		     {EvalFn} Info)
+	10))
 
 
 #\defspecial
@@ -848,8 +815,9 @@
 	##(erlpp EvalAst)
 	## the macro definition needs to be in meta and normal env
 	#(fmt "defspecial ok\n")
-	{10 (new-def Env specials Name
-		     {EvalFn} Info)}))
+	(new-def Env specials Name
+		     {EvalFn} Info)
+	10))
 
 
 ##################################################
@@ -1201,18 +1169,21 @@
 
 
 #\toplevel
+## All toplevel forms do stuff by side-effecting. Ugly
 (defspecial toplevel (:all [Form|Forms]) Env:
-  (let* {Section Env} (transform Form Env)
-	Env
-	(lists\foldl
-	 (fn (Form Env)
-	     (let {Section2 Env} (transform Form Env):
-		  (if (== Section Section2) Env
-		      (error "Toplevel forms must belong to the same section."))
+  (let* Section (transform Form Env) :
+	(lists\foreach
+	 (fn (Form)
+	     (let Section2 (transform Form (scompile\env)):
+		  (if (and (is-integer Section2) (== Section Section2))
+		        ok
+		      (is-integer Section2 )
+		        (error "Toplevel forms must belong to the same section.")
+		      (error "Toplevel forms should return an integer to indicate its section."))
 		  ))
-	 Env Forms)
-	:
-	{Section Env}))
+	 Forms)
+	Section))
+
 
 # (def guards (GuardTests Env):
 #      (transform_each GuardTests Env))

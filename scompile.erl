@@ -229,41 +229,44 @@ compile(Mod,Env,Options) when is_atom(Mod) ->
 		       curmod=Mod,
 		       options=Options}).
 
-%% transforms expressions for "side effect" on the environment.
+
 %% __bof and  __eof are pseudo forms for a language to do its language specific things.
 compile_(Mod,Env) ->
+    set_env(Env),
     %% TODO modify streamer to parse binary.
     In=case file:read_file(atom_to_list(Mod)++".serl") of
 	{ok,Bin} -> binary_to_list(Bin);
 	_ -> error("Cannot find source: ~p\n",[Mod])
     end,
-    try {0,Env2}=transform(?cast_paren([?cast_atom('__bof')]),Env),
-	{eof,Env3}=compile_loop(In,Env2,0),
+    try 0=transform(?cast_paren([?cast_atom('__bof')]),env()),
+	eof=compile_loop(In,0),
 	%% at end of file, transforms the pseudo special form (eof)
 	%% what happens is language dependent.
 	%% maybe compile to erlang, maybe compile to javascript, whatever.
-	transform(?cast_paren([?cast_atom('__eof'),normal]),Env3)
+	transform(?cast_paren([?cast_atom('__eof'),normal]),env())
     after
-	transform(?cast_paren([?cast_atom('__eof'),'after']),Env)
+	transform(?cast_paren([?cast_atom('__eof'),'after']),env())
     end.
 
 %% the compiler loop transforms a sequence of toplevel forms found in a module.
 %% the toplevel forms in a module are divided into numbered sections.
 %% The numbered sections must follow each other in order.
-%% The toplevel forms would return a tuple of {<section-number> Env}
-compile_loop(In,Env,Section) -> 
+%% The toplevel forms are transformed purely for side-effects.
+compile_loop(In,Section) ->
+    %% get the environment, possibly changed by side-effect.
+    Env=env(), 
     {In2,ReaderLine,Ast}=read_(In,Env), 
     case Ast of
-	eof -> {eof,Env};
-	_ -> %% toplevel forms return a tuple of section-number and environment.
+	eof -> eof;
+	_ -> 
 	    %% TODO should give better error when compile loop protocol is violated
-	    {Section2,Env2}=transform(Ast,Env),
+	    Section2=transform(Ast,Env),
 	     if not(is_integer(Section2)) -> error("Not toplevel form: ~p\n",[Section2]);
 		Section2<Section -> error("Toplevel form out of sequence: ~p\n",[Section2]);
 		true -> ok
 	     end,
 	     set_lineno(ReaderLine), %% after transform, set lineno to where the reader left off.
-	     compile_loop(In2,Env2,Section2)
+	     compile_loop(In2,Section2)
     end.
 
 new_process(Fun,Args) ->
