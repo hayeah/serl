@@ -144,7 +144,7 @@ version() ->
     V.
 
 r() ->
-    recompile(0).
+    recompile(0,[bootstrap]).
 
 r(N) ->
      %% recompile with the nth version back.
@@ -161,9 +161,13 @@ rt(N) ->
     r(N),
     t().
 
+rr() ->
+    recompile(0,[]).
+
+
 next() ->
     %% step to next version
-    recompile(1).
+    recompile(1,[bootstrap]).
 
 back(N) ->
     Version=version()-N,
@@ -175,10 +179,11 @@ goto(N) ->
     reload(N).
 
 
-recompile(VersionIncrement) ->
-    %make:all([load]),
-    R=compile(serl,[bin,report,bootstrap]),
-    %R=compile(serl,[bin,report]),
+recompile(VersionIncrement,Options) ->
+    %%make:all([load]),
+    %% if bootstrap is included in the option, then the
+    %% definitions in the file would not take effect.
+    R=compile(serl,[bin,report|Options]),
     %% I absolutely loath how Erlang makes binding in cases visible outside.
     ModBin=case env:assoc(R,[bin]) of
 	       {ok,[_,Bin|_]} -> Bin

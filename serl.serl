@@ -46,7 +46,9 @@
  (specials
   %a{__eof} %a{__bof}
   %a{__block} %a{__brace}
-  %a{__integer} %a{__float} %a{__string} %a{__atom}
+  %a{__integer} %a{__float} %a{__string}
+  %a{__atom} %a{__var}
+  %a{__quote} %a{__bquote}
   module
   def defm defspecial
   functions-import functions-export functions-output
@@ -70,6 +72,15 @@
   begin
   ls
   ))
+
+# (export-from
+#  (macros
+#   integer float
+#   atom var
+#   string
+#   paren brace block
+#   quote bquote unquote sunquote))
+
 
 ## export this so it's usable by future bootstraps.
 ## this is a piece of ad hocery.
@@ -107,6 +118,27 @@
 (def ast-line (Ast):eval: (erlang\element 2 Ast))
 (def ast-mod (Ast):eval: (erlang\element 3 Ast))
 (def ast-data (Ast):eval: (erlang\element 4 Ast))
+
+## broken nested bq
+# (defm defasts (:all Names):
+#   `(toplevel
+#     ;(lsc Name Names:
+# 	  (let Tag (list-to-atom (cat "__" (atom-to-list (>> Name (atom A) A)))):
+# 	       `(defm ,Name (:etc Args):
+# 		  (case Args
+# 		    ([Data] `{,',Tag (lineno) (curmod) ,Data})
+# 		    ([Data Line] `{,',Tag ,Line (curmod) ,Data})
+# 		    ([Data Line Module] `{,',Tag ,Line ,Module ,Data})
+# 		    ))
+# 	       ))))
+
+# (defasts
+#     integer float
+#     atom var
+#     string
+#     paren brace block
+#     quote bquote unquote sunquote)
+
 
 (def erlpp (Ast):eval:
      (fmt "~s\n" [(erl_pp\expr Ast)]))
@@ -302,23 +334,20 @@
 (defspecial %a{__atom} (V) _Env:
   {atom (lineno) (ast-data V)})
 
-# (defspecial %a{__var} (V) Env:
-#   (let L (lineno):
-#        (case V
-# 	 (%a{_}
-# 	    {var L %a{_}})
-# 	 (_ (case (scompile\lookup ())))))
-#   )
+(defspecial %a{__var} (V) Env:
+  (let {_ L M A} V:
+       (case A
+	 (%a{_} {var L A})
+	 (_ (case (scompile\lookup Env vars {M A})
+	      ({ok Alias} {var L Alias})
+	      (false {var L A})
+	      )))))
 
-# '__sp_var'(?ast_paren([?ast_atom3(Line,M,_),V]),Env) ->
-#     case V of
-# 	'_' -> ?erl_var(Line,'_');
-# 	_ -> case lookup(Env,vars,{M,V}) of
-# 		 {ok,Alias} -> ?erl_var(Line,Alias); 
-# 		 false -> {unbound_var,Line,M,V}
-# 			    %{env:assoc_cons(Env,[lexical_unbound,vars],V),}
-# 	     end
-#     end.
+(defspecial %a{__quote} (V) _Env:
+  (erl_syntax\abstract (ast-data V) .erl_syntax\revert))
+
+(defspecial %a{__bquote} (V) Env:
+  (transform (bq\completely_expand (ast-data V)) Env))
 
 
 ##################################################

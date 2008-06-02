@@ -313,34 +313,6 @@ gen_pat_glist(Type,[Es,L,M],Env) ->
     gen_pat(mk_ast(Type,Es,L,M), Env).
 
 
-%%  If P is a variable pattern V, then Rep(P) = {var,LINE,A}, where A is an atom with a printname consisting of the same characters as V. 
-%%  If P is a universal pattern _, then Rep(P) = {var,LINE,'_'}.
-%%  If E is a variable V, then Rep(E) = {var,LINE,A}, where A is an atom with a printname consisting of the same characters as V.
-
-%%HY: It's silly to call variables variables when they don't vary... I call them bindings.
-
-'__sp_var'(?ast_paren([?ast_atom3(_,_,_),?ast_var3(Line,M,V)]),Env) ->
-    case V of
-	'_' -> ?erl_var(Line,'_');
-	_ -> case lookup(Env,vars,{M,V}) of
-		 {ok,Alias} -> ?erl_var(Line,Alias); 
-		 false -> ?erl_var(Line,V)
-			    %{env:assoc_cons(Env,[lexical_unbound,vars],V),}
-	     end
-    end.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Quotation
-
-?defsp('__sp_quote',[?ast_quote(E)]) ->
-    Env,
-    %% TODO syntax objects built by quote should have 0 as the lineno.
-    erl_syntax:revert(erl_syntax:set_pos(erl_syntax:abstract(E),lineno())).
-
-?defsp('__sp_bquote',[?ast_bquote(E)]) ->
-    transform(bq:completely_expand(E),Env).
-
-
 %% 4.5 Clauses
 
 %% erlang's guarded clauses take guard-sequences
