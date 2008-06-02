@@ -204,7 +204,7 @@ bind(?ast_integer(_),Env) -> Env;
 bind(?ast_string(_),Env) -> Env;
 bind(?ast_atom(_),Env) -> Env;
 bind(?ast_var3(_L,M,V),Env) ->
-    scompile:lexical_extend(Env,vars,[{M,V}]); 
+    scompile:lexical_extend(Env,vars,[{{M,V},scompile:gensym()}]); 
 bind(?ast_block(Es),Env) ->
     binds(Es,Env);
 bind(?ast_brace(Es),Env) ->
@@ -319,7 +319,7 @@ gen_pat_glist(Type,[Es,L,M],Env) ->
 
 %%HY: It's silly to call variables variables when they don't vary... I call them bindings.
 
-'__sp_var'(?ast_paren([?ast_atom3(Line,M,_),V]),Env) ->
+'__sp_var'(?ast_paren([?ast_atom3(_,_,_),?ast_var3(Line,M,V)]),Env) ->
     case V of
 	'_' -> ?erl_var(Line,'_');
 	_ -> case lookup(Env,vars,{M,V}) of
@@ -328,6 +328,17 @@ gen_pat_glist(Type,[Es,L,M],Env) ->
 			    %{env:assoc_cons(Env,[lexical_unbound,vars],V),}
 	     end
     end.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Quotation
+
+?defsp('__sp_quote',[?ast_quote(E)]) ->
+    Env,
+    %% TODO syntax objects built by quote should have 0 as the lineno.
+    erl_syntax:revert(erl_syntax:set_pos(erl_syntax:abstract(E),lineno())).
+
+?defsp('__sp_bquote',[?ast_bquote(E)]) ->
+    transform(bq:completely_expand(E),Env).
 
 
 %% 4.5 Clauses
@@ -404,17 +415,6 @@ guard(E,Env) ->
     if Test -> ErlAst;
        true -> error("Invalid guard: ~p",[E])
     end.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Quotation
-
-?defsp('__sp_quote',[E]) ->
-    Env,
-    %% TODO syntax objects built by quote should have 0 as the lineno.
-    erl_syntax:revert(erl_syntax:set_pos(erl_syntax:abstract(E),lineno())).
-
-?defsp('__sp_bquote',[E]) ->
-    transform(bq:completely_expand(E),Env).
 
 
 -define(defast_mac(Name,Type),

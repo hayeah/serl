@@ -18,7 +18,7 @@
 	 macroexpand/2,
 	 map_env0/3,
 	 
-	 lexical_shadow/3,lexical_extend/3,
+	 lexical_shadow/2,lexical_shadow/3,lexical_extend/3,
 	 get_def/3,new_def/4,
 	 lookup/3,lookup_meta_fun/3,lookup_expander/2,
 	 toplevel_lookup/3,external_lookup/3,
@@ -336,8 +336,8 @@ transform(?ast_paren(_)=Exp,Env) ->
 	{macro,Result} -> transform(Result,Env)
     end;
 transform(Exp,Env) when is_tuple(Exp) ->
-    [Car,L,M,E]=tuple_to_list(Exp),
-    transform(?ast_paren2(L,[?ast_atom3(L,M,Car),E]),Env).
+    {Tag,Line,Mod,_Data}=Exp,
+    transform(?ast_paren2(Line,[?ast_atom3(Line,Mod,Tag),Exp]),Env).
 
 %% do one expansion
 %% not tail-recursive. I'd rather have a stack for backtrace.
@@ -465,29 +465,25 @@ external_lookup(Env,NSType,A) ->
 %% Lexical Scoping
 
 %% map a list of symbols to gensyms
-lexical_shadow(Env,NSType,Bindings) ->
-    %% Bindings is a list of {M,A}
-    %% M and A are atoms
-    Bs=case Bindings of
-	   [] -> [];
-	   _ ->lists:zip(Bindings,
-			 gensym(length(Bindings)))
-       end,
-    assoc_cons(Env,[lexical,NSType],Bs).
+lexical_shadow(Env,NSType) -> 
+    assoc_cons(Env,[lexical,NSType],[]).
 
-lexical_extend(Env,NSType,NewKeys) ->
-    %% Bindings is a list of {M,A}
-    %% M and A are atoms
+lexical_shadow(Env,NSType,Bindings) -> 
+    lexical_extend(lexical_shadow(Env,NSType),
+		   NSType,Bindings).
+
+lexical_extend(Env,NSType,Bindings) ->
+    %% Bindings is a list of {{Module,Name},Value}
     {Scope,Scopes}=
 	case assoc(Env,[lexical,NSType]) of
 	    {ok,[H|T]} -> {H,T};
 	    _ -> {[],[]}
-	end, 
+	end,
+    NewKeys=ordsets:from_list([Key || {Key,_} <- Bindings]),
     OldKeys=ordsets:from_list([Key || {Key,_} <- Scope]),
-    case ordsets:intersection(OldKeys,ordsets:from_list(NewKeys)) of
-	[] -> NewBs=lists:zip(NewKeys,
-			      gensym(length(NewKeys))), 
-	      assoc_put(Env,[lexical,NSType],[NewBs++Scope|Scopes]);
+    case ordsets:intersection(OldKeys,NewKeys) of
+	[] -> assoc_put(Env,[lexical,NSType],
+			[Bindings++Scope|Scopes]);
 	Conflicts -> error("Lexical binding conflicts: ~p",[Conflicts])
     end.
     

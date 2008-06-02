@@ -285,22 +285,22 @@
 
 # the payload of the ast is passed in.
 (defspecial %a{__block} (Es) Env:
-  (transform `(ls: ;Es) Env))
+  (transform `(ls: ;(ast-data Es)) Env))
 
 (defspecial %a{__brace} (Es) Env: 
-  (transform `(tuple: ;Es) Env))
+  (transform `(tuple: ;(ast-data Es)) Env))
 
 (defspecial %a{__integer} (V) _Env:
-  {integer (lineno) V})
+  {integer (lineno) (ast-data V)})
 
 (defspecial %a{__float} (V) _Env:
-  {float (lineno) V})
+  {float (lineno) (ast-data V)})
 
 (defspecial %a{__string} (V) _Env:
-  {string (lineno) V})
+  {string (lineno) (ast-data V)})
 
 (defspecial %a{__atom} (V) _Env:
-  {atom (lineno) V})
+  {atom (lineno) (ast-data V)})
 
 # (defspecial %a{__var} (V) Env:
 #   (let L (lineno):

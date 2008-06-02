@@ -176,7 +176,7 @@ goto(N) ->
 
 
 recompile(VersionIncrement) ->
-    make:all([load]),
+    %make:all([load]),
     R=compile(serl,[bin,report,bootstrap]),
     %R=compile(serl,[bin,report]),
     %% I absolutely loath how Erlang makes binding in cases visible outside.
