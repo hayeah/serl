@@ -32,6 +32,9 @@
 # 	)
 
 (export-from
+ (specials ast-as-is))
+
+(export-from
  (functions
   erl-ast-of
   ast-tag ast-line ast-mod ast-data
@@ -55,6 +58,7 @@
   specials-export specials-output
   eval-binding
   let lsc
+  letf
   fn call 
   case if
   do toplevel
@@ -116,6 +120,11 @@
 (def ast-mod (Ast):eval: (erlang\element 3 Ast))
 (def ast-data (Ast):eval: (erlang\element 4 Ast))
 
+## this is useful for certain special macros when parts of it had
+## already been expanded.
+(defspecial ast-as-is (Ast) _Env:
+  Ast)
+
 ## broken nested bq
 # (defm defasts (:all Names):
 #   `(toplevel
@@ -136,6 +145,9 @@
 #     paren brace block
 #     quote bquote unquote sunquote)
 
+(def pr (Term):
+  (fmt "~p\n" [Term])
+  Term)
 
 (def erlpp (Ast):eval:
      (fmt "~s\n" [(erl_pp\expr Ast)]))
@@ -326,8 +338,8 @@
     (true 1)
     (false (error "Module name mismatch: ~p" [Mod])))) 
 
-(def export-defs (Env Type Names):eval:
-  (let Env (env\assoc_append Env [exports Type] Names):
+(def export-defs (Type Names):eval:
+  (let Env (env\assoc_append (scompile\env) [exports Type] Names):
        (scompile\set_env Env)
        Env))
 
@@ -348,10 +360,10 @@
 # 	  ))
 
 
-(def new-def (Env NSType Name Def Info):eval:
+(def new-def (NSType Name Def Info):eval:
   (case (ets\insert_new serl-info {{definitions NSType Name} Info})
     (false (error "%s already defined in %s" [Name NSType]))
-    (_ (let Env (env\assoc_put Env [definitions NSType Name] Def):
+    (_ (let Env (env\assoc_put (scompile\env) [definitions NSType Name] Def):
 	    (scompile\set_env Env)
 	    Env))))
 
@@ -421,8 +433,8 @@
 
 #If F is an attribute -export([Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,export,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}.
 
-(defspecial functions-export (:etc Names) Env: 
-  (export-defs Env functions Names)
+(defspecial functions-export (:etc Names) _Env: 
+  (export-defs functions Names)
   2)
 
 (defspecial functions-output (Info) Env:
@@ -430,8 +442,8 @@
 
 
 
-(defspecial macros-export (:etc Names) Env:
-  (export-defs Env macros Names)
+(defspecial macros-export (:etc Names) _Env:
+  (export-defs macros Names)
   2)
 
 (defspecial macros-output (Info) Env:
@@ -439,8 +451,8 @@
 
 
 
-(defspecial specials-export (:etc Names) Env:
-  (export-defs Env specials Names)
+(defspecial specials-export (:etc Names) _Env:
+  (export-defs specials Names)
   2)
 
 (defspecial specials-output (Info) Env:
@@ -682,6 +694,35 @@
 #   ()
 #   )
 
+# If E is case E_0 of Cc_1 ; ... ; Cc_k end, where E_0 is an expression and each Cc_i is a case clause then Rep(E) = {'case',LINE,Rep(E_0),[Rep(Cc_1), ..., Rep(Cc_k)]}.
+
+(def make-def (FName FClauses Env):
+  ## take care to do transform only once.
+  ## FClauses==[{Args Body} ...], where Body is a single expression.
+  (let* (atom Name Line _) FName
+	EvalVarName (gensym)
+	Arity-Args-Body*
+	(lsc {Args Body} FClauses:
+	     (let* {Env Args} (verl\patterns Args Env)
+		   Body (transform Body Env):
+		   {(length Args) Args Body}))
+	EvalAst {case Line {var Line EvalVarName}
+		      (lsc {_Arity Args Body} Arity-Args-Body*:
+			   (let Args (erl_syntax\list Args none
+						      .erl_syntax\revert):
+				{clause Line [Args] [] [Body]}))}
+	EvalFn (fn (Args Env)
+		   ## the environment at the time of call is passed in.
+		   (scompile\eval_erl EvalAst [{EvalVarName Args}] Env ~>>
+				      {Result _} Result))
+	Arity-Def*
+	(lsc {Arity Args Body} Arity-Args-Body*:
+	     {Arity
+	      {function Line Name Arity
+			[{clause Line Args [] [Body]}]}}) 
+	: 
+	{{EvalFn} Arity-Def*}))
+
 
 #\def
 (defspecial def ((== FName (atom Name)) `(;Args)
@@ -691,40 +732,16 @@
   (fmt "def: ~p\n" [Name])
   ##(fmt "args: ~p\n" [Args])
   ##(fmt "def arities:\n~p\n" [(fun-args FName Args Body)])
-  (let* Line (lineno)
-	EvalFlag (case Eval (false false) (_ true))
+  (let* EvalFlag (case Eval (false false) (_ true))
 	Doc (case Doc (false "") (_ Doc))
-	Mod (curmod)
+	#Mod (curmod)
 	FClauses (fun-args FName Args Body) ## [{Args Body} ...], where Body is a single expression.
-	EvalVarName (gensym)
-	EvalVar (var EvalVarName)
-	## Note that the it expects compiler to pass in the args in a list.
-	## So variable arity works.
-	EvalAst (if EvalFlag (transform
-			      `(case (eval-binding ,EvalVar)
-				 ;(lsc {Args Body} FClauses:
-				       `([;Args] ,Body)))
-			      Env)
-		    false)
-			## TODO support multiple arities 
-	EvalFn (if EvalFlag (fn (Args Env)
-				## the environment at the time of call is passed in.
-				(scompile\eval_erl EvalAst [{EvalVarName Args}] Env ~>>
-						   {Result _} Result))
-		   {Mod Name})
-	Arity-Ast*
-	(lsc {Args Body} FClauses:
-	     (let* Arity (length Args) 
-		   Ast {function Line Name Arity
-				 [(verl\clause Args [] [Body] Line Env)]}: 
-		   {Arity Ast}))
-	Info [{asts Arity-Ast*}
+	{EvalFn Arity-Def*} (make-def FName FClauses Env)
+	Info [{asts Arity-Def*}
 	      {doc Doc}
 	      {eval EvalFlag}]
-	: 
-	#(erlpp EvalAst)
-	(new-def Env functions Name
-		     {EvalFn} Info)
+	:
+	(new-def functions Name EvalFn Info)
 	10
 	))
 
@@ -740,37 +757,29 @@
 	VAllName (gensym)
 	VAll (var VAllName)
 	#the actual name to define the macro function
-	MacName (atom-cat: "$mac" Name) 
-	MacBody (macro-parse-args Args Body VAll) 
+	MacName (atom-cat: "$mac" Name)
+	# take care to transform the body only once
+	MacBody (macro-parse-args Args Body VAll
+				  ~transform Env)
 	## the macro function interprets the erl-ast of the macro definition
 	## the macro function closes over the current  meta-environment.
 	## the macro is not visible to its own definition.
 	## ## but the macro /can/ be used recursively.
 	## functions defined after the macro are not visible.
 	## ## I think this is sensible... 
-	EvalAst (transform 
-		 `(let ,VAll (eval-binding ,VAll) :
-		       ##(io\format "VAll ~p\n" [,VAll])
-		       ,MacBody)
-		 Env)
-	EvalFn
-	(begin
-	 ##(io\format "EvalAst: \n~s\n" [(erl_pp\expr EvalAst)])
-	 (fn (Ast Env) 
-	     (scompile\eval_erl EvalAst [{VAllName Ast}] Env ~>>
-				{Result _} Result)
-	     ))
+	EvalAst MacBody 
+	EvalFn (fn (InputAst Env) 
+		   (scompile\eval_erl EvalAst [{VAllName InputAst}] Env ~>>
+				      {Result _} Result))
 	DefAst {function Line MacName 1
-			 [(verl\clause [VAll] [] [`(begin ,MacBody)] Line Env)]}
+			 [{clause Line [{var Line VAllName}] [] [MacBody]}]}
 	Info [{ast DefAst}
 	      {arities [1]}
 	      {name MacName}
 	      {args Args} 
 	      {doc Doc}]
 	:
-	#(fmt "defm ok\n")
-	(new-def Env macros Name
-		     {EvalFn} Info)
+	(new-def macros Name {EvalFn} Info)
 	10))
 
 
@@ -786,37 +795,31 @@
 	VAll (var VAllName)
 	#the variable for the environment during expansion
 	#VEnv
-	VEnvName (let (var Name) VEnv: Name) 
+	VEnvName (let (var Atom) VEnv: Atom) 
 	#the actual name to define the macro function
 	MacName (atom-cat: "$special" Name) 
-	MacBody (macro-parse-args Args Body VAll)
-	EvalAst (transform 
-		 `(let ,VAll (eval-binding ,VAll)
-		       ,VEnv (eval-binding ,VEnv)
-		      :,MacBody)
-		 Env)
-	EvalFn
-	(begin
-	 ##(io\format "EvalAst: \n~s\n" [(erl_pp\expr EvalAst)])
-	 (fn (Ast Env)
-	     #(fmt "expand special ~p\nAST:~p\n" [Name Ast])
-	     (let {Result _} (scompile\eval_erl EvalAst [{VAllName Ast}
-							 {VEnvName Env}]
-						Env):
-		  Result)))
+	MacBody (macro-parse-args Args Body VAll
+				  ~transform Env)
+	EvalAst MacBody 
+	EvalFn (fn (Ast Env)
+		   (let {Result _} (scompile\eval_erl EvalAst [{VAllName Ast}
+							       {VEnvName Env}]
+						      Env):
+			Result))
 	DefAst {function Line MacName 2
-			 [(verl\clause [VAll VEnv] [] [`(begin ,MacBody)] Line Env)]}
+			 [{clause Line
+				  [{var Line VAllName}
+				   {var Line VEnvName}]
+				  []
+				  [MacBody]}]}
 	Info [{ast DefAst}
 	      {arities [2]}
 	      {name MacName}
 	      {args Args} 
 	      {doc Doc}]
 	: 
-	##(erlpp EvalAst)
-	## the macro definition needs to be in meta and normal env
-	#(fmt "defspecial ok\n")
-	(new-def Env specials Name
-		     {EvalFn} Info)
+	(new-def specials Name
+		 {EvalFn} Info)
 	10))
 
 
@@ -1095,6 +1098,7 @@
 
 
 (def local-call (A Args Env):eval:
+     ## could be calling lexical fun
   {call (ast-line A) (transform A Env) (transform_each Args Env)})
 
 (def remote-call (M A Args Env):eval:
@@ -1103,25 +1107,153 @@
 	     {remote L (transform M Env) (transform A Env)}
 	     (transform_each Args Env)}))
 
-# #\call
+(def lexical-call (Line Alias FreeVars Args Env):eval:
+     {call Line Alias
+	   (let Args (transform_each Args Env):
+		(case FreeVars
+		  (none Args)
+		  (_ [FreeVars|Args])))})
 
-(defspecial call (:all Fn Args) Env: 
+
+##\call
+(defspecial call (:all Fn Args) Env:
+  #(fmt "call: ~p\n" [Fn])
   (case Fn
     (`{,M ,A} (remote-call M A Args Env)) 
-    ((atom A)
-     (let* M (ast-mod Fn)
-	   ## check to see if the atom is from the source or from macro.
-	   FromSource (== M (curmod)): 
-	   (if FromSource
-	       (case (scompile\external_lookup Env functions A)
-		 ## atom is associated with import
-		 ({ok {{M A}}} (remote-call (atom M) (atom A) Args Env))
-		 ## atom is assumed to be local call
-		 (_ (local-call (atom A) Args Env)))
-	       ## atom is not from the source, so interpret as remote
-	       (remote-call (atom M) (atom A) Args Env))
-	   ))
+    ((atom A L M)
+     (case (scompile\lookup Env functions {M A} ~case
+			    ({ok R} R)
+			    (false false))
+       ## unknown lexical
+       ({lexical}
+	## pretend it's a local call.
+	#### a custom ast-type would be happier, but erl_syntax refuses to map over custom types.
+	## letf transforms it to lexical call. 
+	{call L {atom 0 {lexical L M A}} (transform_each Args Env)}
+	)
+       ## known lexical
+       ({lexical Alias FreeVars} 
+	(lexical-call L Alias FreeVars Args Env))
+       ## import
+       ({{M A}} (remote-call (atom M) (atom A) Args Env))
+       ## unknown remote/local
+       (_ (let Local (== M (curmod)):
+	       (if Local (local-call (atom A) Args Env)
+		   (remote-call (atom M) (atom A) Args Env)
+		   )))))
     (_ (local-call Fn Args Env))))
+
+
+## freevar analysis for the lambda-lifting of letf bindings is done in 2 passes:
+## (1) collect for each lexical function the freevars in its body.
+## (2) collect for each lexical function the freevars needed by the lexical function it calls.
+##
+##  the freevars needed by a lexical function is the union of (1) and (2)
+##
+## Having done the freevars analysis, associate the the lexical function with its
+## toplevel alias and the freevars it needs. A call to a lexical function is
+## augumented with the freevars the lexical function needs wrapped in a tuple
+## as the first argument.
+##
+## This is extremely hairy.
+(defspecial letf (:etc Fs :etc LetfBody) Env:
+  (let* NABs (lsc `(,Name (;Args) ;Body) Fs:
+		  {Name Args `(do ;Body)})
+	## Env2 is the environment used to temporarily compile lexical functions' bodies.
+	Env2 (scompile\lexical_shadow
+	      Env functions
+	      (lsc {(atom A _L M) _ _} NABs:
+		   {{M A} {lexical}}))
+	## freevar analysis (1)
+	{FVs* Bindings}
+	(lsc {(atom A L M) Args Body} NABs:
+	     (let* {Env2 Args} (verl\patterns Args (scompile\lexical_shadow Env2 vars))
+		   Body (transform Body Env2)
+		   ## annotate the body for free variables.
+		   ## include the args, so they don't show up in the set of freevars.
+		   ABody (erl_syntax_lib\annotate_bindings
+			  {function 0 foo (length Args)
+				    [{clause 0 Args [] [Body]}]}
+			  (ordsets\new))
+		   FreeVars (erl_syntax\get_ann ABody
+				.lists\keysearch free 1
+				~>> {value {free Vs}} (ordsets\from_list Vs)) 
+		   Alias {atom L (gensym)}
+		   :
+		   {{{M A} FreeVars}
+		    {{M A} Alias Args Body}})
+	     ~lists\unzip)
+	## freevar analysis (2)
+	Bindings
+	(lsc {{M A} Alias Args Body} Bindings:
+	     (let AllFVs (erl_syntax_lib\fold
+			  ## for each lexical function used, the calling function would need
+			  ## the freevars needed by the called function.
+			  (fn (T AllFVs)
+			      (case (erl_syntax\type T)
+				(application
+				 (case (erl_syntax\application_operator T .erl_syntax\revert)
+				   ({atom _ {lexical _L M2 A2}}
+				    (ordsets\union:
+				     AllFVs
+				     (lists\keysearch {M2 A2} 1 FVs*
+						      ~>> {value {_ FVs}} FVs)))
+				   (_ AllFVs)))
+				(_ AllFVs)))
+			  (lists\keysearch {M A} 1 FVs*
+					   ~>> {value {_ FVs}} FVs)
+			  Body): 
+		  {{M A} {Alias
+			  (case (lsc FV AllFVs: {var 0 FV})
+			    ([] none)
+			    (FVs {tuple 0 FVs})) 
+			  Args
+			  Body}}
+		  ))
+	## now we've done the freevar analysis, transform the bodies of the lexical
+	## functions properly and do lambda lifting.
+	Bindings
+	(lsc {{M A} {Alias FVs Args Body}} Bindings:
+	     (let* Body (erl_syntax_lib\map
+			 (fn (T)
+			     (case (erl_syntax\type T)
+			       (application
+				(case (erl_syntax\application_operator T .erl_syntax\revert)
+				  ## a lexical call, do transform
+				  ({atom _ {lexical L M A}}
+				   (let* CallArgs (erl_syntax\application_arguments
+						   T .erl_syntax\revert_forms)
+					 {CallAlias CallFVs _ _} (lists\keysearch {M A} 1 Bindings
+								      ~>> {value {_ R}} R)
+					 CallArgs (case CallFVs
+						    (none CallArgs)
+						    (_ [CallFVs|CallArgs]))
+					 :
+					 {call L CallAlias CallArgs}))
+				  ## an actual local call. Identity.
+				  (_ T)))
+			       ## identity for everything else
+			       (_ T)))
+			 Body
+			 .erl_syntax\revert):
+		   ## lambda lift
+		   (let* {atom Line DefName} Alias
+			 AllArgs (case FVs
+				   (none Args)
+				   (_ [FVs|Args]))
+			 Arity (length AllArgs)
+			 Ast {function Line DefName Arity
+				       [{clause Line AllArgs [] [Body]}]}
+			:
+			(new-def functions DefName false
+				 [{asts [{Arity Ast}]}]))
+		   {{M A} {lexical Alias FVs}}))
+	Env (scompile\lexical_shadow Env functions Bindings)
+	:
+	## TODO eval...
+	## TODO fancy lambda list...
+	## transform letf body
+	(transform `(do ;LetfBody) Env)))
 
 
 # #\defstruct

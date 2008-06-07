@@ -153,7 +153,16 @@ After pattern, delimited by pairs of ':' is the guard sequence. A guard is a ser
 
 -The let* variant is defined as a macro.
 
+* letf
 
+This is the equivalent of letrec in Lisp.
+
+(letf (<name> <argslist> <body>)*
+ : <body>)
+
+
+letf doesn't support def-style argslist yet.
+ 
 * lsc
 
 (lsc <pattern> <generator> ...: A) ## List comprehension.
@@ -581,7 +590,7 @@ A defined macro is visible to subsequent definitions.
 
 ** Specials **
 
-Special forms (used to implemented def, let, case, etc.) are exactly like macros, except they return the transformed Erlang ast, rather than a serl ast.
+Special forms (used to implemented def, let, case, etc.) are exactly like macros, except they return the transformed Erlang ast, rather than a serl ast. Specials should take care only to expand form once. Certain inner forms (e.g. letf) rely on side effect.
 
 They take the compiling environment as an extra argument. Here's a simple example,
 
@@ -601,6 +610,13 @@ The arglist of defspecial is the same as defm. Here's the spec for 'def'.
  )
 
 A defined special is visible to subsequent definitions.
+
+Special forms should take care only to expand its subexpressions only once. This restriction is because of subforms that rely on side-effects (e.g. letf (it defines a global function for each of its local definition)). This is an unhappy restriction.
+
+ast-as-is
+
+this is useful for certain special macros when parts of it had
+already been expanded.
 
 
 

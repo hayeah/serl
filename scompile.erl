@@ -18,7 +18,7 @@
 	 macroexpand/2,
 	 map_env0/3,
 	 
-	 lexical_shadow/2,lexical_shadow/3,lexical_extend/3,
+	 lexical_lookup/3,lexical_shadow/2,lexical_shadow/3,lexical_extend/3,
 	 get_def/3,new_def/4,
 	 lookup/3,lookup_meta_fun/3,lookup_expander/2,
 	 toplevel_lookup/3,external_lookup/3,
@@ -194,6 +194,7 @@ eval_erl(ErlAst,Bindings,Env) ->
 
 
 local_funcall_handler(Name,Args,Env) ->
+    %io:format("funcall: ~p\n",[Env]),
     case lookup(Env,functions,{curmod(),Name}) of
 	{ok,Def} when is_tuple(Def) -> 
 	    %%io:format("local apply: ~p\n",[Name]),
@@ -336,7 +337,9 @@ transform1(Exp,Env) when is_tuple(Exp) ->
 transform(?ast_paren(_)=Exp,Env) ->
     case do_transform(Exp,Env) of
 	{special,Result} -> Result;
-	{macro,Result} -> transform(Result,Env)
+	{macro,Result} ->
+	    %% environment might have changed. Ugly.
+	    transform(Result,Env)
     end;
 transform(Exp,Env) when is_tuple(Exp) ->
     {Tag,Line,Mod,_Data}=Exp,

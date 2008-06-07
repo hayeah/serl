@@ -270,16 +270,11 @@ gen_pat(?ast_paren([?ast_atom(Car)|Es])=P,Env) ->
 	paren -> gen_pat_glist('__paren',Es,Env);
 	block -> gen_pat_glist('__block',Es,Env);
 	brace -> gen_pat_glist('__brace',Es,Env);
-	float -> [Data]=Es,
-		 gen_pat(mk_ast_pat('__float',Data),Env);
-	integer -> [Data]=Es,
-		   gen_pat(mk_ast_pat('__integer',Data),Env);
-	string -> [Data]=Es,
-		  gen_pat(mk_ast_pat('__string',Data),Env);
-	atom -> [Data]=Es,
-		gen_pat(mk_ast_pat('__atom',Data),Env);
-	var -> [Data]=Es,
-	       gen_pat(mk_ast_pat('__var',Data),Env);
+	float -> gen_pat(mk_ast_pat('__float',Es),Env);
+	integer -> gen_pat(mk_ast_pat('__integer',Es),Env);
+	string -> gen_pat(mk_ast_pat('__string',Es),Env);
+	atom -> gen_pat(mk_ast_pat('__atom',Es),Env);
+	var -> gen_pat(mk_ast_pat('__var',Es),Env);
 	_ -> gen_pat(scompile:expand1_(P,Env),Env) %% can't use macroexpand here.
     end;
 gen_pat(P,Env) -> 
@@ -292,11 +287,11 @@ gen_pat_quote(E,Env) ->
 	'__paren' -> gen_pat_quote_glist(paren,Data,Env);
 	'__brace' -> gen_pat_quote_glist(brace,Data,Env);
 	'__block' -> gen_pat_quote_glist(block,Data,Env);
-	'__float' -> gen_pat(mk_ast_pat(Type,?cast_float(Data)),Env);
-	'__integer' -> gen_pat(mk_ast_pat(Type,?cast_integer(Data)),Env);
-	'__string' -> gen_pat(mk_ast_pat(Type,?cast_string(Data)),Env);
-	'__atom' -> gen_pat(mk_ast_pat(Type,?cast_atom(Data)),Env);
-	'__var' -> gen_pat(mk_ast_pat(Type,?cast_atom(Data)),Env)
+	'__float' -> gen_pat(mk_ast_pat(Type,[?cast_float(Data)]),Env);
+	'__integer' -> gen_pat(mk_ast_pat(Type,[?cast_integer(Data)]),Env);
+	'__string' -> gen_pat(mk_ast_pat(Type,[?cast_string(Data)]),Env);
+	'__atom' -> gen_pat(mk_ast_pat(Type,[?cast_atom(Data)]),Env);
+	'__var' -> gen_pat(mk_ast_pat(Type,[?cast_atom(Data)]),Env)
     end.
 
 gen_pat_quote_glist(Type,Es,Env) ->
@@ -408,12 +403,15 @@ mk_ast(Type,E,L,M) ->
     ?cast_brace([?cast_atom(Type), L ,M ,E]).
 
 mk_ast_pat(Type) ->
-    mk_ast_pat(Type,?cast_var('_')). 
-mk_ast_pat(Type,E) ->
-    ?cast_brace([?cast_atom(Type),
-		 ?cast_var('_'),
-		 ?cast_var('_'),
-		 E]).
+    mk_ast_pat(Type,[]). 
+mk_ast_pat(Type,AstData) ->
+    Es=case AstData of
+	   [] -> [?cast_atom(Type), ?cast_var('_'), ?cast_var('_'), ?cast_var('_')];
+	   [Data] -> [?cast_atom(Type), ?cast_var('_'), ?cast_var('_'),Data];
+	   [Data,L] -> [?cast_atom(Type), L, ?cast_var('_'),Data];
+	   [Data,L,M] -> [?cast_atom(Type),L, M, Data]
+       end, 
+    ?cast_brace(Es).
 
 %% (atom: a) => 'a
 ?defast_mac('__mac_float','__float'). 
