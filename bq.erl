@@ -56,6 +56,7 @@ completely_expand(Ast) ->
 	   [?cast_atom(Type),gen_glist(GL)])
        ).
 
+
 gen_code({quote,Q}) ->
     ?cast_quote(Q);
 gen_code({data,D}) ->
@@ -96,7 +97,8 @@ expand(Exp) ->
     case Exp of
 	?ast_unquote(X) -> {data,X};
 	?ast_sunquote(_) -> error("Illegal splicing.");
-	?ast_bquote(X) -> expand(completely_expand(X)); 
+	?ast_bquote(X) -> expand(completely_expand(X));
+	?ast_quote(X) -> {paren,glist([?cast_atom(quote),X])};
 	?ast_block(X) -> {block,glist(X)};
 	?ast_paren(X) -> {paren,glist(X)};
 	?ast_brace(X) -> {brace,glist(X)};
@@ -116,8 +118,6 @@ glist_item(Exp) ->
 	?ast_unquote(X) -> {ls,[{data,X}]};
 	?ast_sunquote(X) -> {data,X};
 	_ -> {ls,[expand(Exp)]}
-%	[?ast_atom(bquote),X] -> {ls,expand(Exp)}; %% what? 
-	%_ -> {quote,Exp}
     end.
 
 simplify(Exp) ->

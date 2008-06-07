@@ -49,6 +49,7 @@
   %a{__integer} %a{__float} %a{__string}
   %a{__atom} %a{__var}
   %a{__quote} %a{__bquote}
+  quote
   module
   def defm defspecial
   functions-import functions-export functions-output
@@ -321,6 +322,9 @@
 
 (defspecial %a{__bquote} (V) Env:
   (transform (bq\completely_expand (ast-data V)) Env))
+
+(defspecial quote (V) _Env:
+  (erl_syntax\abstract V .erl_syntax\revert))
 
 
 ##################################################
