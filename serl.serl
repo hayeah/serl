@@ -32,7 +32,8 @@
 # 	)
 
 (export-from
- (specials ast-as-is))
+ (specials ast-as-is)
+ (macros defasts))
 
 (export-from
  (functions
@@ -81,7 +82,7 @@
 #   atom var
 #   string
 #   paren brace block
-#   quote bquote unquote sunquote))
+#   ))
 
 
 ## export this so it's usable by future bootstraps.
@@ -126,25 +127,26 @@
 (defspecial ast-as-is (Ast) _Env:
   Ast)
 
-## broken nested bq
-# (defm defasts (:all Names):
-#   `(toplevel
-#     ;(lsc Name Names:
-# 	  (let Tag (list-to-atom (cat "__" (atom-to-list (>> Name (atom A) A)))):
-# 	       `(defm ,Name (:etc Args):
-# 		  (case Args
-# 		    ([Data] `{,',Tag (lineno) (curmod) ,Data})
-# 		    ([Data Line] `{,',Tag ,Line (curmod) ,Data})
-# 		    ([Data Line Module] `{,',Tag ,Line ,Module ,Data})
-# 		    ))
-# 	       ))))
 
-# (defasts
-#     integer float
-#     atom var
-#     string
-#     paren brace block
-#     quote bquote unquote sunquote)
+(defm defasts (:all Names):
+  `(toplevel
+    ;(lsc Name Names:
+	  (let Tag (let (atom A) Name:
+			(atom (list-to-atom (cat "__" (atom-to-list A))))): 
+	       `(defm ,Name (:all Args):
+		  (case Args
+		    ([Data] `{,',Tag ,(integer (lineno)) ,(atom (curmod)) ,Data})
+		    ([Data Line] `{,',Tag ,Line ,(atom (curmod)) ,Data})
+		    ([Data Line Module] `{,',Tag ,Line ,Module ,Data})
+		    ))
+	       ))))
+
+(defasts
+    integer float
+    atom var
+    string
+    paren brace block
+    )
 
 (def pr (Term):
   (fmt "~p\n" [Term])
