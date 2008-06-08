@@ -607,8 +607,9 @@
 			      ([_ _|_] (reverse Args ~>> [Tail|RHeads]
 					  `[;(reverse RHeads)|,Tail]))) 
 		 :
-		 `(let [(block ,EtcBinding)|,VK2] ,VK
-		       : ,(macro-arg-blocks-2 Blocks Body VK2))))
+		 `(case ,VK
+		    ([(block ,EtcBinding)|,VK2] ,(macro-arg-blocks-2 Blocks Body VK2))
+		    (_ (erlang\error {macro-arg "Expecting a block." ,VK})))))
        (tag (let* [Tag TagSpec] Args
 		  {TagArg Default} (case TagSpec
 				     (`(,Arg ,Val) {Arg Val})
@@ -750,6 +751,7 @@
 	(new-def functions Name EvalFn Info)
 	10
 	))
+
 
 
 #\defm
