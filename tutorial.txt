@@ -260,6 +260,29 @@ If it makes sense, operators could be nested, as in
 (Op A B ...) => (Op (Op A B) C ...)
 (- A B C ...) => (- (- A B) C ...)
 
+* meta-value
+
+Functions:
+meta-put Env Key Val
+meta-get Env Key
+
+Specials:
+meta-value
+with-meta-values
+
+The meta values are made avaialable in the process dictionary during compile time. A binding is either an atom or a tuple.
+
+{a <exp>} stores the evaluated value of <exp> with key a.
+a stores the atom 'true' with the key a.
+
+The debug form is an example of using meta-value.
+
+(defm debug (:all Forms):
+  `(case (meta-value debug)
+     (true ;Forms)
+     (_ ok)))
+
+
 * def/defm/defspecial/defrm
 
 Defines functions, macros, specials, reader macros, respectively.

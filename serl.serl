@@ -37,6 +37,7 @@
 
 (export-from
  (functions
+  meta-get meta-put
   erl-ast-of
   ast-tag ast-line ast-mod ast-data
   upto-block split-tail 
@@ -45,6 +46,8 @@
   output-forms	     ## TODO: remove later when verl is removed.
   )
  (specials
+  meta-value
+  with-meta-values
   %a{__eof} %a{__bof}
   %a{__block} %a{__brace}
   %a{__integer} %a{__float} %a{__string}
@@ -69,6 +72,7 @@
   tuple cons
   )
  (macros
+  debug
   export-from import-from
   export import 
   let* >>
@@ -113,14 +117,18 @@
 ##################################################
 # .Helper
 
+(defm debug (:all Forms):
+  `(case (meta-value debug)
+     (true ;Forms)
+     (_ ok)))
 
 (def erl-ast-of (Term):
   (erl_syntax\revert (erl_syntax\abstract Term)))
 
-(def ast-tag (Ast):eval: (erlang\element 1 Ast))
-(def ast-line (Ast):eval: (erlang\element 2 Ast))
-(def ast-mod (Ast):eval: (erlang\element 3 Ast))
-(def ast-data (Ast):eval: (erlang\element 4 Ast))
+(def ast-tag (Ast): (element 1 Ast))
+(def ast-line (Ast): (element 2 Ast))
+(def ast-mod (Ast): (element 3 Ast))
+(def ast-data (Ast): (element 4 Ast))
 
 ## this is useful for certain special macros when parts of it had
 ## already been expanded.
@@ -152,10 +160,10 @@
   (fmt "~p\n" [Term])
   Term)
 
-(def erlpp (Ast):eval:
+(def erlpp (Ast):
      (fmt "~s\n" [(erl_pp\expr Ast)]))
 
-(def upto-block (Es):eval:
+(def upto-block (Es):
   (let {UpToFirstBlock Rest} (lists\splitwith
 			      (fn (E)
 				  (case E
@@ -165,19 +173,19 @@
        {UpToFirstBlock Rest}
        ))
 
-(def split-tail (Lst):eval:
+(def split-tail (Lst):
   (reverse Lst ~>> [Tail|RHeads] {(reverse RHeads) Tail}))
 
-(def atom-cat (Vs):eval:
+(def atom-cat (Vs):
      ## perhaps name it catom?? 
   (foldl
    (fn (V Acc)
-       (let Str (if (erlang\is_integer V) (erlang\integer_to_list V)
-		    (erlang\is_atom V) (erlang\atom_to_list V)
-		    (erlang\is_list V) V):
+       (let Str (if (is-integer V) (integer-to-list V)
+		    (is-atom V) (atom-to-list V)
+		    (is-list V) V):
 	    [Str|Acc]))
    [] Vs
-   .reverse ~string\join "-" .erlang\list_to_atom))
+   .reverse ~string\join "-" .list-to-atom))
 
 
 #\with-genvar
@@ -193,7 +201,7 @@
 
 
 #\clause
-(def clause (Ps GSeq Es Env):eval:
+(def clause (Ps GSeq Es Env):
   (let* L (let [P|_] Ps: (ast-line P))
 	{Env Ps} (verl\patterns Ps (scompile\lexical_shadow Env vars []))
 	:
@@ -202,7 +210,7 @@
 		(transform_each Es Env)}
        ))
 
-(def guarded-clause (Ps GuardedBody Env):eval:
+(def guarded-clause (Ps GuardedBody Env):
   ## a guarded body is a sequence of expression possibly preceded by test blocks.
   (case GuardedBody
     ##  (... : <guard-test>* : <guard-test>* : ... : <exp>*)
@@ -222,7 +230,7 @@
 
 # A guard G is a nonempty sequence of guard tests Gt_1, ..., Gt_k, and Rep(G) = [Rep(Gt_1), ..., Rep(Gt_k)].
 
-(def guard-seq (GSeq Env):eval:
+(def guard-seq (GSeq Env):
      ##(fmt "Gseq: ~p\n" [GSeq])
   (lsc (block Guard) GSeq:
        (lsc Test Guard:
@@ -235,21 +243,60 @@
 ##################################################
 # .Pseudo Forms
 
-(def cleanup ():eval: 
-     (ets\delete serl-info)
-     ok)
+# (def pr-f-defs (Fs):
+#   (case Fs
+#     ([] (fmt "done\n"))
+#     ([F|Fs]
+#      (fmt "Size:~p\n" [(term-to-binary F .size)])
+#      (pr-f-defs Fs))
+#     ))
 
-(defspecial %a{__bof} () _Env:
+(def meta-get (Env K):
+  (env\assoc Env [meta vals K]
+	     ~case
+	      ({ok R} R)
+	      (false false)))
+
+(def meta-put (Env K V):
+  (env\assoc_put Env [meta vals K] V))
+
+
+(defspecial meta-value ((atom K)) Env:
+  (transform `',(meta-get Env K) Env))
+
+(defspecial with-meta-values (:etc Bindings :etc Body) Env:
+  (let* Vals (transform_each Bindings Env)
+	Vals (lsc Val Vals:
+		  (case (scompile\eval Val Env)
+		    ({K V}:(is-atom K): {K V})
+		    (K :(is-atom K): {K true})))
+	OldValsDict (dict\from_list (env\assoc Env [compile-options]))
+	## Merge the given Vals with other existing vals..
+	Vals (foldl
+	      (fn ({K V} Dict) (dict\store K V Dict))
+	      OldValsDict
+	      Vals .dict\to_list)
+	:
+	(transform `(do ;Body)
+		   (env\assoc_append Env [meta vals] Vals))))
+
+
+(defspecial %a{__bof} () Env:
   (ets\new serl-info [named_table])
+  ## put this in the meta-vars 
+  (let* Env (foldl (fn (Opt Env)
+		       (case Opt
+			 ({K V} (meta-put Env K V))
+			 (K :(is-atom K): (meta-put Env K true))))
+		   Env
+		   (scompile\options))
+	## set meta vars for eval=false output=true export=false 
+	Env (meta-put (meta-put (meta-put Env eval false)
+				output true)
+		      export false): 
+	(scompile\set_env Env))
+  
   0)
-
-(def pr-f-defs (Fs):
-  (case Fs
-    ([] (fmt "done\n"))
-    ([F|Fs]
-     (fmt "Size:~p\n" [(term-to-binary F .size)])
-     (pr-f-defs Fs))
-    ))
 
 (defspecial %a{__eof} (Command) Env:
   (case Command
@@ -263,7 +310,11 @@
 		 ))
     (after (cleanup))))
 
-(def output-forms (Env):eval:
+(def cleanup (): 
+     (ets\delete serl-info)
+     ok)
+
+(def output-forms (Env):
   ## do output for each NS types
   (let* Types (lsc {Type _} (env\assoc Env [definitions] ~>>
 				       {ok NSs} NSs):
@@ -344,17 +395,17 @@
     (true 1)
     (false (error "Module name mismatch: ~p" [Mod])))) 
 
-(def export-defs (Type Names):eval:
+(def export-defs (Type Names):
   (let Env (env\assoc_append (scompile\env) [exports Type] Names):
        (scompile\set_env Env)
        Env))
 
-(def get-exports (Env Type):eval: 
+(def get-exports (Env Type): 
   (env\assoc Env [exports Type] ~case
 	     ({ok Names} Names)
 	     (_ [])))
 
-# (def get-imports (Env Type):eval:
+# (def get-imports (Env Type):
 #      (let Names (env\assoc Env [imports] ~>> {ok Imports}
 # 			   (lsc {Mod _} Imports
 # 				Name (env\assoc [imports Mod Type] ~>> {ok }
@@ -366,14 +417,14 @@
 # 	  ))
 
 
-(def new-def (NSType Name Def Info):eval:
+(def new-def (NSType Name Def Info):
   (case (ets\insert_new serl-info {{definitions NSType Name} Info})
     (false (error "%s already defined in %s" [Name NSType]))
     (_ (let Env (env\assoc_put (scompile\env) [definitions NSType Name] Def):
 	    (scompile\set_env Env)
 	    Env))))
 
-(def def-info (_Env NSType Name Key):eval:
+(def def-info (_Env NSType Name Key):
   # caller of this function should check its result
   (case (ets\match serl-info {{definitions NSType Name} %a{$1}})
     ([[Info]] (proplists\lookup Key Info ~case
@@ -381,13 +432,13 @@
 				({_ R} {ok R})))
     (_ false)))
 
-# (def get-def (Env NSType Name):eval:
+# (def get-def (Env NSType Name):
 #   # get the definition of a name
 #   (env\assoc Env [definitions NSType Name] ~case
 # 	     ({ok Def} Def)
 # 	     (_ false)))
 
-(def get-defs (Env NSType):eval:
+(def get-defs (Env NSType):
   # get all the definitions related to a namespace
   (env\assoc Env [definitions NSType] ~case
 	     ({ok Defs} Defs)
@@ -466,7 +517,7 @@
 
 
 
-(def output-fun (Info Env Type):eval:
+(def output-fun (Info Env Type):
   ## used so far by functions
      ##(fmt "output: ~p\n" [Type])
   (let* FNames (lsc {Name _} (get-defs Env Type):
@@ -505,7 +556,7 @@
 	      Ast)
 	 }))
 
-(def output-meta-fun (Info Env Type):eval:
+(def output-meta-fun (Info Env Type):
   ## shared by exports,specials
   ## only the exported defs need actually be output
      ##(fmt "output-meta: ~p\n" [Type])
@@ -547,159 +598,34 @@
 ##################################################
 # .Definitions
 
-(def macro-parse-args (Args Body VAll):eval:
-  # V_n are the continuaton variables that store partial parsing results.
-  # parse the required args or a leading :etc block (special case).
-  # auxiliary args must come after the leading args.
-     #(fmt "MPA:\nBody: ~p\n" [Body])
-  (case Args
-    ([] `(let (paren [_Car]) ,VAll : ;Body))
-    ([(block ['etc|EArgs])|Blocks]
-     (let {Heads Tail} (split-tail EArgs)
-	  VK (genvar) VK2 (genvar)
-	  :
-	  `(let* (paren [_Car ;Heads | ,VK]) ,VAll
-		 {,Tail ,VK2} (upto-block ,VK)
-		 : ,(macro-arg-blocks Blocks Body VAll VK2))))
-    ([(block ['all|Args])]
-     (let {Heads Tail} (split-tail Args):
-	  `(let (paren [_ ;Heads | ,Tail]) ,VAll:
-		;Body)
-	  ))
-    (_ (let* {Heads Blocks} (upto-block Args)
-	     VK (genvar)
-	     :
-	     `(let (paren [_Car ;Heads | ,VK]) ,VAll
-		   : ,(macro-arg-blocks Blocks Body VAll VK))
-	     ))))
-
-(def macro-arg-blocks (Blocks Body VAll VK):eval:
-    (let* {Blocks AuxBlocks} (lists\partition
-				 (fn ((block [(atom Type) | _]))
-				     ## raise error if type not recognized
-				     (case Type
-				       (etc true)
-				       (tag true)
-				       ##(aux false)
-				       (_ (error "Unrecognized macro argument block: ~p"
-						 [Type]))))
-				 Blocks) 
-	  AuxBindings (macro-aux-blocks AuxBlocks VAll)
-	  :
-	  (case Blocks
-	    ([] `(let ;AuxBindings : ,(macro-arg-end Body VK)))
-	    (_ `(let ;AuxBindings
-		  : ,(macro-arg-blocks-2 Blocks Body VK)))
-	    #~>> R (fmt "MAB -> ~p\n" [R]) R
-	     )))
-
-(def macro-arg-blocks-2 (Blocks Body VK):eval:
-  # parse the non-auxiliary block args
-  # key & etc
-  (case Blocks
-    ([] (macro-arg-end Body VK))
-    ([(block [(atom Type)|Args])|Blocks]
-     (case Type
-       (etc (let VK2 (genvar)
-		 EtcBinding (case Args
-			      ([Tail] Tail)
-			      ## more than two args in :etc
-			      ([_ _|_] (reverse Args ~>> [Tail|RHeads]
-					  `[;(reverse RHeads)|,Tail]))) 
-		 :
-		 `(case ,VK
-		    ([(block ,EtcBinding)|,VK2] ,(macro-arg-blocks-2 Blocks Body VK2))
-		    (_ (erlang\error {macro-arg "Expecting a block." ,VK})))))
-       (tag (let* [Tag TagSpec] Args
-		  {TagArg Default} (case TagSpec
-				     (`(,Arg ,Val) {Arg Val})
-				     (Arg {Arg '[]}))
-		  VK2 (genvar) 
-		  :
-		  `(let {,TagArg ,VK2} (case ,VK
-					 ([(block [(atom ,Tag)|TagVal])|Blocks]
-					  {TagVal Blocks})
-					 (Args {,Default Args})):
-			,(macro-arg-blocks-2 Blocks Body VK2))
-		  ))
-       ))))
-
-(def macro-aux-blocks (Blocks _VAll):eval:
-     (case Blocks
-       ([] [])
-       (_ (error "No auxiliary argument supported yet") ))
-  # auxiliary arguments that don't consume arguments.
-     
-#      (foldl (fn ((block [Type|Spec]) Bindings)
-# 	     (case Type
-# 	       ('all [(>> Spec [AllArg] AllArg) VAll | Bindings])))
-# 	 []
-# 	 Blocks) 
-  )
-
-(def macro-arg-end (Body VK):eval:
-     `(case ,VK
-	([] ;Body)
-	(_  (erlang\error {macro-arg "Leftover arguments."}))))
-
-# returns list of [{Args Body} ...]
-(def fun-args (Name Args Body):eval:
-  (let {RequiredArgs Blocks} (upto-block Args):
-       (case Blocks
-	 ([]
-	  [{RequiredArgs `(begin ;Body)}])
-	 ##( ... :opt ...)
-	 ([(block ['opt | OptArgs])]
-	  (fun-args-opts Name RequiredArgs OptArgs Body))
-	 (_
-	  (error "def block args not yet supported")
-	  #(fun-args-blocks Name RequiredArgs Blocks Body)
-	  ))))
-
-(def fun-args-opts (Name Reqs Opts Body):eval:
-     (let Opts (lsc Opt Opts:
-		    (case Opt
-		      (`(,Arg ,Init) [Arg Init])
-		      (Arg [Arg 'false])))
-	  :
-	  (fun-args-opt-rec Name Reqs [] Opts Body [])))
-
-
-# (def foo (A B :opt (C c) (D d)): ...)
-#
-# (foo A B)
-#  (let C c D d: (foo A B C D))
-# (foo A B C)
-#  (let D d: (foo A B C D))
-# (foo A B C D)
-#   body
-#
-# damn! I need flet
-(def fun-args-opt-rec (Name Reqs OptsBound OptsUnbound Body Acc):eval:
-  (case OptsUnbound
-    ([]
-     [{(cat Reqs (lsc [Arg _] (reverse OptsBound): Arg))
-       `(begin ;Body)}
-      |Acc])
-    ([OU|OUs]
-     ## fugly
-     (fun-args-opt-rec
-      Name Reqs [OU|OptsBound] OUs Body
-      [{(cat Reqs (lsc [Arg _] (reverse OptsBound): Arg))
-	`(let* ;(cat OptsUnbound):
-	   (,Name ;Reqs
-		  ;(lsc [Arg|_] OptsBound: Arg)
-		  ;(lsc [Arg|_] OptsUnbound: Arg)))}
-       
-	|Acc]
-      ))))
-
 #(def fun-args-blocks ():e)
 
 
-# (def fun-args-blocks (Name Reqs Blocks Body):eval:
+# (def fun-args-blocks (Name Reqs Blocks Body):
 #   ()
 #   )
+
+
+#\def
+(defspecial def ((== FName (atom Name)) `(;Args)
+		 :tag doc Doc
+		 :tag eval Eval
+		 :etc Body) Env:
+  (fmt "def: ~p\n" [Name])
+  ##(fmt "args: ~p\n" [Args])
+  ##(fmt "def arities:\n~p\n" [(fun-args FName Args Body)])
+  (let* EvalFlag (case Eval (false false) (_ true))
+	Doc (case Doc (false "") (_ Doc))
+	#Mod (curmod)
+	FClauses (fun-args FName Args Body) ## [{Args Body} ...], where Body is a single expression.
+	{EvalFn Arity-Def*} (make-def FName FClauses Env)
+	Info [{asts Arity-Def*}
+	      {doc Doc}
+	      {eval EvalFlag}]
+	:
+	(new-def functions Name EvalFn Info)
+	10
+	))
 
 # If E is case E_0 of Cc_1 ; ... ; Cc_k end, where E_0 is an expression and each Cc_i is a case clause then Rep(E) = {'case',LINE,Rep(E_0),[Rep(Cc_1), ..., Rep(Cc_k)]}.
 
@@ -731,26 +657,57 @@
 	{{EvalFn} Arity-Def*}))
 
 
-#\def
-(defspecial def ((== FName (atom Name)) `(;Args)
-		 :tag doc Doc
-		 :tag eval Eval
-		 :etc Body) Env:
-  (fmt "def: ~p\n" [Name])
-  ##(fmt "args: ~p\n" [Args])
-  ##(fmt "def arities:\n~p\n" [(fun-args FName Args Body)])
-  (let* EvalFlag (case Eval (false false) (_ true))
-	Doc (case Doc (false "") (_ Doc))
-	#Mod (curmod)
-	FClauses (fun-args FName Args Body) ## [{Args Body} ...], where Body is a single expression.
-	{EvalFn Arity-Def*} (make-def FName FClauses Env)
-	Info [{asts Arity-Def*}
-	      {doc Doc}
-	      {eval EvalFlag}]
-	:
-	(new-def functions Name EvalFn Info)
-	10
-	))
+# returns list of [{Args Body} ...]
+(def fun-args (Name Args Body):
+  (let {RequiredArgs Blocks} (upto-block Args):
+       (case Blocks
+	 ([]
+	  [{RequiredArgs `(begin ;Body)}])
+	 ##( ... :opt ...)
+	 ([(block ['opt | OptArgs])]
+	  (fun-args-opts Name RequiredArgs OptArgs Body))
+	 (_
+	  (error "def block args not yet supported")
+	  #(fun-args-blocks Name RequiredArgs Blocks Body)
+	  ))))
+
+(def fun-args-opts (Name Reqs Opts Body):
+     (let Opts (lsc Opt Opts:
+		    (case Opt
+		      (`(,Arg ,Init) [Arg Init])
+		      (Arg [Arg 'false])))
+	  :
+	  (fun-args-opt-rec Name Reqs [] Opts Body [])))
+
+
+# (def foo (A B :opt (C c) (D d)): ...)
+#
+# (foo A B)
+#  (let C c D d: (foo A B C D))
+# (foo A B C)
+#  (let D d: (foo A B C D))
+# (foo A B C D)
+#   body
+#
+# damn! I need flet
+(def fun-args-opt-rec (Name Reqs OptsBound OptsUnbound Body Acc):
+  (case OptsUnbound
+    ([]
+     [{(cat Reqs (lsc [Arg _] (reverse OptsBound): Arg))
+       `(begin ;Body)}
+      |Acc])
+    ([OU|OUs]
+     ## fugly
+     (fun-args-opt-rec
+      Name Reqs [OU|OptsBound] OUs Body
+      [{(cat Reqs (lsc [Arg _] (reverse OptsBound): Arg))
+	`(let* ;(cat OptsUnbound):
+	   (,Name ;Reqs
+		  ;(lsc [Arg|_] OptsBound: Arg)
+		  ;(lsc [Arg|_] OptsUnbound: Arg)))}
+       
+	|Acc]
+      ))))
 
 
 
@@ -831,6 +788,103 @@
 	10))
 
 
+
+
+(def macro-parse-args (Args Body VAll):
+  # V_n are the continuaton variables that store partial parsing results.
+  # parse the required args or a leading :etc block (special case).
+  # auxiliary args must come after the leading args.
+     #(fmt "MPA:\nBody: ~p\n" [Body])
+  (case Args
+    ([] `(let (paren [_Car]) ,VAll : ;Body))
+    ([(block ['etc|EArgs])|Blocks]
+     (let {Heads Tail} (split-tail EArgs)
+	  VK (genvar) VK2 (genvar)
+	  :
+	  `(let* (paren [_Car ;Heads | ,VK]) ,VAll
+		 {,Tail ,VK2} (upto-block ,VK)
+		 : ,(macro-arg-blocks Blocks Body VAll VK2))))
+    ([(block ['all|Args])]
+     (let {Heads Tail} (split-tail Args):
+	  `(let (paren [_ ;Heads | ,Tail]) ,VAll:
+		;Body)
+	  ))
+    (_ (let* {Heads Blocks} (upto-block Args)
+	     VK (genvar)
+	     :
+	     `(let (paren [_Car ;Heads | ,VK]) ,VAll
+		   : ,(macro-arg-blocks Blocks Body VAll VK))
+	     ))))
+
+(def macro-arg-blocks (Blocks Body VAll VK):
+    (let* {Blocks AuxBlocks} (lists\partition
+				 (fn ((block [(atom Type) | _]))
+				     ## raise error if type not recognized
+				     (case Type
+				       (etc true)
+				       (tag true)
+				       ##(aux false)
+				       (_ (error "Unrecognized macro argument block: ~p"
+						 [Type]))))
+				 Blocks) 
+	  AuxBindings (macro-aux-blocks AuxBlocks VAll)
+	  :
+	  (case Blocks
+	    ([] `(let ;AuxBindings : ,(macro-arg-end Body VK)))
+	    (_ `(let ;AuxBindings
+		  : ,(macro-arg-blocks-2 Blocks Body VK)))
+	    #~>> R (fmt "MAB -> ~p\n" [R]) R
+	     )))
+
+(def macro-arg-blocks-2 (Blocks Body VK):
+  # parse the non-auxiliary block args
+  # key & etc
+  (case Blocks
+    ([] (macro-arg-end Body VK))
+    ([(block [(atom Type)|Args])|Blocks]
+     (case Type
+       (etc (let VK2 (genvar)
+		 EtcBinding (case Args
+			      ([Tail] Tail)
+			      ## more than two args in :etc
+			      ([_ _|_] (reverse Args ~>> [Tail|RHeads]
+					  `[;(reverse RHeads)|,Tail]))) 
+		 :
+		 `(case ,VK
+		    ([(block ,EtcBinding)|,VK2] ,(macro-arg-blocks-2 Blocks Body VK2))
+		    (_ (erlang\error {macro-arg "Expecting a block." ,VK})))))
+       (tag (let* [Tag TagSpec] Args
+		  {TagArg Default} (case TagSpec
+				     (`(,Arg ,Val) {Arg Val})
+				     (Arg {Arg '[]}))
+		  VK2 (genvar) 
+		  :
+		  `(let {,TagArg ,VK2} (case ,VK
+					 ([(block [(atom ,Tag)|TagVal])|Blocks]
+					  {TagVal Blocks})
+					 (Args {,Default Args})):
+			,(macro-arg-blocks-2 Blocks Body VK2))
+		  ))
+       ))))
+
+(def macro-aux-blocks (Blocks _VAll):
+     (case Blocks
+       ([] [])
+       (_ (error "No auxiliary argument supported yet") ))
+  # auxiliary arguments that don't consume arguments.
+     
+#      (foldl (fn ((block [Type|Spec]) Bindings)
+# 	     (case Type
+# 	       ('all [(>> Spec [AllArg] AllArg) VAll | Bindings])))
+# 	 []
+# 	 Blocks) 
+  )
+
+(def macro-arg-end (Body VK):
+     `(case ,VK
+	([] ;Body)
+	(_  (erlang\error {macro-arg "Leftover arguments."}))))
+
 ##################################################
 # .Binding Forms
 
@@ -840,7 +894,7 @@
 	   ((atom A) {var L A})
 	   ((var A) {var L A}))))
 
-(def let-bindings (Bindings Patterns Assignments):eval:
+(def let-bindings (Bindings Patterns Assignments):
      (case Bindings
        ([] {(reverse Patterns) (reverse Assignments)})
        ([Pattern Value|Bindings]
@@ -889,7 +943,7 @@
 # # If C is a catch clause P when Gs -> B where P is a pattern, Gs is a guard sequence and B is a body, then Rep(C) = {clause,LINE,[Rep({throw,P,_})],Rep(Gs),Rep(B)}. 
 # # If C is a catch clause X : P when Gs -> B where X is an atomic literal or a variable pattern, P is a pattern, Gs is a guard sequence and B is a body, then Rep(C) = {clause,LINE,[Rep({X,P,_})],Rep(Gs),Rep(B)}.
 
-(def catch-clause (`(;Es) Env):eval:
+(def catch-clause (`(;Es) Env):
      (let {Heads Blocks} (upto-block Es)
 	  #L (lineno)
 	  :
@@ -959,10 +1013,10 @@
 # If W is a generator P <= E, where P is a pattern and E is an expression, then Rep(W) = {b_generate,LINE,Rep(P),Rep(E)}. 
 # If W is a filter E, which is an expression, then Rep(W) = Rep(E).
 
-(def lsc-bindings (Env Qs Acc):eval:
+(def lsc-bindings (Env Qs Acc):
   (case Qs
     ([] {Env (reverse Acc)})
-    (['if Filter|Qs] (lsc-bindings Env Qs [(transform Filter Env)|Acc]))
+    ([(block ['if Filter])|Qs] (lsc-bindings Env Qs [(transform Filter Env)|Acc]))
     ([Pattern Generator|Qs]
      (let Env2 (verl\bindmac Pattern Env):
 	  (lsc-bindings Env2 Qs [{generate (ast-line Pattern)
@@ -972,8 +1026,9 @@
 	  ))))
 
 #\lsc
-(defspecial lsc (:etc Qualifiers :etc Body) Env:
+(defspecial lsc (:all Es) Env:
   (let* Line (lineno)
+	{Qualifiers (block Body)} (split-tail Es) 
 	{Env RWs} (lsc-bindings Env Qualifiers [])
 	:
 	{lc Line
@@ -992,7 +1047,7 @@
 # If TS is a couple A:Value where A is an atom and Value is an integer, Rep(TS) = {A, Value}.
 
 
-(def bin-element (Seg Env):eval:
+(def bin-element (Seg Env):
    (case Seg
      ((paren Seg)
       (let* {Heads TypeSpecs} (upto-block Seg) 
@@ -1018,7 +1073,7 @@
      (_ [{bin_element (bin-value Seg Env) default default}])
      ))
 
-(def bin-value (V Env):eval:
+(def bin-value (V Env):
    (transform (do (case V
 		    ((var _) true)
 		    ((integer _) true)
@@ -1028,7 +1083,7 @@
 		  V)
 	      Env))
 
-(def bin-size (V Env):eval:
+(def bin-size (V Env):
    (transform (do (case V
 		    ((integer _) true)
 		    (_ (error "Invalid bin size (want integer).")))
@@ -1057,7 +1112,7 @@
 # (fn foo 3)
 
 
-(def fn-value (Args Es Env):eval:
+(def fn-value (Args Es Env):
   (let L (lineno)
        Env (scompile\lexical_shadow Env vars []):
        {fun L
@@ -1074,7 +1129,7 @@
       (lsc I (lists\seq 1 N):
 	   ## TODO this is quite an ugly way to do it.
 	   ## should have a help function/macro to construct capturing var
-	   (var (erlang\list_to_atom (cat "V" (erlang\integer_to_list I)))
+	   (var (list-to-atom (cat "V" (integer-to-list I)))
 		0
 		## this variable intends to capture. Should use the pseudo module "true"
 		## but this doesn't work at the moment b
@@ -1105,17 +1160,17 @@
 # (call E0 ...)
 
 
-(def local-call (A Args Env):eval:
+(def local-call (A Args Env):
      ## could be calling lexical fun
   {call (ast-line A) (transform A Env) (transform_each Args Env)})
 
-(def remote-call (M A Args Env):eval:
+(def remote-call (M A Args Env):
   (let L (ast-line M):
        {call L
 	     {remote L (transform M Env) (transform A Env)}
 	     (transform_each Args Env)}))
 
-(def lexical-call (Line Alias FreeVars Args Env):eval:
+(def lexical-call (Line Alias FreeVars Args Env):
      {call Line Alias
 	   (let Args (transform_each Args Env):
 		(case FreeVars
@@ -1279,7 +1334,7 @@
 ##################################################
 # .Control Forms
 
-(def if-clauses (Tests Acc Line Env):eval:
+(def if-clauses (Tests Acc Line Env):
   (case Tests
     ([Guard Exp|Tests]
      (if-clauses Tests
@@ -1372,7 +1427,7 @@
 
 #If E is E_1 Op E_2, where Op is a binary operator, then Rep(E) = {op,LINE,Op,Rep(E_1),Rep(E_2)}.
 
-(def nest-bin-op (Op [Arg1 Arg2|Args] Env):eval:
+(def nest-bin-op (Op [Arg1 Arg2|Args] Env):
   # (Op A B ...) => (Op (Op A B) C ...)
   # (- A B C ...) => (- (- A B) C ...)
   (foldl (fn (Arg Exp)
@@ -1382,13 +1437,13 @@
 	 {op (lineno) Op (transform Arg1 Env) (transform Arg2 Env)}
 	 Args))
 
-(def bin-op (Op [Arg1 Arg2] Env):eval:
+(def bin-op (Op [Arg1 Arg2] Env):
   {op (ast-line Arg1)
       Op
       (transform Arg1 Env)
       (transform Arg2 Env)})
 
-(def una-op (Op [Arg1] Env):eval:
+(def una-op (Op [Arg1] Env):
   {op (ast-line Arg1)
       Op
       (transform Arg1 Env)})
@@ -1440,7 +1495,7 @@
   (let L (lineno):
        {tuple L (transform_each Es Env)}))
 
-(def list-of (Heads Tail):eval:
+(def list-of (Heads Tail):
      (foldr (fn (H T) `(cons ,H ,T))
 	    Tail Heads))
 
