@@ -47,6 +47,9 @@
   output-forms	     ## TODO: remove later when verl is removed.
   )
  (specials
+  private
+  public
+  toplevel-for
   meta-value
   with-meta-values
   %a{__eof} %a{__bof}
@@ -265,21 +268,21 @@
 (defspecial meta-value ((atom K)) Env:
   (transform `',(meta-get Env K) Env))
 
-(defspecial with-meta-values (:etc Bindings :etc Body) Env:
-  (let* Vals (transform_each Bindings Env)
-	Vals (lsc Val Vals:
-		  (case (scompile\eval Val Env)
-		    ({K V}:(is-atom K): {K V})
-		    (K :(is-atom K): {K true})))
-	OldValsDict (dict\from_list (env\assoc Env [compile-options]))
-	## Merge the given Vals with other existing vals..
-	Vals (foldl
-	      (fn ({K V} Dict) (dict\store K V Dict))
-	      OldValsDict
-	      Vals .dict\to_list)
-	:
-	(transform `(do ;Body)
-		   (env\assoc_append Env [meta vals] Vals))))
+# (defspecial with-meta-values (:etc Bindings :etc Body) Env:
+#   (let* Vals (transform_each Bindings Env)
+# 	Vals (lsc Val Vals:
+# 		  (case (scompile\eval Val Env)
+# 		    ({K V}:(is-atom K): {K V})
+# 		    (K :(is-atom K): {K true})))
+# 	OldValsDict (dict\from_list (env\assoc Env [compile-options]))
+# 	## Merge the given Vals with other existing vals..
+# 	Vals (foldl
+# 	      (fn ({K V} Dict) (dict\store K V Dict))
+# 	      OldValsDict
+# 	      Vals .dict\to_list)
+# 	:
+# 	(transform `(do ;Body)
+# 		   (env\assoc_append Env [meta vals] Vals))))
 
 
 (defspecial %a{__bof} () Env:
@@ -393,7 +396,28 @@
 (defspecial module (Mod) _Env:
   (case (is_curmod Mod)
     (true 1)
-    (false (error "Module name mismatch: ~p" [Mod])))) 
+    (false (error "Module name mismatch: ~p" [Mod]))))
+
+
+(defspecial public (:all Es) Env:
+  (let Env2 (meta-put Env export true):
+       (scompile\set_env Env2)
+       (let R (transform `(toplevel ;Es) Env2):
+	    (scompile\set_env Env)
+	    R
+	    )))
+
+(defspecial private (:all Es) Env:
+  (let Env2 (meta-put Env export false):
+       (scompile\set_env Env2)
+       (let R (transform `(toplevel ;Es) Env2):
+	    (scompile\set_env Env)
+	    (pr R)
+	    )))
+
+(defspecial toplevel-for ((atom Time) :etc Es) Env:
+  (transform `(toplevel ;Es)
+	     (meta-put Env time Time)))
 
 (def export-defs (Type Names):
   (let Env (env\assoc_append (scompile\env) [exports Type] Names):
@@ -417,14 +441,15 @@
 # 	  ))
 
 
-(def new-def (NSType Name Def Info):
-  (case (ets\insert_new serl-info {{definitions NSType Name} Info})
-    (false (error "%s already defined in %s" [Name NSType]))
-    (_ (let Env (env\assoc_put (scompile\env) [definitions NSType Name] Def):
-	    (scompile\set_env Env)
-	    Env))))
+# (def new-def (NSType Name Def Info):
+#   (case (ets\insert_new serl-info {{definitions NSType Name} Info})
+#     (false (error "%s already defined in %s" [Name NSType]))
+#     (_ (let Env (env\assoc_put (scompile\env) [definitions NSType Name] Def):
+# 	    (scompile\set_env Env)
+# 	    Env))))
 
-(def new-def-for (NSType Name MetaDef Def): 
+(def new-def-for (NSType Name MetaDef Def):
+  ## TODO probably most elegant to add "lexical" here.
   ## Time := meta, eval, both
   ## MetaDef := the information made available for use in compile time.
   ## Def := is information that is to be compiled.
@@ -545,9 +570,10 @@
 		   Ast})
 	     .lists\unzip3) 
 	:
+	(fmt "")
 	{(env\assoc_put Info [exports Type]
-			(lists\delete (fn (X) (== X false)) Exports))
-	 (lists\delete (fn (X) (== X false)) ExportAttributes)
+			(lists\filter (fn (X) (/= X false)) Exports))
+	 (lists\filter (fn (X) (/= X false)) ExportAttributes)
 	 Asts}))
 
 
@@ -1253,8 +1279,8 @@
 			 Ast {function Line DefName Arity
 				       [{clause Line AllArgs [] [Body]}]}
 			:
-			(new-def functions DefName false
-				 [{asts [{Arity Ast}]}]))
+			(new-def-for functions DefName false
+				     [{asts [{Arity Ast}]}]))
 		   {{M A} {lexical Alias FVs}}))
 	Env (scompile\lexical_shadow Env functions Bindings)
 	:
