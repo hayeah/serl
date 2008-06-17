@@ -37,6 +37,7 @@
 
 (export-from
  (functions
+  pr
   meta-get meta-put
   erl-ast-of
   ast-tag ast-line ast-mod ast-data
@@ -290,10 +291,9 @@
 			 (K :(is-atom K): (meta-put Env K true))))
 		   Env
 		   (scompile\options))
-	## set meta vars for eval=false output=true export=false 
-	Env (meta-put (meta-put (meta-put Env eval false)
-				output true)
-		      export false): 
+	## set meta vars for time=eval export=false 
+	Env (meta-put (meta-put Env time both)
+		      export true): 
 	(scompile\set_env Env))
   
   0)
@@ -424,25 +424,34 @@
 	    (scompile\set_env Env)
 	    Env))))
 
-(def def-info (_Env NSType Name Key):
-  # caller of this function should check its result
-  (case (ets\match serl-info {{definitions NSType Name} %a{$1}})
-    ([[Info]] (proplists\lookup Key Info ~case
-				(none false)
-				({_ R} {ok R})))
-    (_ false)))
+(def new-def-for (NSType Name MetaDef Def): 
+  ## Time := meta, eval, both
+  ## MetaDef := the information made available for use in compile time.
+  ## Def := is information that is to be compiled.
+  ## MetaDef 
+  ## this function controls whether a definition is compiled & exported.
+  (let* Env (scompile\env)
+	Time (meta-get Env time)
+	Export (meta-get Env export)
+	Env (if (or (== Time meta) (== Time both))
+		(env\assoc_put Env [definitions NSType Name] MetaDef)
+		Env) :
+	(scompile\set_env Env)
+	(if (or (== Time eval) (== Time both))
+	    ## TODO I forgot if this is a robust way to check for definedness.
+	    ## TODO should check imports for conflict.
+	    (case (ets\insert_new serl-info {{definitions NSType Name} [{export Export}|Def]})
+	      (false (error "%s already defined in %s" [Name NSType]))
+	      (_ ok))
+	    ok)
+	Env))
 
-# (def get-def (Env NSType Name):
-#   # get the definition of a name
-#   (env\assoc Env [definitions NSType Name] ~case
-# 	     ({ok Def} Def)
-# 	     (_ false)))
-
-(def get-defs (Env NSType):
-  # get all the definitions related to a namespace
-  (env\assoc Env [definitions NSType] ~case
-	     ({ok Defs} Defs)
-	     (false [])))
+(def get-defs-of (NSType):
+  ## get all the definitions related to a namespace
+  (case (ets\match serl-info {{definitions NSType %a{_}} %a{$1}})
+    ([] false)
+    (Matches (lsc [Def] Matches: Def))
+    ))
 
 
 #\import-from
@@ -495,7 +504,7 @@
   2)
 
 (defspecial functions-output (Info) Env:
-  (output-fun Info Env functions))
+  (output-defs Info Env functions))
 
 
 
@@ -504,7 +513,7 @@
   2)
 
 (defspecial macros-output (Info) Env:
-  (output-meta-fun Info Env macros))
+  (output-defs Info Env macros))
 
 
 
@@ -513,86 +522,33 @@
   2)
 
 (defspecial specials-output (Info) Env:
-  (output-meta-fun Info Env specials))
+  (output-defs Info Env specials))
 
 
 
-(def output-fun (Info Env Type):
-  ## used so far by functions
-     ##(fmt "output: ~p\n" [Type])
-  (let* FNames (lsc {Name _} (get-defs Env Type):
-		    Name)
-	Exports (lsc Export (get-exports Env Type): 
-		     {(ast-line Export)
-		      (ast-data Export)
-		      })
-	Info (env\assoc_put
-	      Info [exports Type]
-	      (let M (curmod):
-		   (lsc {Line Name} Exports:
-			{Name {{M Name}
-			       [{doc
-				 (def-info Env Type Name doc ~case
-					   ({ok Doc} Doc)
-					   (_ (error "~p: Exporting ~p undefined: ~p"
-						     [Line Type Name])))
-				 }]}})))
-	Defs (lsc Name FNames :
-		  {Name (def-info Env Type Name asts ~case
-				  ({ok Arity-Ast*} Arity-Ast*)
-				  (false (error "no asts in def-info??")))})
+(def output-defs (Info _Env Type):
+  ## TODO put doc in meta info
+  (let* Mod (curmod) 
+	{Exports ExportAttributes Asts}
+	(lsc Def (get-defs-of Type .pr)
+	     (== Ast {function Line Name Arity _})
+	     (lists\keysearch asts 1 Def ~>> {value {_ R}} R):
+	     (let ToExport (lists\keysearch export 1 Def
+					    ~>> {value {_ R}} R)
+		  :
+		  {(case ToExport
+		     (true {Name {{Mod Name}}})
+		     (_ false))
+		   (case ToExport
+		     (true {attribute Line export [{Name Arity}]})
+		     (_ false))
+		   Ast})
+	     .lists\unzip3) 
 	:
-	{Info
-	 ##export attributes
-	 (lsc {Line Name} Exports
-	      {Arity _Ast} (lists\keysearch Name 1 Defs ~>>
-					    {value {_Name R}} R):
-	      {attribute Line export [{Name Arity}]}
-	      )
-	 ##definitions
-	 (lsc Name FNames
-	      {_Arity Ast} (lists\keysearch Name 1 Defs ~>>
-					    {value {_Name R}} R):
-	      Ast)
-	 }))
-
-(def output-meta-fun (Info Env Type):
-  ## shared by exports,specials
-  ## only the exported defs need actually be output
-     ##(fmt "output-meta: ~p\n" [Type])
-  (let* Exports (lsc Export (get-exports Env Type):
-		     {(ast-line Export) (ast-data Export)})
-	{Headers Bodies}
-	(lsc {Line Name} Exports:
-	     (let* MacName (def-info Env Type Name name ~case
-				     ({ok Name} Name)
-				     (_ (error "~p: Exporting ~p undefined: ~p"
-					       [Line Type Name])))
-		   Attributes (lsc Arity (def-info Env Type Name arities ~>>
-						   {ok Arities} Arities):
-				   {attribute Line export [{MacName Arity}]})
-		   Ast (def-info Env Type Name ast ~case
-				 ({ok Ast} Ast)):
-		   {Attributes Ast})
-	     .lists\unzip)
-	Info
-	(env\assoc_put Info [exports Type]
-		       (lsc {_L Name} Exports:
-			    {Name {## Fun
-				   {(curmod) (def-info Env Type Name name ~>>
-						       {ok MacName} MacName)}
-				   ## Info
-				   [{doc (def-info Env Type Name doc ~>>
-						   {ok Doc} Doc)}]}}))
-	:
-	##(fmt "Info: ~p\n" [Info])
-	{Info 
-	 ## export attributes
-	 (lists\flatten Headers)
-	 ## definitions
-	 Bodies})) 
-
-
+	{(env\assoc_put Info [exports Type]
+			(lists\delete (fn (X) (== X false)) Exports))
+	 (lists\delete (fn (X) (== X false)) ExportAttributes)
+	 Asts}))
 
 
 ##################################################
@@ -609,21 +565,18 @@
 #\def
 (defspecial def ((== FName (atom Name)) `(;Args)
 		 :tag doc Doc
-		 :tag eval Eval
 		 :etc Body) Env:
   (fmt "def: ~p\n" [Name])
   ##(fmt "args: ~p\n" [Args])
   ##(fmt "def arities:\n~p\n" [(fun-args FName Args Body)])
-  (let* EvalFlag (case Eval (false false) (_ true))
-	Doc (case Doc (false "") (_ Doc))
+  (let* Doc (case Doc (false "") (_ Doc))
 	#Mod (curmod)
 	FClauses (fun-args FName Args Body) ## [{Args Body} ...], where Body is a single expression.
-	{EvalFn Arity-Def*} (make-def FName FClauses Env)
-	Info [{asts Arity-Def*}
-	      {doc Doc}
-	      {eval EvalFlag}]
-	:
-	(new-def functions Name EvalFn Info)
+	{EvalFn Asts} (make-def FName FClauses Env)
+	Info [{asts Asts}
+	      {doc Doc}]
+	: 
+	(new-def-for functions Name EvalFn Info)
 	10
 	))
 
@@ -648,13 +601,12 @@
 		   ## the environment at the time of call is passed in.
 		   (scompile\eval_erl EvalAst [{EvalVarName Args}] Env ~>>
 				      {Result _} Result))
-	Arity-Def*
+	Asts
 	(lsc {Arity Args Body} Arity-Args-Body*:
-	     {Arity
-	      {function Line Name Arity
-			[{clause Line Args [] [Body]}]}}) 
+	     {function Line Name Arity
+		       [{clause Line Args [] [Body]}]}) 
 	: 
-	{{EvalFn} Arity-Def*}))
+	{{EvalFn} Asts}))
 
 
 # returns list of [{Args Body} ...]
@@ -738,13 +690,10 @@
 				      {Result _} Result))
 	DefAst {function Line MacName 1
 			 [{clause Line [{var Line VAllName}] [] [MacBody]}]}
-	Info [{ast DefAst}
-	      {arities [1]}
-	      {name MacName}
-	      {args Args} 
+	Info [{asts [DefAst]} 
 	      {doc Doc}]
 	:
-	(new-def macros Name {EvalFn} Info)
+	(new-def-for macros Name {EvalFn} Info)
 	10))
 
 
@@ -777,14 +726,10 @@
 				   {var Line VEnvName}]
 				  []
 				  [MacBody]}]}
-	Info [{ast DefAst}
-	      {arities [2]}
-	      {name MacName}
-	      {args Args} 
+	Info [{asts [DefAst]} 
 	      {doc Doc}]
 	: 
-	(new-def specials Name
-		 {EvalFn} Info)
+	(new-def-for specials Name {EvalFn} Info)
 	10))
 
 
