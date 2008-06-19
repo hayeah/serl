@@ -1,7 +1,6 @@
 ## make sure I can change the AST representation whenver I feel like it.
 ## verl's meta-module doesn't support import.
 
-
 (module serl)
 
 (import scompile
@@ -24,99 +23,6 @@
 	foreach
 	)
 
-# (export ast-tag ast-line ast-mod ast-data
-# 	upto-block
-# 	atom-cat
-# 	erlpp ## TODO: remove when eval-only is implemented
-# 	output-forms ## TODO: remove later when verl is removed.
-# 	)
-
-(export-from
- (specials ast-as-is)
- (macros defasts))
-
-(export-from
- (functions
-  pr
-  meta-get meta-put
-  erl-ast-of
-  ast-tag ast-line ast-mod ast-data
-  upto-block split-tail 
-  atom-cat
-  erlpp		     ## TODO: remove when eval-only is implemented
-  output-forms	     ## TODO: remove later when verl is removed.
-  )
- (specials
-  private
-  public
-  toplevel-for
-  meta-value
-  with-meta-values
-  %a{__eof} %a{__bof}
-  %a{__block} %a{__brace}
-  %a{__integer} %a{__float} %a{__string}
-  %a{__atom} %a{__var}
-  %a{__quote} %a{__bquote}
-  quote
-  module
-  def defm defspecial
-  functions-import functions-export functions-output
-  #macros-import
-  macros-export macros-output
-  #specials-import
-  specials-export specials-output
-  eval-binding
-  let lsc
-  letf
-  fn call 
-  case if
-  do toplevel
-  try receive
-  bin
-  tuple cons
-  )
- (macros
-  debug
-  export-from import-from
-  export import 
-  let* >>
-  begin
-  ls
-  ))
-
-# (export-from
-#  (macros
-#   integer float
-#   atom var
-#   string
-#   paren brace block
-#   ))
-
-
-## export this so it's usable by future bootstraps.
-## this is a piece of ad hocery.
-(export-from
- (macros def-ops))
-
-(export-from
- (specials
-  + - * / ++ --
-  == /= =< < >= >
-  div rem
-  bnot band bor bxor bsl bsr
-  === /==
-  and or xor orelse andalso
-  not))
-
-
-
-# (def cat (L1 :opt L2):
-#   (case L2
-#     (false (lists\append L1))
-#     (_ (lists\append L1 L2))))
-
-# (def fmt (Str Args):
-#   (io\format Str Args))
 
 ##################################################
 # .Helper
@@ -268,27 +174,28 @@
 (defspecial meta-value ((atom K)) Env:
   (transform `',(meta-get Env K) Env))
 
-# (defspecial with-meta-values (:etc Bindings :etc Body) Env:
-#   (let* Vals (transform_each Bindings Env)
-# 	Vals (lsc Val Vals:
-# 		  (case (scompile\eval Val Env)
-# 		    ({K V}:(is-atom K): {K V})
-# 		    (K :(is-atom K): {K true})))
-# 	OldValsDict (dict\from_list (env\assoc Env [compile-options]))
-# 	## Merge the given Vals with other existing vals..
-# 	Vals (foldl
-# 	      (fn ({K V} Dict) (dict\store K V Dict))
-# 	      OldValsDict
-# 	      Vals .dict\to_list)
-# 	:
-# 	(transform `(do ;Body)
-# 		   (env\assoc_append Env [meta vals] Vals))))
+
+(defspecial toplevel-with (:etc Bindings :etc Es) Env:
+  (let* Vals (transform_each Bindings Env)
+	Vals (lsc Val Vals:
+		  (case (scompile\eval Val Env)
+		    ({K V}:(is-atom K): {K V})
+		    (K :(is-atom K): {K true})))
+	OldVals (env\assoc Env [meta vals])
+	## Merge the given Vals with other existing vals..
+	Vals (foldl
+	      (fn ({K V} Dict) (dict\store K V Dict))
+	      (dict\from_list OldVals)
+	      Vals .dict\to_list)
+	{Section Env} (transform `(toplevel ;Es)
+				 (env\assoc_put Env [meta vals] Vals))
+	: 
+	{Section (env\assoc_put Env [meta vals] OldVals)}))
 
 
 (defspecial %a{__bof} () Env:
   (ets\new serl-info [named_table])
-  ## put this in the meta-vars 
-  (let* Env (foldl (fn (Opt Env)
+  (let* Env (foldl (fn (Opt Env)   ## options as meta-vars 
 		       (case Opt
 			 ({K V} (meta-put Env K V))
 			 (K :(is-atom K): (meta-put Env K true))))
@@ -297,9 +204,7 @@
 	## set meta vars for time=eval export=false 
 	Env (meta-put (meta-put Env time both)
 		      export true): 
-	(scompile\set_env Env))
-  
-  0)
+	{0 Env}))
 
 (defspecial %a{__eof} (Command) Env:
   (case Command
@@ -388,85 +293,61 @@
 #
 # Just support functions & macros/specials for the moment.
 
-## (export "sp-.*")
-## (export "mac-.*")
-
 # (import-from mod (macros ...) (functions ...))
 
-(defspecial module (Mod) _Env:
+(defspecial module (Mod) Env:
   (case (is_curmod Mod)
-    (true 1)
+    (true {1 Env})
     (false (error "Module name mismatch: ~p" [Mod]))))
 
 
 (defspecial public (:all Es) Env:
-  (let Env2 (meta-put Env export true):
-       (scompile\set_env Env2)
-       (let R (transform `(toplevel ;Es) Env2):
-	    (scompile\set_env Env)
-	    R
-	    )))
+  (case Es
+    ([] {10 (meta-put Env export true)})
+    (_ (transform `(toplevel-with export:
+				  ;Es)
+		  Env))))
 
 (defspecial private (:all Es) Env:
-  (let Env2 (meta-put Env export false):
-       (scompile\set_env Env2)
-       (let R (transform `(toplevel ;Es) Env2):
-	    (scompile\set_env Env)
-	    (pr R)
-	    )))
+  (case Es
+    ([] {10 (meta-put Env export false)})
+    (_ (transform `(toplevel-with {export false}:
+				  ;Es)
+		  Env))))
 
-(defspecial toplevel-for ((atom Time) :etc Es) Env:
-  (transform `(toplevel ;Es)
-	     (meta-put Env time Time)))
-
-(def export-defs (Type Names):
-  (let Env (env\assoc_append (scompile\env) [exports Type] Names):
-       (scompile\set_env Env)
-       Env))
-
-(def get-exports (Env Type): 
-  (env\assoc Env [exports Type] ~case
-	     ({ok Names} Names)
-	     (_ [])))
+# (let* Orig (meta-get Env export) 
+# 	Env (meta-put Env export true)
+# 	{Section Env} (transform `(toplevel ;Es) Env):
+# 	{Section (meta-put Env export Orig)})
 
 # (def get-imports (Env Type):
 #      (let Names (env\assoc Env [imports] ~>> {ok Imports}
-# 			   (lsc {Mod _} Imports
-# 				Name (env\assoc [imports Mod Type] ~>> {ok }
-# 						)
-# 				: Mod)):
-# 	  Namess (lsc Mod Mods
-# 		      Val (env\imports_of Mod Type all ~>> {Type Vals}):
-# 		      )
-# 	  ))
+#                         (lsc {Mod _} Imports
+#                              Name (env\assoc [imports Mod Type] ~>> {ok }
+#                                              )
+#                              : Mod)):
+#        Namess (lsc Mod Mods
+#                    Val (env\imports_of Mod Type all ~>> {Type Vals}):
+#                    )
+#        ))
 
-
-# (def new-def (NSType Name Def Info):
-#   (case (ets\insert_new serl-info {{definitions NSType Name} Info})
-#     (false (error "%s already defined in %s" [Name NSType]))
-#     (_ (let Env (env\assoc_put (scompile\env) [definitions NSType Name] Def):
-# 	    (scompile\set_env Env)
-# 	    Env))))
-
-(def new-def-for (NSType Name MetaDef Def):
+(def new-def (Env NSType Name MetaDef Def):
   ## TODO probably most elegant to add "lexical" here.
   ## Time := meta, eval, both
   ## MetaDef := the information made available for use in compile time.
   ## Def := is information that is to be compiled.
   ## MetaDef 
   ## this function controls whether a definition is compiled & exported.
-  (let* Env (scompile\env)
-	Time (meta-get Env time)
+  (let* Time (meta-get Env time)
 	Export (meta-get Env export)
 	Env (if (or (== Time meta) (== Time both))
 		(env\assoc_put Env [definitions NSType Name] MetaDef)
-		Env) :
-	(scompile\set_env Env)
+		Env) : 
 	(if (or (== Time eval) (== Time both))
 	    ## TODO I forgot if this is a robust way to check for definedness.
 	    ## TODO should check imports for conflict.
 	    (case (ets\insert_new serl-info {{definitions NSType Name} [{export Export}|Def]})
-	      (false (error "%s already defined in %s" [Name NSType]))
+	      (false (error "~s already defined in ~s" [Name NSType]))
 	      (_ ok))
 	    ok)
 	Env))
@@ -505,7 +386,8 @@
 
 (defspecial functions-import (:etc Mod Names) Env:
   (let (atom Mod) Mod
-       Names (lsc (atom A) Names: A):
+       Names (lsc (atom A) Names: A)
+       :
        (foreach (fn (Name)
 		    (case (scompile\lookup Env functions {(curmod) Name})
 		      ({ok {{M A}}} (error "Function import conflict: ~p:~p with ~p:~p"
@@ -513,64 +395,46 @@
 		      (_ ok)))
 		Names)
        ##TODO allow importing functions from not yet loaded modules
-       (let Env (env\import Env Mod functions Names):
-	    (scompile\set_env Env)
-	    2)
+       {2 (env\import Env Mod functions Names)}
        ))
 
-#\export
-(defm export (:etc Mod Names):
-  `(functions-export ,Mod ;Names))
 
-#If F is an attribute -export([Fun_1/A_1, ..., Fun_k/A_k]), then Rep(F) = {attribute,LINE,export,[{Fun_1,A_1}, ..., {Fun_k,A_k}]}.
-
-(defspecial functions-export (:etc Names) _Env: 
-  (export-defs functions Names)
-  2)
 
 (defspecial functions-output (Info) Env:
   (output-defs Info Env functions))
 
-
-
-(defspecial macros-export (:etc Names) _Env:
-  (export-defs macros Names)
-  2)
-
 (defspecial macros-output (Info) Env:
   (output-defs Info Env macros))
 
-
-
-(defspecial specials-export (:etc Names) _Env:
-  (export-defs specials Names)
-  2)
-
 (defspecial specials-output (Info) Env:
   (output-defs Info Env specials))
-
 
 
 (def output-defs (Info _Env Type):
   ## TODO put doc in meta info
   (let* Mod (curmod) 
 	{Exports ExportAttributes Asts}
-	(lsc Def (get-defs-of Type .pr)
+	(lsc Def (get-defs-of Type)
+
 	     (== Ast {function Line Name Arity _})
-	     (lists\keysearch asts 1 Def ~>> {value {_ R}} R):
+	       (lists\keysearch asts 1 Def ~>> {value {_ R}} R) 
+	     :
 	     (let ToExport (lists\keysearch export 1 Def
 					    ~>> {value {_ R}} R)
+		  Alias
+		    (case (lists\keysearch alias 1 Def)
+		      ({value {_ Alias}} Alias)
+		      (_ Name))
 		  :
 		  {(case ToExport
-		     (true {Name {{Mod Name}}})
+		     (true {Alias {{Mod Name}}})
 		     (_ false))
 		   (case ToExport
 		     (true {attribute Line export [{Name Arity}]})
 		     (_ false))
 		   Ast})
 	     .lists\unzip3) 
-	:
-	(fmt "")
+	: 
 	{(env\assoc_put Info [exports Type]
 			(lists\filter (fn (X) (/= X false)) Exports))
 	 (lists\filter (fn (X) (/= X false)) ExportAttributes)
@@ -602,9 +466,7 @@
 	Info [{asts Asts}
 	      {doc Doc}]
 	: 
-	(new-def-for functions Name EvalFn Info)
-	10
-	))
+	{10 (new-def Env functions Name EvalFn Info)}))
 
 # If E is case E_0 of Cc_1 ; ... ; Cc_k end, where E_0 is an expression and each Cc_i is a case clause then Rep(E) = {'case',LINE,Rep(E_0),[Rep(Cc_1), ..., Rep(Cc_k)]}.
 
@@ -716,11 +578,11 @@
 				      {Result _} Result))
 	DefAst {function Line MacName 1
 			 [{clause Line [{var Line VAllName}] [] [MacBody]}]}
-	Info [{asts [DefAst]} 
+	Info [{alias Name}
+	      {asts [DefAst]} 
 	      {doc Doc}]
 	:
-	(new-def-for macros Name {EvalFn} Info)
-	10))
+	{10 (new-def Env macros Name {EvalFn} Info)}))
 
 
 #\defspecial
@@ -752,11 +614,11 @@
 				   {var Line VEnvName}]
 				  []
 				  [MacBody]}]}
-	Info [{asts [DefAst]} 
+	Info [{alias Name}
+	      {asts [DefAst]} 
 	      {doc Doc}]
 	: 
-	(new-def-for specials Name {EvalFn} Info)
-	10))
+	{10 (new-def Env specials Name {EvalFn} Info)}))
 
 
 
@@ -1178,116 +1040,116 @@
     (_ (local-call Fn Args Env))))
 
 
-## freevar analysis for the lambda-lifting of letf bindings is done in 2 passes:
-## (1) collect for each lexical function the freevars in its body.
-## (2) collect for each lexical function the freevars needed by the lexical function it calls.
-##
-##  the freevars needed by a lexical function is the union of (1) and (2)
-##
-## Having done the freevars analysis, associate the the lexical function with its
-## toplevel alias and the freevars it needs. A call to a lexical function is
-## augumented with the freevars the lexical function needs wrapped in a tuple
-## as the first argument.
-##
-## This is extremely hairy.
-(defspecial letf (:etc Fs :etc LetfBody) Env:
-  (let* NABs (lsc `(,Name (;Args) ;Body) Fs:
-		  {Name Args `(do ;Body)})
-	## Env2 is the environment used to temporarily compile lexical functions' bodies.
-	Env2 (scompile\lexical_shadow
-	      Env functions
-	      (lsc {(atom A _L M) _ _} NABs:
-		   {{M A} {lexical}}))
-	## freevar analysis (1)
-	{FVs* Bindings}
-	(lsc {(atom A L M) Args Body} NABs:
-	     (let* {Env2 Args} (verl\patterns Args (scompile\lexical_shadow Env2 vars))
-		   Body (transform Body Env2)
-		   ## annotate the body for free variables.
-		   ## include the args, so they don't show up in the set of freevars.
-		   ABody (erl_syntax_lib\annotate_bindings
-			  {function 0 foo (length Args)
-				    [{clause 0 Args [] [Body]}]}
-			  (ordsets\new))
-		   FreeVars (erl_syntax\get_ann ABody
-				.lists\keysearch free 1
-				~>> {value {free Vs}} (ordsets\from_list Vs)) 
-		   Alias {atom L (gensym)}
-		   :
-		   {{{M A} FreeVars}
-		    {{M A} Alias Args Body}})
-	     ~lists\unzip)
-	## freevar analysis (2)
-	Bindings
-	(lsc {{M A} Alias Args Body} Bindings:
-	     (let AllFVs (erl_syntax_lib\fold
-			  ## for each lexical function used, the calling function would need
-			  ## the freevars needed by the called function.
-			  (fn (T AllFVs)
-			      (case (erl_syntax\type T)
-				(application
-				 (case (erl_syntax\application_operator T .erl_syntax\revert)
-				   ({atom _ {lexical _L M2 A2}}
-				    (ordsets\union:
-				     AllFVs
-				     (lists\keysearch {M2 A2} 1 FVs*
-						      ~>> {value {_ FVs}} FVs)))
-				   (_ AllFVs)))
-				(_ AllFVs)))
-			  (lists\keysearch {M A} 1 FVs*
-					   ~>> {value {_ FVs}} FVs)
-			  Body): 
-		  {{M A} {Alias
-			  (case (lsc FV AllFVs: {var 0 FV})
-			    ([] none)
-			    (FVs {tuple 0 FVs})) 
-			  Args
-			  Body}}
-		  ))
-	## now we've done the freevar analysis, transform the bodies of the lexical
-	## functions properly and do lambda lifting.
-	Bindings
-	(lsc {{M A} {Alias FVs Args Body}} Bindings:
-	     (let* Body (erl_syntax_lib\map
-			 (fn (T)
-			     (case (erl_syntax\type T)
-			       (application
-				(case (erl_syntax\application_operator T .erl_syntax\revert)
-				  ## a lexical call, do transform
-				  ({atom _ {lexical L M A}}
-				   (let* CallArgs (erl_syntax\application_arguments
-						   T .erl_syntax\revert_forms)
-					 {CallAlias CallFVs _ _} (lists\keysearch {M A} 1 Bindings
-								      ~>> {value {_ R}} R)
-					 CallArgs (case CallFVs
-						    (none CallArgs)
-						    (_ [CallFVs|CallArgs]))
-					 :
-					 {call L CallAlias CallArgs}))
-				  ## an actual local call. Identity.
-				  (_ T)))
-			       ## identity for everything else
-			       (_ T)))
-			 Body
-			 .erl_syntax\revert):
-		   ## lambda lift
-		   (let* {atom Line DefName} Alias
-			 AllArgs (case FVs
-				   (none Args)
-				   (_ [FVs|Args]))
-			 Arity (length AllArgs)
-			 Ast {function Line DefName Arity
-				       [{clause Line AllArgs [] [Body]}]}
-			:
-			(new-def-for functions DefName false
-				     [{asts [{Arity Ast}]}]))
-		   {{M A} {lexical Alias FVs}}))
-	Env (scompile\lexical_shadow Env functions Bindings)
-	:
-	## TODO eval...
-	## TODO fancy lambda list...
-	## transform letf body
-	(transform `(do ;LetfBody) Env)))
+# ## freevar analysis for the lambda-lifting of letf bindings is done in 2 passes:
+# ## (1) collect for each lexical function the freevars in its body.
+# ## (2) collect for each lexical function the freevars needed by the lexical function it calls.
+# ##
+# ##  the freevars needed by a lexical function is the union of (1) and (2)
+# ##
+# ## Having done the freevars analysis, associate the the lexical function with its
+# ## toplevel alias and the freevars it needs. A call to a lexical function is
+# ## augumented with the freevars the lexical function needs wrapped in a tuple
+# ## as the first argument.
+# ##
+# ## This is extremely hairy.
+# (defspecial letf (:etc Fs :etc LetfBody) Env:
+#   (let* NABs (lsc `(,Name (;Args) ;Body) Fs:
+# 		  {Name Args `(do ;Body)})
+# 	## Env2 is the environment used to temporarily compile lexical functions' bodies.
+# 	Env2 (scompile\lexical_shadow
+# 	      Env functions
+# 	      (lsc {(atom A _L M) _ _} NABs:
+# 		   {{M A} {lexical}}))
+# 	## freevar analysis (1)
+# 	{FVs* Bindings}
+# 	(lsc {(atom A L M) Args Body} NABs:
+# 	     (let* {Env2 Args} (verl\patterns Args (scompile\lexical_shadow Env2 vars))
+# 		   Body (transform Body Env2)
+# 		   ## annotate the body for free variables.
+# 		   ## include the args, so they don't show up in the set of freevars.
+# 		   ABody (erl_syntax_lib\annotate_bindings
+# 			  {function 0 foo (length Args)
+# 				    [{clause 0 Args [] [Body]}]}
+# 			  (ordsets\new))
+# 		   FreeVars (erl_syntax\get_ann ABody
+# 				.lists\keysearch free 1
+# 				~>> {value {free Vs}} (ordsets\from_list Vs)) 
+# 		   Alias {atom L (gensym)}
+# 		   :
+# 		   {{{M A} FreeVars}
+# 		    {{M A} Alias Args Body}})
+# 	     ~lists\unzip)
+# 	## freevar analysis (2)
+# 	Bindings
+# 	(lsc {{M A} Alias Args Body} Bindings:
+# 	     (let AllFVs (erl_syntax_lib\fold
+# 			  ## for each lexical function used, the calling function would need
+# 			  ## the freevars needed by the called function.
+# 			  (fn (T AllFVs)
+# 			      (case (erl_syntax\type T)
+# 				(application
+# 				 (case (erl_syntax\application_operator T .erl_syntax\revert)
+# 				   ({atom _ {lexical _L M2 A2}}
+# 				    (ordsets\union:
+# 				     AllFVs
+# 				     (lists\keysearch {M2 A2} 1 FVs*
+# 						      ~>> {value {_ FVs}} FVs)))
+# 				   (_ AllFVs)))
+# 				(_ AllFVs)))
+# 			  (lists\keysearch {M A} 1 FVs*
+# 					   ~>> {value {_ FVs}} FVs)
+# 			  Body): 
+# 		  {{M A} {Alias
+# 			  (case (lsc FV AllFVs: {var 0 FV})
+# 			    ([] none)
+# 			    (FVs {tuple 0 FVs})) 
+# 			  Args
+# 			  Body}}
+# 		  ))
+# 	## now we've done the freevar analysis, transform the bodies of the lexical
+# 	## functions properly and do lambda lifting.
+# 	Bindings
+# 	(lsc {{M A} {Alias FVs Args Body}} Bindings:
+# 	     (let* Body (erl_syntax_lib\map
+# 			 (fn (T)
+# 			     (case (erl_syntax\type T)
+# 			       (application
+# 				(case (erl_syntax\application_operator T .erl_syntax\revert)
+# 				  ## a lexical call, do transform
+# 				  ({atom _ {lexical L M A}}
+# 				   (let* CallArgs (erl_syntax\application_arguments
+# 						   T .erl_syntax\revert_forms)
+# 					 {CallAlias CallFVs _ _} (lists\keysearch {M A} 1 Bindings
+# 								      ~>> {value {_ R}} R)
+# 					 CallArgs (case CallFVs
+# 						    (none CallArgs)
+# 						    (_ [CallFVs|CallArgs]))
+# 					 :
+# 					 {call L CallAlias CallArgs}))
+# 				  ## an actual local call. Identity.
+# 				  (_ T)))
+# 			       ## identity for everything else
+# 			       (_ T)))
+# 			 Body
+# 			 .erl_syntax\revert):
+# 		   ## lambda lift
+# 		   (let* {atom Line DefName} Alias
+# 			 AllArgs (case FVs
+# 				   (none Args)
+# 				   (_ [FVs|Args]))
+# 			 Arity (length AllArgs)
+# 			 Ast {function Line DefName Arity
+# 				       [{clause Line AllArgs [] [Body]}]}
+# 			:
+# 			(new-def-for functions DefName false
+# 				     [{asts [{Arity Ast}]}]))
+# 		   {{M A} {lexical Alias FVs}}))
+# 	Env (scompile\lexical_shadow Env functions Bindings)
+# 	:
+# 	## TODO eval...
+# 	## TODO fancy lambda list...
+# 	## transform letf body
+# 	(transform `(do ;LetfBody) Env)))
 
 
 # #\defstruct
@@ -1335,20 +1197,17 @@
 
 
 #\toplevel
-## All toplevel forms do stuff by side-effecting. Ugly
-(defspecial toplevel (:all [Form|Forms]) Env:
-  (let* Section (transform Form Env) :
-	(lists\foreach
-	 (fn (Form)
-	     (let Section2 (transform Form (scompile\env)):
-		  (if (and (is-integer Section2) (== Section Section2))
-		        ok
-		      (is-integer Section2 )
-		        (error "Toplevel forms must belong to the same section.")
-		      (error "Toplevel forms should return an integer to indicate its section."))
-		  ))
-	 Forms)
-	Section))
+(defspecial toplevel (:all Forms) Env:
+  (let {(== Sections [S1|_]) Env}
+          (scompile\map_env0 (fn (Form Env) (transform Form Env))
+			     Forms Env)
+       :
+       (lsc S Sections:
+	    (if (not (is-integer S)) (error "Not toplevel form")
+		ok)
+	    (if (not (== S S1)) (error "Toplevel forms must be from same section")
+		ok))
+       {S1 Env}))
 
 
 # (def guards (GuardTests Env):

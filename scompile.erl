@@ -233,41 +233,39 @@ compile(Mod,Env,Options) when is_atom(Mod) ->
 
 %% __bof and  __eof are pseudo forms for a language to do its language specific things.
 compile_(Mod,Env) ->
-    set_env(Env),
     %% TODO modify streamer to parse binary.
     In=case file:read_file(atom_to_list(Mod)++".serl") of
 	{ok,Bin} -> binary_to_list(Bin);
 	_ -> error("Cannot find source: ~p\n",[Mod])
     end,
-    try 0=transform(?cast_paren([?cast_atom('__bof')]),env()),
-	eof=compile_loop(In,0),
+    try {0,Env2}=transform(?cast_paren([?cast_atom('__bof')]),Env),
+	{eof,Env3}=compile_loop(In,0,Env2),
 	%% at end of file, transforms the pseudo special form (eof)
 	%% what happens is language dependent.
 	%% maybe compile to erlang, maybe compile to javascript, whatever.
-	transform(?cast_paren([?cast_atom('__eof'),normal]),env())
+	transform(?cast_paren([?cast_atom('__eof'),normal]),Env3)
     after
-	transform(?cast_paren([?cast_atom('__eof'),'after']),env())
+	transform(?cast_paren([?cast_atom('__eof'),'after']),Env)
     end.
 
 %% the compiler loop transforms a sequence of toplevel forms found in a module.
 %% the toplevel forms in a module are divided into numbered sections.
 %% The numbered sections must follow each other in order.
 %% The toplevel forms are transformed purely for side-effects.
-compile_loop(In,Section) ->
-    %% get the environment, possibly changed by side-effect.
-    Env=env(), 
-    {In2,ReaderLine,Ast}=read_(In,Env), 
+compile_loop(In,Section,Env) ->
+    %io:format("cloop: ~p\n",[Env]),
+    {In2,ReaderLine,Ast}=read_(In,Env),
     case Ast of
-	eof -> eof;
+	eof -> {eof,Env};
 	_ -> 
 	    %% TODO should give better error when compile loop protocol is violated
-	    Section2=transform(Ast,Env),
+	    {Section2,Env2}=transform(Ast,Env),
 	     if not(is_integer(Section2)) -> error("Not toplevel form: ~p\n",[Section2]);
 		Section2<Section -> error("Toplevel form out of sequence: ~p\n",[Section2]);
 		true -> ok
 	     end,
 	     set_lineno(ReaderLine), %% after transform, set lineno to where the reader left off.
-	     compile_loop(In2,Section2)
+	     compile_loop(In2,Section2,Env2)
     end.
 
 new_process(Fun,Args) ->
@@ -374,7 +372,7 @@ do_transform(?ast_paren3(L,_M,[Car|Body])=Exp,Env) ->
 	error:{serl_error,Reason,Stack,Trace} ->
 	    erlang:error({serl_error,Reason,Stack,[Car|Trace]});
 	error:Reason ->
-	    erlang:error({serl_error,Reason,erlang:get_stacktrace(),[Car]})
+	    erlang:error({serl_error,Reason,erlang:get_stacktrace(),[Car,{env,Env}]})
     end.
 
 transform_each(Es,Env) ->
@@ -384,9 +382,9 @@ transform_each(Es,Env) ->
 map_env0(F,Es,Env) ->
     map_env0(F,Es,[],Env). 
 map_env0(_F,[],Acc,Env) ->
-    {Env,lists:reverse(Acc)};
+    {lists:reverse(Acc),Env};
 map_env0(F,[E|Es],Acc,Env) ->
-    {Env2,R}=F(E,Env),
+    {R,Env2}=F(E,Env),
     map_env0(F,Es,[R|Acc],Env2).
     
 
@@ -510,6 +508,7 @@ new_def(Env,NSType,Key,Def) ->
 %%     end.
 
 lexical_lookup(Env,NSType,Key) ->
+    %io:format("lex-lk: ~p\n",[Env]),
     case assoc(Env,[lexical,NSType]) of
 	{ok,Scopes} -> lookup_scopes(Key,Scopes);
 	_ -> false
