@@ -176,12 +176,13 @@
 
 
 (defspecial toplevel-with (:etc Bindings :etc Es) Env:
-  (let* Vals (transform_each Bindings Env)
-	Vals (lsc Val Vals:
-		  (case (scompile\eval Val Env)
+  (let* Asts (transform_each Bindings Env)
+	Vals (lsc Ast Asts:
+		  (case (scompile\eval_erl Ast [] Env ~>>
+					   {R _} R)
 		    ({K V}:(is-atom K): {K V})
 		    (K :(is-atom K): {K true})))
-	OldVals (env\assoc Env [meta vals])
+	OldVals (env\assoc Env [meta vals] ~>> {ok R} R)
 	## Merge the given Vals with other existing vals..
 	Vals (foldl
 	      (fn ({K V} Dict) (dict\store K V Dict))
@@ -1051,7 +1052,11 @@
 # ## augumented with the freevars the lexical function needs wrapped in a tuple
 # ## as the first argument.
 # ##
-# ## This is extremely hairy.
+# ## This is extremely hairy. There had got to be a way to factor this so i don't
+# ## have to do it all over again for letm...
+
+
+# #\letf
 # (defspecial letf (:etc Fs :etc LetfBody) Env:
 #   (let* NABs (lsc `(,Name (;Args) ;Body) Fs:
 # 		  {Name Args `(do ;Body)})
@@ -1132,7 +1137,7 @@
 # 			       (_ T)))
 # 			 Body
 # 			 .erl_syntax\revert):
-# 		   ## lambda lift
+# 		   ## lambda lift the function for the binding.
 # 		   (let* {atom Line DefName} Alias
 # 			 AllArgs (case FVs
 # 				   (none Args)
@@ -1141,15 +1146,19 @@
 # 			 Ast {function Line DefName Arity
 # 				       [{clause Line AllArgs [] [Body]}]}
 # 			:
-# 			(new-def-for functions DefName false
-# 				     [{asts [{Arity Ast}]}]))
+# 			 ## TODO definition for compile time
+# 			 ## this form is evaluated purely for side-effect.
+# 			 (new-def (meta-put Env meta false) functions
+# 				  DefName nothing
+# 				  [{asts [{Arity Ast}]}]))
+# 		   ## a letf binding
 # 		   {{M A} {lexical Alias FVs}}))
 # 	Env (scompile\lexical_shadow Env functions Bindings)
 # 	:
-# 	## TODO eval...
 # 	## TODO fancy lambda list...
-# 	## transform letf body
+# 	## finally, transform letf body
 # 	(transform `(do ;LetfBody) Env)))
+
 
 
 # #\defstruct
