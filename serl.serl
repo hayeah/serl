@@ -84,7 +84,7 @@
        ))
 
 (def split-tail (Lst):
-  (reverse Lst ~>> [Tail|RHeads] {(reverse RHeads) Tail}))
+  (reverse Lst .>> [Tail|RHeads] {(reverse RHeads) Tail}))
 
 (def atom-cat (Vs):
      ## perhaps name it catom?? 
@@ -95,7 +95,7 @@
 		    (is-list V) V):
 	    [Str|Acc]))
    [] Vs
-   .reverse ~string\join "-" .list-to-atom))
+   .reverse .string\join "-" .list-to-atom))
 
 
 #\with-genvar
@@ -163,7 +163,7 @@
 
 (def meta-get (Env K):
   (env\assoc Env [meta vals K]
-	     ~case
+	     .case
 	      ({ok R} R)
 	      (false false)))
 
@@ -178,11 +178,11 @@
 (defspecial toplevel-with (:etc Bindings :etc Es) Env:
   (let* Asts (transform_each Bindings Env)
 	Vals (lsc Ast Asts:
-		  (case (scompile\eval_erl Ast [] Env ~>>
+		  (case (scompile\eval_erl Ast [] Env .>>
 					   {R _} R)
 		    ({K V}:(is-atom K): {K V})
 		    (K :(is-atom K): {K true})))
-	OldVals (env\assoc Env [meta vals] ~>> {ok R} R)
+	OldVals (env\assoc Env [meta vals] .>> {ok R} R)
 	## Merge the given Vals with other existing vals..
 	Vals (foldl
 	      (fn ({K V} Dict) (dict\store K V Dict))
@@ -225,27 +225,27 @@
 
 (def output-forms (Env):
   ## do output for each NS types
-  (let* Types (lsc {Type _} (env\assoc Env [definitions] ~>>
+  (let* Types (lsc {Type _} (env\assoc Env [definitions] .>>
 				       {ok NSs} NSs):
 		   Type):
 	(foldl (fn (Type {Info Headers Bodies})
 		   ## transform (<Type>-output) for each namespace
 		   (transform `(,(atom (atom-cat: Type output)) ,Info) Env
-			      ~>> {I H B} {I [H|Headers] [B|Bodies]}))
+			      .>> {I H B} {I [H|Headers] [B|Bodies]}))
 	       {(env\new) [] []}
 	       Types
-	       ~>> {Info Headers Bodies}
-		(let* Info (env\assoc_put Info [imports]
-					  (env\assoc Env [imports]
-						     ~>> {ok Imports} Imports))
-		      Info (env\assoc_put Info [base]
-					  (env\assoc Env [base] ~>> {ok Base}
-						     (lsc {M _Defs} Base: M))):
-		  (lists\flatten [{attribute 0 module (curmod)}
-				  {attribute 0 serl true}
-				  {attribute 0 serl_info Info}
-				  Headers Bodies])
-		  ))))
+	       .>> {Info Headers Bodies}
+	       (let* Info (env\assoc_put Info [imports]
+					 (env\assoc Env [imports]
+						    .>> {ok Imports} Imports))
+		     Info (env\assoc_put Info [base]
+					 (env\assoc Env [base] .>> {ok Base}
+						    (lsc {M _Defs} Base: M))):
+		     (lists\flatten [{attribute 0 module (curmod)}
+				     {attribute 0 serl true}
+				     {attribute 0 serl_info Info}
+				     Headers Bodies])
+		     ))))
 
 
 
@@ -322,13 +322,13 @@
 # 	{Section (meta-put Env export Orig)})
 
 # (def get-imports (Env Type):
-#      (let Names (env\assoc Env [imports] ~>> {ok Imports}
+#      (let Names (env\assoc Env [imports] .>> {ok Imports}
 #                         (lsc {Mod _} Imports
-#                              Name (env\assoc [imports Mod Type] ~>> {ok }
+#                              Name (env\assoc [imports Mod Type] .>> {ok }
 #                                              )
 #                              : Mod)):
 #        Namess (lsc Mod Mods
-#                    Val (env\imports_of Mod Type all ~>> {Type Vals}):
+#                    Val (env\imports_of Mod Type all .>> {Type Vals}):
 #                    )
 #        ))
 
@@ -418,10 +418,10 @@
 	(lsc Def (get-defs-of Type)
 
 	     (== Ast {function Line Name Arity _})
-	       (lists\keysearch asts 1 Def ~>> {value {_ R}} R) 
+	       (lists\keysearch asts 1 Def .>> {value {_ R}} R) 
 	     :
 	     (let ToExport (lists\keysearch export 1 Def
-					    ~>> {value {_ R}} R)
+					    .>> {value {_ R}} R)
 		  Alias
 		    (case (lists\keysearch alias 1 Def)
 		      ({value {_ Alias}} Alias)
@@ -488,7 +488,7 @@
 				{clause Line [Args] [] [Body]}))}
 	EvalFn (fn (Args Env)
 		   ## the environment at the time of call is passed in.
-		   (scompile\eval_erl EvalAst [{EvalVarName Args}] Env ~>>
+		   (scompile\eval_erl EvalAst [{EvalVarName Args}] Env .>>
 				      {Result _} Result))
 	Asts
 	(lsc {Arity Args Body} Arity-Args-Body*:
@@ -566,7 +566,7 @@
 	MacName (atom-cat: "$mac" Name)
 	# take care to transform the body only once
 	MacBody (macro-parse-args Args Body VAll
-				  ~transform Env)
+				  .transform Env)
 	## the macro function interprets the erl-ast of the macro definition
 	## the macro function closes over the current  meta-environment.
 	## the macro is not visible to its own definition.
@@ -575,7 +575,7 @@
 	## ## I think this is sensible... 
 	EvalAst MacBody 
 	EvalFn (fn (InputAst Env) 
-		   (scompile\eval_erl EvalAst [{VAllName InputAst}] Env ~>>
+		   (scompile\eval_erl EvalAst [{VAllName InputAst}] Env .>>
 				      {Result _} Result))
 	DefAst {function Line MacName 1
 			 [{clause Line [{var Line VAllName}] [] [MacBody]}]}
@@ -602,7 +602,7 @@
 	#the actual name to define the macro function
 	MacName (atom-cat: "$special" Name) 
 	MacBody (macro-parse-args Args Body VAll
-				  ~transform Env)
+				  .transform Env)
 	EvalAst MacBody 
 	EvalFn (fn (Ast Env)
 		   (let {Result _} (scompile\eval_erl EvalAst [{VAllName Ast}
@@ -667,7 +667,7 @@
 	    ([] `(let ;AuxBindings : ,(macro-arg-end Body VK)))
 	    (_ `(let ;AuxBindings
 		  : ,(macro-arg-blocks-2 Blocks Body VK)))
-	    #~>> R (fmt "MAB -> ~p\n" [R]) R
+	    #.>> R (fmt "MAB -> ~p\n" [R]) R
 	     )))
 
 (def macro-arg-blocks-2 (Blocks Body VK):
@@ -681,7 +681,7 @@
 		 EtcBinding (case Args
 			      ([Tail] Tail)
 			      ## more than two args in :etc
-			      ([_ _|_] (reverse Args ~>> [Tail|RHeads]
+			      ([_ _|_] (reverse Args .>> [Tail|RHeads]
 					  `[;(reverse RHeads)|,Tail]))) 
 		 :
 		 `(case ,VK
@@ -1018,7 +1018,7 @@
   (case Fn
     (`{,M ,A} (remote-call M A Args Env)) 
     ((atom A L M)
-     (case (scompile\lookup Env functions {M A} ~case
+     (case (scompile\lookup Env functions {M A} .case
 			    ({ok R} R)
 			    (false false))
        ## unknown lexical
@@ -1078,12 +1078,12 @@
 # 			  (ordsets\new))
 # 		   FreeVars (erl_syntax\get_ann ABody
 # 				.lists\keysearch free 1
-# 				~>> {value {free Vs}} (ordsets\from_list Vs)) 
+# 				.>> {value {free Vs}} (ordsets\from_list Vs)) 
 # 		   Alias {atom L (gensym)}
 # 		   :
 # 		   {{{M A} FreeVars}
 # 		    {{M A} Alias Args Body}})
-# 	     ~lists\unzip)
+# 	     .lists\unzip)
 # 	## freevar analysis (2)
 # 	Bindings
 # 	(lsc {{M A} Alias Args Body} Bindings:
@@ -1098,11 +1098,11 @@
 # 				    (ordsets\union:
 # 				     AllFVs
 # 				     (lists\keysearch {M2 A2} 1 FVs*
-# 						      ~>> {value {_ FVs}} FVs)))
+# 						      .>> {value {_ FVs}} FVs)))
 # 				   (_ AllFVs)))
 # 				(_ AllFVs)))
 # 			  (lists\keysearch {M A} 1 FVs*
-# 					   ~>> {value {_ FVs}} FVs)
+# 					   .>> {value {_ FVs}} FVs)
 # 			  Body): 
 # 		  {{M A} {Alias
 # 			  (case (lsc FV AllFVs: {var 0 FV})
@@ -1125,7 +1125,7 @@
 # 				   (let* CallArgs (erl_syntax\application_arguments
 # 						   T .erl_syntax\revert_forms)
 # 					 {CallAlias CallFVs _ _} (lists\keysearch {M A} 1 Bindings
-# 								      ~>> {value {_ R}} R)
+# 								      .>> {value {_ R}} R)
 # 					 CallArgs (case CallFVs
 # 						    (none CallArgs)
 # 						    (_ [CallFVs|CallArgs]))

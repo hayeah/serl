@@ -191,14 +191,14 @@ paren(Line) ->
     %% run the instructions
     paren_renest(Insts,Line).
 
-%% (a . b ~ c . d) =>
-%% (b (a) ~ c . d)
-%% (c (b (a)) . d)
+%% (a ~ b . c ~ d) =>
+%% (b (a) . c ~ d)
+%% (c (b (a)) ~ d)
 %% (d (c (b (a))))
 
-%% (a b . c d ~ e f . g h) =>
-%% (c d (a b) ~ e f . g h)
-%% (e (c d (a b)) f . g h)
+%% (a b ~ c d . e f ~ g h) =>
+%% (c d (a b) . e f ~ g h)
+%% (e (c d (a b)) f ~ g h)
 %% (g h (e (c d (a b)) f))
 
 %% the instructions are: nest_tail, nest_head, close
@@ -212,7 +212,7 @@ paren_renest([Items1,Op,Items2|Insts],Line) ->
     case Op of
 	{nest_tail,NestLine} ->
 	    if Items2==[] ->
-		    error("No elements for nesting operator \".\"");
+		    error("No elements for nesting operator \"~\"");
 	       true -> ok
 	    end,
 	    paren_renest(
@@ -221,7 +221,7 @@ paren_renest([Items1,Op,Items2|Insts],Line) ->
 	      NestLine);
 	{nest_head,NestLine} ->
 	    if Items2==[] ->
-		    error("No elements for nesting operator \"~\"");
+		    error("No elements for nesting operator \".\"");
 	       true -> ok
 	    end,
 	    [H|T]=Items2,
@@ -237,8 +237,8 @@ paren_segments(Acc,Inst,Line) ->
     %% %% ":" is transparent to the nesting operators.
     case peek() of
 	$\) -> read(), reverse([{close},reverse(Acc)|Inst]);
-	$\. -> read(), paren_segments([],[{nest_tail,lineno()},reverse(Acc)|Inst],Line);
-	$\~ -> read(), paren_segments([],[{nest_head,lineno()},reverse(Acc)|Inst],Line);
+	$\~ -> read(), paren_segments([],[{nest_tail,lineno()},reverse(Acc)|Inst],Line);
+	$\. -> read(), paren_segments([],[{nest_head,lineno()},reverse(Acc)|Inst],Line);
        	$\: -> read(), paren_segments(paren_block([],Acc,Line),Inst,Line); 
 	eof -> error("Unexpected eof while reading paren.");
 	_ -> paren_segments([an_exp()|Acc],Inst,Line)
