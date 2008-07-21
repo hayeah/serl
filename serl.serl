@@ -21,6 +21,7 @@
 	reverse
 	member
 	foreach
+	flatten
 	)
 
 
@@ -67,11 +68,11 @@
     )
 
 (def pr (Term):
-  (fmt "~p\n" [Term])
+  (format "~p\n" [Term])
   Term)
 
 (def erlpp (Ast):
-     (fmt "~s\n" [(erl_pp\expr Ast)]))
+     (format "~s\n" [(erl_pp\expr Ast)]))
 
 (def upto-block (Es):
   (let {UpToFirstBlock Rest} (lists\splitwith
@@ -141,7 +142,7 @@
 # A guard G is a nonempty sequence of guard tests Gt_1, ..., Gt_k, and Rep(G) = [Rep(Gt_1), ..., Rep(Gt_k)].
 
 (def guard-seq (GSeq Env):
-     ##(fmt "Gseq: ~p\n" [GSeq])
+     ##(format "Gseq: ~p\n" [GSeq])
   (lsc (block Guard) GSeq:
        (lsc Test Guard:
 	    (let Ast (transform Test Env):
@@ -155,9 +156,9 @@
 
 # (def pr-f-defs (Fs):
 #   (case Fs
-#     ([] (fmt "done\n"))
+#     ([] (format "done\n"))
 #     ([F|Fs]
-#      (fmt "Size:~p\n" [(term-to-binary F .size)])
+#      (format "Size:~p\n" [(term-to-binary F .size)])
 #      (pr-f-defs Fs))
 #     ))
 
@@ -211,10 +212,10 @@
   (case Command
     (normal (let R (verl\emit (output-forms Env) Env
 			      (verl\set_opts (scompile\options))):
-		 ##(fmt "ETS: ~p\n" [(ets\info serl-info)])
-		 ##(fmt "memory: ~p\n" [(erlang\process_info (self) memory)])
-		 ##(fmt "Env size: ~p\n" [(term-to-binary (scompile\env) .size)])
-		 ##(fmt "Env: ~p\n" [Env])
+		 ##(format "ETS: ~p\n" [(ets\info serl-info)])
+		 ##(format "memory: ~p\n" [(erlang\process_info (self) memory)])
+		 ##(format "Env size: ~p\n" [(term-to-binary (scompile\env) .size)])
+		 ##(format "Env: ~p\n" [Env])
 		 R
 		 ))
     (after (cleanup))))
@@ -457,9 +458,9 @@
 (defspecial def ((== FName (atom Name)) `(;Args)
 		 :tag doc Doc
 		 :etc Body) Env:
-  (fmt "def: ~p\n" [Name])
-  ##(fmt "args: ~p\n" [Args])
-  ##(fmt "def arities:\n~p\n" [(fun-args FName Args Body)])
+  (format "def: ~p\n" [Name])
+  ##(format "args: ~p\n" [Args])
+  ##(format "def arities:\n~p\n" [(fun-args FName Args Body)])
   (let* Doc (case Doc (false "") (_ Doc))
 	#Mod (curmod)
 	FClauses (fun-args FName Args Body) ## [{Args Body} ...], where Body is a single expression.
@@ -556,7 +557,7 @@
 (defspecial defm ((atom Name) `(;Args)
 		       :tag doc Doc
 			:etc Body) Env:
-  (fmt "defm: ~p\n" [Name])
+  (format "defm: ~p\n" [Name])
   (let* Doc (case Doc (false "") (_ Doc))
 	Line (lineno)
 	#the variable for the whole macro expression
@@ -590,7 +591,7 @@
 (defspecial defspecial ((atom Name) `(;Args) VEnv
 		       :tag doc Doc
 			:etc Body) Env :
-  (fmt "defspecial: ~p\n" [Name])
+  (format "defspecial: ~p\n" [Name])
   (let* Doc (case Doc (false "") (_ Doc))
 	Line (lineno)
 	#the variable for the whole macro expression
@@ -628,7 +629,7 @@
   # V_n are the continuaton variables that store partial parsing results.
   # parse the required args or a leading :etc block (special case).
   # auxiliary args must come after the leading args.
-     #(fmt "MPA:\nBody: ~p\n" [Body])
+     #(format "MPA:\nBody: ~p\n" [Body])
   (case Args
     ([] `(let (paren [_Car]) ,VAll : ;Body))
     ([(block ['etc|EArgs])|Blocks]
@@ -667,7 +668,7 @@
 	    ([] `(let ;AuxBindings : ,(macro-arg-end Body VK)))
 	    (_ `(let ;AuxBindings
 		  : ,(macro-arg-blocks-2 Blocks Body VK)))
-	    #.>> R (fmt "MAB -> ~p\n" [R]) R
+	    #.>> R (format "MAB -> ~p\n" [R]) R
 	     )))
 
 (def macro-arg-blocks-2 (Blocks Body VK):
@@ -1014,7 +1015,7 @@
 
 ##\call
 (defspecial call (:all Fn Args) Env:
-  #(fmt "call: ~p\n" [Fn])
+  #(format "call: ~p\n" [Fn])
   (case Fn
     (`{,M ,A} (remote-call M A Args Env)) 
     ((atom A L M)

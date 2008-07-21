@@ -292,8 +292,11 @@ a_string(Acc,Segs) ->
     C=read(),
     case C of
 	$\\ -> a_string([string_escape()|Acc],Segs);
-	$# -> error("String interpolation not supported");
-
+	$# -> case peek() of
+		  %% ${ = 123
+		  123 -> error("String interpolation not supported"); 
+		  C2 -> a_string([C2|Acc],Segs)
+	      end; 
 	%% $# -> Seg=string_interpolate(),
 %% 	      NewSegs=string_cat_seg(Acc,Segs),
 %% 	      NewSegs2=string_cat_seg(Seg,NewSegs),

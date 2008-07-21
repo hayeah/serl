@@ -1,0 +1,104 @@
+
+(module fmt)
+
+(import scompile
+	error)
+(import lists
+	map 
+	foldl
+	foldr
+	reverse
+	member
+	foreach
+	flatten
+	unzip
+	)
+
+(defm fmt (:all Es):
+  (make-fmt (atom format 0 io) Es))
+
+(defm fmts (:all Es): 
+  (make-fmt (atom format 0 io_lib) Es))
+
+(def make-fmt (Fun Es): 
+  (let* Blocks (case Es
+		 ([(block _)|_] Es)
+		 (_ (let {Leads Blocks} (serl\upto-block Es): [(block ['fmt | Leads]) | Blocks])))
+	{FmtString Inputs} (format-args Blocks "" [])
+	:
+	`(,Fun ,(string FmtString) [;Inputs])))
+
+(def format-args (Blocks FmtFrags Inputs):
+  (case Blocks
+    ([] {(flatten FmtFrags) (flatten Inputs)})
+    ([(block ['n | Items])|Blocks] 
+     (format-args
+      [(block ['fmt | Items])|Blocks]
+      [FmtFrags|"~n"]
+      Inputs))
+    ([(block ['fmt | Items])|Blocks] 
+     (let {Fmt MoreInputs} (foldl (fn (Item {Fmt Inputs})
+				      (case Item
+					((string LiteralS) {[LiteralS|Fmt] Inputs})
+					# ... should optimize for literals
+					## just use fall through for now
+					# fall through should print any data type
+					(_ {["~w"|Fmt] [Item|Inputs]}))
+				      )
+				  {"" []}
+				  Items)
+	  :
+	  (format-args
+	   Blocks
+	   [FmtFrags|(string\join (reverse Fmt) " ")]
+	   [Inputs|(reverse MoreInputs)])))
+    ([(block [Command Input|Items])|Blocks]
+     # Input is the argument to command
+     # Items are wrapped in implicit fmt
+     (let* {Command Args} (case Command
+			    ((atom C) {C []})
+			    ((paren [C|Args]) {C Args}))
+	   {FmtFrag MoreInputs} (dispatch Command Args) # dispatch may introduce more inputs 
+	   Blocks (case Items # collect extra items in an implicit :fmt
+		    ([] Blocks)
+		    (_ [(block ['fmt Items])|Blocks]))
+	   :
+	   (format-args Blocks [FmtFrags|FmtFrag] [Inputs|[Input|MoreInputs]])
+	   ))))
+
+(def dispatch ((atom Command) Args):
+  (case Command
+    # ...
+    (_ (erlang-format-dispatch (hd (atom-to-list Command)) Args []))))
+
+#~F.P.PadC
+## commands: cfegswpWPBX#bx+ni
+(def erlang-format-dispatch (Command Args Inputs):
+  (case (length Args)
+    (4
+     (let {Args Tail} (lists\split 3 Args)
+	  :
+	  (case (member Command "wpb")
+	    (true ok)
+	    (_ (error "command ~c doesn't accept fourth argument ~n" [Command])))
+	  (erlang-format-dispatch (string\to_upper Command)
+				  Args
+				  [Tail])))
+    (N:(> 4 N):
+       (let {Args NewInputs} (foldl (fn (A {Args Inputs})
+					(case A
+					  ((integer N) {[(io_lib\format "~w" [N])|Args] Inputs})
+					  ('none {[""|Args] Inputs})
+					  (_ {["*"|Args] [A|Inputs]})))
+				    {[] []}
+				    Args)
+	    :
+	    (case (member Command "cfegswpWPBX#bx+ni")
+	      (true ok)
+	      (_ (error "unknown command ~c~n" [Command])))
+	    {["~" (string\join (reverse Args) ".") Command]
+	     (reverse (cat: NewInputs Inputs))})
+       )))
+
+
+
