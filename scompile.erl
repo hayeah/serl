@@ -335,22 +335,35 @@ transform1(Exp,Env) when is_tuple(Exp) ->
 transform(?ast_paren(_)=Exp,Env) ->
     case do_transform(Exp,Env) of
 	{special,Result} -> Result;
-	{macro,Result} ->
-	    %% environment might have changed. Ugly.
-	    transform(Result,Env)
+	{macro,Result} -> transform(Result,Env)
     end;
 transform(Exp,Env) when is_tuple(Exp) ->
-    {Tag,Line,Mod,_Data}=Exp,
-    transform(?ast_paren2(Line,[?ast_atom3(Line,Mod,Tag),Exp]),Env).
+    transform_ast(Exp,Env). 
+
+transform_ast(Exp,Env) when is_tuple(Exp) ->
+    {Tag,Line,Mod,Data}=Exp,
+    % if an ast comes from another module,
+    %% (1) An expander is defined (use it to override curmod)
+    %% (2) No expander is defined (use curmod's expander)
+    % if an ast comes from the compiling module
+    %% (1) An expander is defined (use it)
+    %% (2) No expander is defined (error)
+    CurMod=curmod(),
+    case lookup_expander(Env,{Mod,Tag}) of
+	{special,F} -> F(?cast_paren([?cast_atom(Tag),Exp]),Env);
+	%% guard
+	_ when CurMod /= Mod -> transform_ast({Tag,Line,curmod(),Data},Env); 
+	_ -> error("No special defined for ast: ~s~n",[Tag])
+    end.
 
 %% do one expansion
-%% not tail-recursive. I'd rather have a stack for backtrace.
+%% not tail-recursive, to keep the stack for backtrace.
 do_transform(?ast_paren3(L,_M,[Car|Body])=Exp,Env) ->
     %%io:format("~p: ~p\n",[L,Car]),
     %% line tracking
     %% lineno() always give the line of the closest open paren visible in source.
     if L > 0 -> set_lineno(L);
-       true -> ok %% non-source syntax objects have lineno==0.
+       true -> ok %% non-source syntax objects have lineno < 0.
     end, 
     try case lookup_expander(Env,Car) of
 	    {special,F} -> {special,F(Exp,Env)};
@@ -359,14 +372,9 @@ do_transform(?ast_paren3(L,_M,[Car|Body])=Exp,Env) ->
 			     _ when is_function(F) -> R=F(Exp,Env)
 			 end,
 			 {macro,R};
-	    _ -> case lookup_expander(Env,?cast_atom('call')) of
-		     %% make sure to raise error, otherwise go into loop.
-		     {Type,_F} when Type==special;Type==macro ->
-			 R=transform(?cast_paren([?cast_atom('call'),Car|Body]),
-				     Env),
-			 {Type,R};
-		     _ -> error("No expander for function call.")
-		 end
+	    %% transform paren as ast if no expander is defined for its head.
+	    %% asts always use special expander
+	    _ -> {special,transform_ast(Exp,Env)}
 	end
     catch
 	error:{serl_error,Reason,Stack,Trace} ->
@@ -374,6 +382,8 @@ do_transform(?ast_paren3(L,_M,[Car|Body])=Exp,Env) ->
 	error:Reason ->
 	    erlang:error({serl_error,Reason,erlang:get_stacktrace(),[Car,{env,Env}]})
     end.
+
+
 
 transform_each(Es,Env) ->
     [transform(E,Env) || E <- Es].

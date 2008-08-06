@@ -252,9 +252,18 @@
 
 #\asts
 
-# the payload of the ast is passed in.
+# the payload of the ast is passed in as is.
+
+# incidentally, it's possible to define () as nil...
+## but i don't know what I gain from this pun except nostalgia.
+(defspecial %a{__paren} (Es) Env: 
+  # 'call' had better be defined in serl.serl
+  # So be wary of changing its name.
+  (transform `(call ;(ast-data Es)) Env))
+
 (defspecial %a{__block} (Es) Env:
   (transform `(ls: ;(ast-data Es)) Env))
+
 
 (defspecial %a{__brace} (Es) Env: 
   (transform `(tuple: ;(ast-data Es)) Env))
@@ -458,6 +467,7 @@
 (defspecial def ((== FName (atom Name)) `(;Args)
 		 :tag doc Doc
 		 :etc Body) Env:
+  #(fmt "def:" Name :n)
   (format "def: ~p\n" [Name])
   ##(format "args: ~p\n" [Args])
   ##(format "def arities:\n~p\n" [(fun-args FName Args Body)])
