@@ -76,7 +76,7 @@
 	       ]},
 	      {macros,
 	       [{'ls',{{?MOD,'__mac_ls'}}},
-		{'>>',{{?MOD,'__mac_>>'}}},
+		%%{'>>',{{?MOD,'__mac_>>'}}},
 		{'fmt',{{fmt,'$mac-fmt'}}},
 		{'fmts',{{fmt,'$mac-fmts'}}},
 

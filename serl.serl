@@ -792,8 +792,23 @@
 	{block Line (cat Assignments (transform_each Body Env2))}))
 
 #\>>
-(defm >> (:etc Val Pattern Body):
-  `(let ,Pattern ,Val: ;Body))
+(defspecial >> (:all Val Es) Env: 
+  (case Es
+    ([Pattern]
+     # In this case, the pattern make exactly one binding.
+     # the value of that binding is returned.
+     #
+     # Establish a new scope, and see to it that it makes one binding only.
+     (let* {Env2 RPattern} (verl\pattern Pattern (scompile\lexical_shadow Env vars))
+	   Scope (scompile\lexical_current_scope Env2 vars)
+	   RVal (transform Val Env)
+	   L (ast-line Pattern):
+	   (case Scope
+	     # ugly... breaks if the lexical binding ever changes its internal representation.
+	     ([{_ Binding}] {block L [{match L RPattern RVal} {var L Binding}]})
+	     (_ (error ">> makes more than one binding w/o a body")))))
+    ([Pattern|Body]
+     (transform `(let ,Pattern ,Val: ;Body) Env))))
 
 
 # If E is case E_0 of Cc_1 ; ... ; Cc_k end, where E_0 is an expression and each Cc_i is a case clause then Rep(E) = {'case',LINE,Rep(E_0),[Rep(Cc_1), ..., Rep(Cc_k)]}.

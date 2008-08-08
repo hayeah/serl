@@ -17,7 +17,8 @@
 	 transform1/2, transform/2, transform_each/2, 
 	 macroexpand/2,
 	 map_env0/3,
-	 
+
+	 lexical_current_scope/2,
 	 lexical_lookup/3,lexical_shadow/2,lexical_shadow/3,lexical_extend/3,
 	 get_def/3,new_def/4,
 	 lookup/3,lookup_meta_fun/3,lookup_expander/2,
@@ -358,7 +359,7 @@ transform_ast(Exp,Env) when is_tuple(Exp) ->
 
 %% do one expansion
 %% not tail-recursive, to keep the stack for backtrace.
-do_transform(?ast_paren3(L,_M,[Car|Body])=Exp,Env) ->
+do_transform(?ast_paren3(L,_M,[Car|_Body])=Exp,Env) ->
     %%io:format("~p: ~p\n",[L,Car]),
     %% line tracking
     %% lineno() always give the line of the closest open paren visible in source.
@@ -516,6 +517,12 @@ new_def(Env,NSType,Key,Def) ->
 %%     if T -> NewEnv;
 %%        true -> error("Conflicting bindings. Extending with \n~p\n\tto:\n~p\n",[NewBs,Env])
 %%     end.
+
+lexical_current_scope(Env,NSType) ->
+    case assoc(Env,[lexical,NSType]) of
+	{ok,[S|_Scopes]} -> S;
+	_ -> []
+    end.
 
 lexical_lookup(Env,NSType,Key) ->
     %io:format("lex-lk: ~p\n",[Env]),
