@@ -15,10 +15,10 @@
 	)
 
 (defm fmt (:all Es):
-  (make-fmt (atom format 0 io) Es))
+  (make-fmt 'io\format Es))
 
 (defm fmts (:all Es): 
-  (make-fmt (atom format 0 io_lib) Es))
+  (make-fmt 'io_lib\format Es))
 
 (def make-fmt (Fun Es): 
   (let* Blocks (case Es

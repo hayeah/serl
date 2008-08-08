@@ -112,14 +112,19 @@
 
 
 #\clause
-(def clause (Ps GSeq Es Env):
-  (let* L (let [P|_] Ps: (ast-line P))
-	{Env Ps} (verl\patterns Ps (scompile\lexical_shadow Env vars []))
-	:
-	{clause L Ps 
-		(guard-seq GSeq Env)
-		(transform_each Es Env)}
-       ))
+
+(def clause:
+    ((Ps GSeq Es Env):
+     (let L (case Ps
+	      ([] 0)
+	      ([P|_] (ast-line P))):
+	  (clause Ps GSeq Es Env L)))
+    ((Ps GSeq Es Env L):
+     (let {Env Ps} (verl\patterns Ps (scompile\lexical_shadow Env vars []))
+	  :
+	  {clause L Ps 
+		  (guard-seq GSeq Env)
+		  (transform_each Es Env)})))
 
 (def guarded-clause (Ps GuardedBody Env):
   ## a guarded body is a sequence of expression possibly preceded by test blocks.
@@ -464,49 +469,70 @@
 
 
 #\def
-(defspecial def ((== FName (atom Name)) `(;Args)
-		 :tag doc Doc
-		 :etc Body) Env:
-  #(fmt "def:" Name :n)
-  (format "def: ~p\n" [Name])
-  ##(format "args: ~p\n" [Args])
-  ##(format "def arities:\n~p\n" [(fun-args FName Args Body)])
-  (let* Doc (case Doc (false "") (_ Doc))
-	#Mod (curmod)
-	FClauses (fun-args FName Args Body) ## [{Args Body} ...], where Body is a single expression.
-	{EvalFn Asts} (make-def FName FClauses Env)
+
+# # If E is case E_0 of Cc_1 ; ... ; Cc_k end, where E_0 is an expression and each Cc_i is a case clause then Rep(E) = {'case',LINE,Rep(E_0),[Rep(Cc_1), ..., Rep(Cc_k)]}.
+
+(defspecial def (:all (== FName (atom Name)) [E|Es]) Env: 
+  # (def foo (Arg1 Arg2 ...): body ...:doc "foo")
+  ## single head def
+  # (def foo: ((Arg1) ...) ((Arg2) ...) ... :doc "foo")
+  ## multi-head def
+  (fmt "def:" Name :n)
+  (let* {EvalFn Asts} (case E
+			(`(;Args)
+			 (let [(block Body)] Es:
+			      (make-def-single FName Args Body Env)))
+			((block FnHeads)
+			 (make-def-multi FName FnHeads Env)
+			 ))
 	Info [{asts Asts}
-	      {doc Doc}]
-	: 
+	      {doc ""}]
+	:
 	{10 (new-def Env functions Name EvalFn Info)}))
 
-# If E is case E_0 of Cc_1 ; ... ; Cc_k end, where E_0 is an expression and each Cc_i is a case clause then Rep(E) = {'case',LINE,Rep(E_0),[Rep(Cc_1), ..., Rep(Cc_k)]}.
-
-(def make-def (FName FClauses Env):
-  ## take care to do transform only once.
-  ## FClauses==[{Args Body} ...], where Body is a single expression.
+(def make-def-single (FName Args Body Env):
+  ## single head
   (let* (atom Name Line _) FName
-	EvalVarName (gensym)
-	Arity-Args-Body*
-	(lsc {Args Body} FClauses:
-	     (let* {Env Args} (verl\patterns Args Env)
-		   Body (transform Body Env):
-		   {(length Args) Args Body}))
-	EvalAst {case Line {var Line EvalVarName}
-		      (lsc {_Arity Args Body} Arity-Args-Body*:
-			   (let Args (erl_syntax\list Args none
-						      .erl_syntax\revert):
-				{clause Line [Args] [] [Body]}))}
-	EvalFn (fn (Args Env)
-		   ## the environment at the time of call is passed in.
-		   (scompile\eval_erl EvalAst [{EvalVarName Args}] Env .>>
-				      {Result _} Result))
-	Asts
-	(lsc {Arity Args Body} Arity-Args-Body*:
-	     {function Line Name Arity
-		       [{clause Line Args [] [Body]}]}) 
-	: 
+	Args-Body* (fun-args FName Args Body) # [{Args Body} ...], where Body is a single expression
+	Clauses (lsc {Args Body} Args-Body*: (clause Args [] [Body] Env)) 
+	EvalFn (make-def-eval-fn Clauses Line)
+	Asts (lsc C Clauses:
+		  (let* {clause L Args _G _B} C
+			Arity (length Args):
+			{function L Name Arity [C]}
+			))
+	:
+	{{EvalFn} Asts}
+	))
+
+(def make-def-multi (FName FnHeads Env):
+  (let* (atom Name Line _) FName
+	Clauses (lsc `((;Args) ;GuardedBody) FnHeads: (guarded-clause Args GuardedBody Env)) 
+	EvalFn (make-def-eval-fn Clauses Line)
+	# sort heads by arities
+	Arity-Clauses* (foldl (fn (C D)
+				  (let* {clause _L Args _G _B} C
+					Arity (length Args):
+					(orddict\append Arity C D)
+					))
+			      (orddict\new)
+			      Clauses
+			      .orddict\to_list)
+	Asts (lsc {Arity Clauses} Arity-Clauses*:
+		  {function Line Name Arity Clauses}): 
 	{{EvalFn} Asts}))
+
+(def make-def-eval-fn (FnClauses L):
+  (let* CaseVar (gensym) 
+	EvalAst {case L {var L CaseVar}
+		      (lsc {clause L Args Guards Body} FnClauses:
+			   # for case expression, wrap function arguments in a list
+			   (let Args (erl_syntax\list Args none .erl_syntax\revert):
+				{clause L [Args] Guards Body}))}
+	:
+	(fn (Args Env)
+	    (scompile\eval_erl EvalAst [{CaseVar Args}] Env .>>
+			       {Result _} Result))))
 
 
 # returns list of [{Args Body} ...]
