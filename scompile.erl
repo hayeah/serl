@@ -23,6 +23,7 @@
 	 get_def/3,new_def/4,
 	 lookup/3,lookup_meta_fun/3,lookup_expander/2,
 	 toplevel_lookup/3,external_lookup/3,
+	 lookup_definitions/3,
 	 lookup_imports/3,
 	 warn/1,warn/2,error/1,error/2
 	 ]).

@@ -2,6 +2,12 @@ modulation of atom is ignored: <mod>\bar => bar (for the base case when atom trn
 -but the module information of an atom is available for macro/special
 --so special forms like "call" and "let" can be defined to be module aware.
 
+-modulated atom with reader macro
+%a(%a{__strange_mod_name}){__srange_atom_name}
+
+-specials prefixed with __ are special-specials that violate MP.
+
+
 ==================================================
 = File Structure
 

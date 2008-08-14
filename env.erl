@@ -24,7 +24,7 @@
 	 
 	 assoc/2,
 	 assoc_put/3,assoc_cons/3,assoc_append/3,
-	 module_meta_info/2,module_meta_info/1
+	 serl_info/2,serl_info/1
 	]).
 
 %% empty environment
@@ -59,7 +59,7 @@ import(Env,Mod,NSType,Keys) ->
 
 
 exports_of(Mod) ->
-    case module_meta_info(Mod,[exports]) of
+    case serl_info(Mod,[exports]) of
 	%% treat as serl
 	{ok,NSs} -> {ok,NSs};
 	%% treat as compiled and loaded normal erlang modules
@@ -80,7 +80,7 @@ exports_of(Mod,NSType) ->
     end.
 
 exports_of(Mod,NSType,Keys) ->
-    case module_meta_info(Mod,[exports,NSType]) of
+    case serl_info(Mod,[exports,NSType]) of
 	{ok,NS} ->
 	    case Keys of
 		all -> {ok,{NSType,NS}};
@@ -112,7 +112,7 @@ exports_of(Mod,NSType,Keys) ->
     end.
 
 imports_of(Mod) ->
-    module_meta_info(Mod,[imports]).
+    serl_info(Mod,[imports]).
 
 
 
@@ -123,13 +123,13 @@ imports_of(Mod,NSType,Keys) ->
     end.
 
 definitions_of(Mod) ->
-    case module_meta_info(Mod,[definitions]) of
+    case serl_info(Mod,[definitions]) of
 	false -> false; 
 	Val -> Val
     end.
 
 base_of(Mod) ->
-    case module_meta_info(Mod,[base]) of
+    case serl_info(Mod,[base]) of
 	{ok,Mods} -> {ok,[{M,case exports_of(M) of
 				 {ok,Defs} -> Defs;
 				 _ -> error("None existing base module.")
@@ -195,33 +195,25 @@ assoc_append(AList,Keys,List) ->
     end.
 
 
-meta_module_of(Mod) ->
-    case Mod of
-	%% special cases for bootstrapping
-	verl -> verl__meta;
-	%serl -> serl__meta;
-	_ -> Mod
-    end.
-
-
-module_meta_info(Mod,Fs) when is_list(Fs) ->
+serl_info(Mod,Fs) when is_list(Fs) ->
     %% THINK: what happens of MOD is not a serl module?
     %% Or when it is not loaded?
-    %% Or when the module does not exist?
-    Mod2=meta_module_of(Mod),
-    case code:ensure_loaded(Mod2) of
-	{module,_} -> assoc(Mod2:module_info(attributes),[serl_info|Fs]);
+    %% Or when the module does not exist? 
+    case serl_info(Mod) of
+	{ok,Env} -> assoc(Env,Fs);
 	_ -> false
     end;
+serl_info(Mod,F) when is_atom(F) ->
+    serl_info(Mod,[F]).
 
-module_meta_info(Mod,F) when is_atom(F) ->
-    module_meta_info(Mod,[F]).
 
-
-module_meta_info(Mod)  ->
-    Mod2=meta_module_of(Mod),
-    case code:ensure_loaded(Mod2) of
-	{module,_} -> assoc(Mod2:module_info(attributes),[serl_info]);
+serl_info(Mod)  -> 
+    case code:ensure_loaded(Mod) of
+	{module,_} ->
+	    case assoc(Mod:module_info(attributes),[serl]) of
+		{ok,_} -> {ok,Mod:'serl-info'()};
+		_ -> false
+	    end;
 	_ -> false
     end.
 

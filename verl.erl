@@ -18,6 +18,219 @@
 
 -compile(export_all).
 
+%% fake to be serl module
+-serl(true). 
+'serl-info'() ->
+    [{base,[]},
+     {exports,[{specials,
+	       [%% pseudo forms
+		{'__bof',{{?MODULE,'__sp_bof'}}},
+		{'__eof',{{?MODULE,'__sp_eof'}}},
+		%% ast specials 
+		{'__float',{{?MODULE,'__sp_float'}}}, 
+		{'__integer',{{?MODULE,'__sp_integer'}}}, 
+		{'__string',{{?MODULE,'__sp_string'}}}, 
+		{'__atom',{{?MODULE,'__sp_atom'}}}, 
+		{'__var',{{?MODULE,'__sp_var'}}},
+		{'__block',{{?MODULE,'__sp_block'}}},
+		{'__brace',{{?MODULE,'__sp_brace'}}}, 
+		{'__call',{{?MODULE,'__sp_call'}}},
+		{'__quote',{{?MODULE,'__sp_quote'}}},
+		{'__bquote',{{?MODULE,'__sp_bquote'}}},
+
+		%% extensions
+		{'defm',{{?MODULE,'__sp_defm'}}},
+		{'eval-binding',{{?MODULE,'__sp_eval-binding'}}},
+		{'let',{{?MODULE,'__sp_let'}}}, 
+
+		%% 4.1
+		{'module',{{?MODULE,'__sp_module'}}},
+		{'export',{{?MODULE,'__sp_export'}}},
+		{'import',{{?MODULE,'__sp_import'}}},
+		{'record',{{?MODULE,'__sp_record'}}},
+		{'def',{{?MODULE,'__sp_def'}}}, 
+
+		%%       {'=',{{?MODULE,'__sp_='}}},
+
+		{'tuple',{{?MODULE,'__sp_tuple'}}}, 
+		{'cons',{{?MODULE,'__sp_cons'}}},
+		{'nil',{{?MODULE,'__sp_nil'}}}, 
+
+		{'op',{{?MODULE,'__sp_op'}}},
+
+		{'+',{{?MODULE,'__sp_+'}}},
+		{'-',{{?MODULE,'__sp_-'}}},
+		{'*',{{?MODULE,'__sp_*'}}},
+		{'/',{{?MODULE,'__sp_/'}}},	 
+		{'rem',{{?MODULE,'__sp_rem'}}},
+
+		{'++',{{?MODULE,'__sp_++'}}},
+
+		{'==',{{?MODULE,'__sp_=='}}},
+		{'<',{{?MODULE,'__sp_<'}}},
+		{'>',{{?MODULE,'__sp_>'}}},
+		{'>=',{{?MODULE,'__sp_>='}}},
+		{'=<',{{?MODULE,'__sp_=<'}}},
+
+
+		{'and',{{?MODULE,'__sp_and'}}},
+		{'or',{{?MODULE,'__sp_or'}}},
+		{'andalso',{{?MODULE,'__sp_andalso'}}},
+		{'orelse',{{?MODULE,'__sp_orelse'}}},
+		{'not',{{?MODULE,'__sp_not'}}},
+
+		%%       {'rec',{{?MODULE,'__sp_rec'}}},
+		%%       {'rec-index',{{?MODULE,'__sp_rec-index'}}},
+		%%       {'rec-val',{{?MODULE,'__sp_rec-val'}}},
+
+		{'catch',{{?MODULE,'__sp_catch'}}},
+
+		{'if',{{?MODULE,'__sp_if'}}},
+		{'case',{{?MODULE,'__sp_case'}}},
+		{'try',{{?MODULE,'__sp_try'}}},
+
+		{'fn',{{?MODULE,'__sp_fn'}}},
+		{'do',{{?MODULE,'__sp_begin'}}},
+		{'begin',{{?MODULE,'__sp_begin'}}}
+
+	       ]},
+	      {macros,
+	       [{'ls',{{?MODULE,'__mac_ls'}}},
+		%%{'>>',{{?MODULE,'__mac_>>'}}},
+		{'fmt',{{fmt,'$mac-fmt'}}},
+		{'fmts',{{fmt,'$mac-fmts'}}},
+
+		{'float',{{?MODULE,'__mac_float'}}},
+		{'integer',{{?MODULE,'__mac_integer'}}},
+		{'string',{{?MODULE,'__mac_string'}}},
+		{'atom',{{?MODULE,'__mac_atom'}}},
+		{'var',{{?MODULE,'__mac_var'}}},
+		{'block',{{?MODULE,'__mac_block'}}},
+		{'paren',{{?MODULE,'__mac_paren'}}},
+		{'brace',{{?MODULE,'__mac_brace'}}},
+
+		{'floats',{{?MODULE,'__mac_floats'}}},
+		{'integers',{{?MODULE,'__mac_integers'}}},
+		{'strings',{{?MODULE,'__mac_strings'}}},
+		{'atoms',{{?MODULE,'__mac_atoms'}}},
+		{'vars',{{?MODULE,'__mac_vars'}}},
+		{'blocks',{{?MODULE,'__mac_blocks'}}},
+		{'parens',{{?MODULE,'__mac_parens'}}},
+		{'braces',{{?MODULE,'__mac_braces'}}}
+
+	       ]},
+	      {rmacros,
+	       [{'a',{{?MODULE,'__rm_a'}}},
+		{'c',{{?MODULE,'__rm_c'}}},
+		{'s',{{?MODULE,'__rm_s'}}}
+	       ]},
+	      {functions,
+	       [{'cat',{{lists,append}}},
+		{'format',{{io,format}}},
+		{'send',{{erlang,'send'}}},
+		
+		%%bifs
+		{'abs',{{erlang,'abs'}}},
+		{'adler32',{{erlang,'adler32'}}},
+		{'adler32-combine',{{erlang,'adler32_combine'}}},
+		{'apply',{{erlang,'apply'}}},
+		{'atom-to-list',{{erlang,'atom_to_list'}}},
+		{'binary-to-list',{{erlang,'binary_to_list'}}},
+		{'bitstring-to-list',{{erlang,'bitstring_to_list'}}},
+		{'binary-to-term',{{erlang,'binary_to_term'}}},
+		{'bit-size',{{erlang,'bit_size'}}},
+		{'byte-size',{{erlang,'byte_size'}}},
+		{'check-process-code',{{erlang,'check_process_code'}}},
+		{'concat-binary',{{erlang,'concat_binary'}}},
+		{'crc32',{{erlang,'crc32'}}},
+		{'crc32-combine',{{erlang,'crc32_combine'}}},
+		{'date',{{erlang,'date'}}},
+		{'delete-module',{{erlang,'delete_module'}}},
+		{'disconnect-node',{{erlang,'disconnect_node'}}},
+		{'element',{{erlang,'element'}}},
+		{'erase',{{erlang,'erase'}}},
+		{'exit',{{erlang,'exit'}}},
+		{'float',{{erlang,'float'}}},
+		{'float-to-list',{{erlang,'float_to_list'}}},
+		{'garbage-collect',{{erlang,'garbage_collect'}}},
+		{'get',{{erlang,'get'}}},
+		{'get-keys',{{erlang,'get_keys'}}},
+		{'group-leader',{{erlang,'group_leader'}}},
+		{'halt',{{erlang,'halt'}}},
+		{'hd',{{erlang,'hd'}}},
+		{'integer-to-list',{{erlang,'integer_to_list'}}},
+		{'iolist-to-binary',{{erlang,'iolist_to_binary'}}},
+		{'iolist-size',{{erlang,'iolist_size'}}},
+		{'is-alive',{{erlang,'is_alive'}}},
+		{'is-atom',{{erlang,'is_atom'}}},
+		{'is-binary',{{erlang,'is_binary'}}},
+		{'is-bitstring',{{erlang,'is_bitstring'}}},
+		{'is-boolean',{{erlang,'is_boolean'}}},
+		{'is-float',{{erlang,'is_float'}}},
+		{'is-function',{{erlang,'is_function'}}},
+		{'is-integer',{{erlang,'is_integer'}}},
+		{'is-list',{{erlang,'is_list'}}},
+		{'is-number',{{erlang,'is_number'}}},
+		{'is-pid',{{erlang,'is_pid'}}},
+		{'is-port',{{erlang,'is_port'}}},
+		{'is-process-alive',{{erlang,'is_process_alive'}}},
+		{'is-record',{{erlang,'is_record'}}},
+		{'is-reference',{{erlang,'is_reference'}}},
+		{'is-tuple',{{erlang,'is_tuple'}}},
+		{'length',{{erlang,'length'}}},
+		{'link',{{erlang,'link'}}},
+		{'list-to-atom',{{erlang,'list_to_atom'}}},
+		{'list-to-bitstring',{{erlang,'list_to_bitstring'}}},
+		{'list-to-existing-atom',{{erlang,'list_to_existing_atom'}}},
+		{'list-to-float',{{erlang,'list_to_float'}}},
+		{'list-to-integer',{{erlang,'list_to_integer'}}},
+		{'list-to-pid',{{erlang,'list_to_pid'}}},
+		{'list-to-tuple',{{erlang,'list_to_tuple'}}},
+		{'load-module',{{erlang,'load_module'}}},
+		{'make-ref',{{erlang,'make_ref'}}},
+		{'module-loaded',{{erlang,'module_loaded'}}},
+		{'monitor-node',{{erlang,'monitor_node'}}},
+		{'node',{{erlang,'node'}}},
+		{'nodes',{{erlang,'nodes'}}},
+		{'now',{{erlang,'now'}}},
+		{'open-port',{{erlang,'open_port'}}},
+		{'pid-to-list',{{erlang,'pid_to_list'}}},
+		{'port-close',{{erlang,'port_close'}}},
+		{'port-command',{{erlang,'port_command'}}},
+		{'port-connect',{{erlang,'port_connect'}}},
+		{'port-control',{{erlang,'port_control'}}},
+		{'pre-loaded',{{erlang,'pre_loaded'}}},
+		{'process-flag',{{erlang,'process_flag'}}},
+		{'process-info',{{erlang,'process_info'}}},
+		{'processes',{{erlang,'processes'}}},
+		{'purge-module',{{erlang,'purge_module'}}},
+		{'put',{{erlang,'put'}}},
+		{'register',{{erlang,'register'}}},
+		{'registered',{{erlang,'registered'}}},
+		{'round',{{erlang,'round'}}},
+		{'self',{{erlang,'self'}}},
+		{'setelement',{{erlang,'setelement'}}},
+		{'size',{{erlang,'size'}}},
+		{'spawn',{{erlang,'spawn'}}},
+		{'spawn-link',{{erlang,'spawn_link'}}},
+		{'spawn-monitor',{{erlang,'spawn_monitor'}}},
+		{'spawn-opt',{{erlang,'spawn_opt'}}},
+		{'split-binary',{{erlang,'split_binary'}}},
+		{'statistics',{{erlang,'statistics'}}},
+		{'term-to-binary',{{erlang,'term_to_binary'}}},
+		{'throw',{{erlang,'throw'}}},
+		{'time',{{erlang,'time'}}},
+		{'tl',{{erlang,'tl'}}},
+		{'trunc',{{erlang,'trunc'}}},
+		{'tuple-size',{{erlang,'tuple_size'}}},
+		{'tuple-to-list',{{erlang,'tuple_to_list'}}},
+		{'unlink',{{erlang,'unlink'}}},
+		{'unregister',{{erlang,'unregister'}}},
+		{'whereis',{{erlang,'whereis'}}}
+		
+	       ]}
+	      ]}].
+
 %% -define(defsp(Name,Args),Name(Args,Env)).
 
 -define(defsp(Name,Args),Name(?ast_paren3(_,_Mod,[_|Args]),Env)).
@@ -321,7 +534,7 @@ gen_pat_glist(Type,[Es,L,M],Env) ->
 
 clause(Ps,G,Es,Line,Env) ->
     %% A <guard> is a list of <guard-test>
-    {Env2,RPs}=patterns(Ps,scompile:lexical_shadow(Env,vars,[])),
+    {Env2,RPs}=patterns(Ps,scompile:lexical_shadow(Env,vars,[])), 
     REs=transform_each(Es,Env2), 
     GuardSequence=
 	case G of
@@ -380,7 +593,7 @@ guard(E,Env) ->
     ErlAst=transform(E,Env),
     Test=erl_lint:is_guard_test(ErlAst),
     %Literal=erl_syntax:is_literal(ErlAst),
-    %io:format("Guard: ~p\nTest: ~p\n",[E,Test]),
+    %io:format("Guard: ~p\nRGuard: ~p\nTest: ~p\n",[E,ErlAst,Test]),
     if Test -> ErlAst;
        true -> error("Invalid guard: ~p",[E])
     end.

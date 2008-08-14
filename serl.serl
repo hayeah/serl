@@ -233,25 +233,58 @@
   ## do output for each NS types
   (let* Types (lsc {Type _} (env\assoc Env [definitions] .>>
 				       {ok NSs} NSs):
-		   Type):
+		   Type)
+	{Info Headers Bodies}
 	(foldl (fn (Type {Info Headers Bodies})
 		   ## transform (<Type>-output) for each namespace
 		   (transform `(,(atom (atom-cat: Type output)) ,Info) Env
 			      .>> {I H B} {I [H|Headers] [B|Bodies]}))
 	       {(env\new) [] []}
-	       Types
-	       .>> {Info Headers Bodies}
-	       (let* Info (env\assoc_put Info [imports]
-					 (env\assoc Env [imports]
-						    .>> {ok Imports} Imports))
-		     Info (env\assoc_put Info [base]
-					 (env\assoc Env [base] .>> {ok Base}
-						    (lsc {M _Defs} Base: M))):
-		     (lists\flatten [{attribute 0 module (curmod)}
-				     {attribute 0 serl true}
-				     {attribute 0 serl_info Info}
-				     Headers Bodies])
-		     ))))
+	       Types)
+	Info (env\assoc_put Info [imports]
+			    (env\assoc Env [imports]
+				       .>> {ok Imports} Imports))
+	Info (env\assoc_put Info [base]
+			    (env\assoc Env [base] .>> {ok Base}
+				       (lsc {M _Defs} Base: M)))
+	# define the magic function(s) to access serl module info
+	{Headers Bodies} (define-module-named-envs Info Headers Bodies)
+	:
+	(lists\flatten [{attribute 0 module (curmod)}
+			{attribute 0 serl true}
+			{attribute 0 serl_module true}
+			{attribute 0 serl_info Info}
+			Headers
+			Bodies])))
+
+(def define-module-named-envs (Env Headers Bodies):
+  # needs to check if
+  #(a) module defines a special form to produce info-functions
+  #(b) none of names for the defined info-functions should conflict with other names.
+  (let* EnvName-Env* (case (scompile\lookup_definitions Env specials %a{__module_info_functions})
+		       ({ok _} (transform `(%a{__module_info_functions}) Env))
+		       (_ []))
+	DefaultEnvName serl-info
+	DefaultEnv Env
+	EnvNames (lsc {Name _Env} EnvName-Env*: Name)
+	: 
+	## sanity check 1: non of the named environment has the same name as the default environment
+	(case (member DefaultEnvName EnvNames)
+	  (true (error "cannot define an environment that's named ~p\n" [DefaultEnvName]))
+	  (false ok))
+	
+	(lsc {EnvName Env} [{DefaultEnvName DefaultEnv}|EnvName-Env*]:
+	     ## maybe define an arity-1 function that look into the that namespace
+	     ## wow, this is like, yuk!
+	     {{attribute 0 export [{EnvName 0}]}
+	      {function 0 EnvName 0
+			[{clause 0 [] [] [(erl_syntax\abstract Env .erl_syntax\revert)]}]}}
+	     .lists\unzip .>> {Exports Defs}
+	      #(fmt "Headers: " :p Exports :n "Defs:" :p Defs :n)
+	      #(io\format "Headers: ~s~nDefs: ~s~n" [Exports Defs])
+	      #{Headers Bodies}
+	      {(cat Exports Headers) (cat Defs Bodies)}
+	      )))
 
 
 
