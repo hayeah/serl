@@ -30,7 +30,9 @@
     ?cast_integer(C).
 %% atom
 '__rm_a'([],Str) ->
-    ?cast_atom(list_to_atom(Str)).
+    ?cast_atom(list_to_atom(Str));
+'__rm_a'([?ast_atom(Mod)],Str) ->
+    ?ast_atom3(lineno(),Mod,list_to_atom(Str)).
 %% string literal
 '__rm_s'([],Str) ->
     ?cast_string(Str).
