@@ -4,7 +4,7 @@
 (import scompile
 	error)
 (import lists
-	map 
+	map
 	foldl
 	foldr
 	reverse
@@ -17,10 +17,10 @@
 (defm fmt (:all Es):
   (make-fmt 'io\format Es))
 
-(defm fmts (:all Es): 
+(defm fmts (:all Es):
   (make-fmt 'io_lib\format Es))
 
-(def make-fmt (Fun Es): 
+(def make-fmt (Fun Es):
   (let* Blocks (case Es
 		 ([(block _)|_] Es)
 		 (_ (let {Leads Blocks} (serl\upto-block Es): [(block ['fmt | Leads]) | Blocks])))
@@ -31,12 +31,12 @@
 (def format-args (Blocks FmtFrags Inputs):
   (case Blocks
     ([] {(flatten FmtFrags) (flatten Inputs)})
-    ([(block ['n | Items])|Blocks] 
+    ([(block ['n | Items])|Blocks]
      (format-args
       [(block ['fmt | Items])|Blocks]
       [FmtFrags|"~n"]
       Inputs))
-    ([(block ['fmt | Items])|Blocks] 
+    ([(block ['fmt | Items])|Blocks]
      (let {Fmt MoreInputs} (foldl (fn (Item {Fmt Inputs})
 				      (case Item
 					((string LiteralS) {[LiteralS|Fmt] Inputs})
@@ -56,9 +56,10 @@
      # Input is the argument to command
      # Items are wrapped in implicit fmt
      (let* {Command Args} (case Command
-			    ((atom C) {C []})
-			    ((paren [C|Args]) {C Args}))
-	   {FmtFrag MoreInputs} (dispatch Command Args) # dispatch may introduce more inputs 
+			    ((atom C) {C []}) # command used without arguments
+			    ((paren [(atom C)|Args]) {C Args}) # command used with arguments
+			    )
+	   {FmtFrag MoreInputs} (dispatch Command Args) # dispatch may introduce more inputs
 	   Blocks (case Items # collect extra items in an implicit :fmt
 		    ([] Blocks)
 		    (_ [(block ['fmt Items])|Blocks]))
@@ -66,7 +67,7 @@
 	   (format-args Blocks [FmtFrags|FmtFrag] [Inputs|[Input|MoreInputs]])
 	   ))))
 
-(def dispatch ((atom Command) Args):
+(def dispatch (Command Args):
   (case Command
     # ...
     (_ (erlang-format-dispatch (hd (atom-to-list Command)) Args []))))

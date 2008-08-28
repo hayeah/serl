@@ -7,6 +7,27 @@ modulation of atom is ignored: <mod>\bar => bar (for the base case when atom trn
 
 -specials prefixed with __ are special-specials that violate MP.
 
+-define a special __module_envs to provide additional envs for a module
+--this env can do arbitrary things to th env...
+--the special is a special-special (violates protocol). returns list of tuples of name and env
+
+-fmt
+--consists of blocks. The first element in the block is the flag.
+---if it is a symbol, it's a flag w/o argument
+---else it's a paren that takes arguments.
+---the symbol none signals no argument for that position
+(fmt :(p none none none) a) == (fmt :p a)
+--string literals print as is with spaces between each clement. other values are printed by ~w.
+(fmt a b c)
+--same flags as erlang's io:format
+(fmt :p 3)
+---a flag takes one single argument. all additional arguments are wrapped within an implicit fmt
+(fmt :p 3 4 5) ==> (fmt :p 3 :fmt 4 5)
+--flags can take arguments
+(fmt :(p 1 2) 3 4)
+--flags w,p,b are special cases in that the take 4 arguments, and translate to ~W,~P,~B
+
+
 
 ==================================================
 = File Structure
@@ -23,9 +44,9 @@ An example file,
 (export foo x y z)
 
 ## definition section
-(def x (X): 
+(def x (X):
   X)
-  
+
 ... ## more definitions
 
 ==================================================
@@ -59,7 +80,7 @@ Here are some toplevel forms. Currently the default global function namespace co
 
 There are three additional imports:
 
-cat == lists:append  
+cat == lists:append
 fmt == io:format
 send == erlang:send
 
@@ -74,15 +95,15 @@ Serl supports arbitrary namespaces. 'import-from' is a macro that translates to 
 (import-from (<NS-Type> <atom> <atom>*)* ) ## ==
 (toplevel
  (<NS-Type>-import <atom> <atom>*)*)
- 
+
 
 Example,
- 
+
 (import-from (functions mod1 ...) (macros mod2 ...) ...) ## ==
 (toplevel
  (functions-import mod1 ...)
  (macros-import mod2 ...))
- 
+
 
 Export follows the same convention,
 
@@ -134,14 +155,14 @@ Bindings are lexically scoped, and not visible outside of the case form, in cont
   (case {foo A}
     (A A))) ## => {foo a}
 
-    
+
 After pattern, delimited by pairs of ':' is the guard sequence. A guard is a series of tests.
 
 (case A
  ## matches if A is an integer and an atom (never).
  (A :(is_atom A)(is_integer I): ...)
  ## matches if A is either an integer or an atom.
- (A :(is_atom A):(is_integer I): ...) 
+ (A :(is_atom A):(is_integer I): ...)
  ## matches if L is a list
  (L :(is_list L): ...)
  ## universal pattern.
@@ -171,7 +192,7 @@ This is the equivalent of letrec in Lisp.
 
 
 letf doesn't support def-style argslist yet.
- 
+
 * lsc
 
 (lsc <pattern> <generator> ...: A) ## List comprehension.
@@ -227,7 +248,7 @@ The 'try' form is pretty much like Erlang's 'try'. Any of the :of, :catch, and :
 
 * bin
 
-Bitstring. 
+Bitstring.
 
 (bin <bin-seg>*)
 
@@ -241,9 +262,9 @@ Value must be a variable, integer, float, or string.
 
 TypeSpecifiers are the following,
 
-Type= integer | float | binary | bytes | bitstring | bits 
-Signedness= signed | unsigned 
-Endianness= big | little | native 
+Type= integer | float | binary | bytes | bitstring | bits
+Signedness= signed | unsigned
+Endianness= big | little | native
 Unit= (unit IntegerLiteral)
 
 Refer to 6.12 of Erlang Reference Manual
@@ -259,7 +280,7 @@ Operators are (unfortunately) implemented as macros.
 
 (def-ops
   (binary-nested + - * / ++ --)
-  (binary == /= =< < >= >) 
+  (binary == /= =< < >= >)
   (binary div rem bnot band bor bxor bsl bsr)
   (binary-nested and or xor orelse andalso)
   (unary not))
@@ -419,7 +440,7 @@ This is useful for defining Erlang records. You might transform the code into tu
 
 (record foo Foo: a) ## access field a of Foo of type macro foo
 ## in a (defstruct ...), we get a bunch of convenience macros:
-## (ast-foo Foo) 
+## (ast-foo Foo)
 
 (record foo Foo: Field)
 ## unknown field for dynamic access. Fall back to function call.
@@ -500,13 +521,13 @@ Notice that bar is just a function with 3 arguments, the last 2 of which are lis
 
 
 foo takes two required arguments, and 2 optional arguments with optional init forms. An optional argument defaults to false. The init form of the optional arguments may refer to bindings made previously.
- 
+
 
 ** Macros **
 
 Unlike classic lisp, the AST is a tree of abstract data types, with four fields:
 
-tag -- tag of the AST 
+tag -- tag of the AST
 line -- line where the AST appeared
 mod -- module of the AST (protection against unintentional capturing.)
 data --  the payload of the AST.
@@ -583,7 +604,7 @@ Fancy lambda list is implemented for defm. The lambda list specifies how the mac
 
 (defm baz (:etc E :etc F :etc G):
  `{{e ;E} {f ;F} {g ;G}})
- 
+
 (bar a b :c d :e f) ## => {{e a b} {f c d} {g e f}}
 
 ':tag' specifies an optional ':' segment that may or may not appear in the macro body. Sequence of ':tag's has to appear (if they do) in the order as specified in the arglist. If a tag segment doesn't appear, its associated binding defaults to [].
@@ -593,8 +614,8 @@ Fancy lambda list is implemented for defm. The lambda list specifies how the mac
     ,{tag-b ;B}})
 
 (tag :a 1 2 3 :b a b c)	## => {{a-tag 1 2 3} {b-tag a b c}}
-(tag :a 1 2 3)	        ## => {{tag-a 1 2 3} {tag-b no-b}} 
-(tag :b a b c)		## => {{tag-a} {tag-b a b c}} 
+(tag :a 1 2 3)	        ## => {{tag-a 1 2 3} {tag-b no-b}}
+(tag :b a b c)		## => {{tag-a} {tag-b a b c}}
 (tag)			## => {{tag-a} {tag-b no-b}}
 (tag :b a b c :a 1 2 3) ## => error: left over arguments
 
@@ -632,7 +653,7 @@ They take the compiling environment as an extra argument. Here's a simple exampl
 
 This example does nothing to the environment. In binding forms like let, the Env would be extended before passing to the recursive transformations.
 
-The arglist of defspecial is the same as defm. Here's the spec for 'def'. 
+The arglist of defspecial is the same as defm. Here's the spec for 'def'.
 
 (defspecial def ((atom Name) `(;Args)
 		 :tag doc Doc
@@ -675,14 +696,14 @@ here doc
 
 %foo HERE error #multiline heredoc must start on a new line.
 here doc
-     HERE 
+     HERE
 
 The predefined reader macros are,
 
 %a{c} ## == $c in erlang
 %v{V} ## == V
 %s{literal-string} ## == "literal-string"
-     
+
 A defined reader macro is visible to subsequent definitions.
 
 Definition of new reader macros isn't supported yet, but would work like defm and defspecial.
